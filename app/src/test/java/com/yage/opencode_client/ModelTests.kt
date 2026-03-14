@@ -1,10 +1,14 @@
 package com.yage.opencode_client
 
 import com.yage.opencode_client.data.model.*
+import com.yage.opencode_client.ui.AppState
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
+
+private fun modelOption(displayName: String) =
+    AppState.ModelOption(displayName = displayName, providerId = "test", modelId = "test")
 
 class ModelTests {
     private val json = Json {
@@ -232,6 +236,46 @@ class ModelTests {
         )
         assertTrue(file.isFile)
         assertFalse(file.isDirectory)
+    }
+
+    @Test
+    fun `ModelOption shortName returns Opus for Opus models`() {
+        assertEquals("Opus", modelOption("Claude Opus 4").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns Sonnet for Sonnet models`() {
+        assertEquals("Sonnet", modelOption("Claude 3.5 Sonnet").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns Haiku for Haiku models`() {
+        assertEquals("Haiku", modelOption("Claude 3 Haiku").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns Gemini for Gemini models`() {
+        assertEquals("Gemini", modelOption("Gemini 2.5 Pro").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns GPT for GPT models`() {
+        assertEquals("GPT", modelOption("GPT-4o").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns Grok for Grok models`() {
+        assertEquals("Grok", modelOption("Grok 3").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns first word for unknown models`() {
+        assertEquals("DeepSeek", modelOption("DeepSeek V3").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName returns empty string for empty displayName`() {
+        assertEquals("", modelOption("").shortName)
     }
 
     @Test
