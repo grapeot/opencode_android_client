@@ -172,16 +172,6 @@ private fun MessageRow(
     val isUser = message.info.isUser
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-        if (!isUser) {
-            message.info.resolvedModel?.let { model ->
-                Text(
-                    text = "${model.providerId}/${model.modelId}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
-                )
-            }
-        }
         var i = 0
         while (i < message.parts.size) {
             val part = message.parts[i]
@@ -218,6 +208,16 @@ private fun MessageRow(
             } else {
                 PartView(part, isUser, streamingText, onFileClick, Modifier.fillMaxWidth())
                 i += 1
+            }
+        }
+        if (!isUser) {
+            message.info.resolvedModel?.let { model ->
+                Text(
+                    text = "${model.providerId}/${model.modelId}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                )
             }
         }
     }
