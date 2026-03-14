@@ -120,6 +120,10 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 
 平板三栏布局下 Chat 面板的 toolbar 在 Phase 5 中已使用新两行布局，但由于 `showSessionListInTopBar = false` 和 `showNewSessionInTopBar = false`，左侧只剩一个 Rename 按钮，视觉上不平衡。需要调整平板布局下的 toolbar 样式，使左右分布更合理。
 
+#### 消息模型标注（Phase 5b — 对齐 iOS）
+
+iOS 在每条 assistant 消息旁显示回复该消息的模型名称（如 `anthropic/claude-opus-4-20250514`），Android 虽然 `MessageWithParts.info.resolvedModel` 数据已存在但未在 UI 中渲染。需要在消息行中添加一个小标签显示模型信息，格式为 `providerID/modelID`，使用 caption 字号、tertiary 颜色。
+
 #### Files Tab
 
 - **文件树**：递归展示工作目录，支持 git 状态颜色标记 ✅
@@ -184,6 +188,7 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 | Session Rename UI | Toolbar pencil 按钮 | ✅ Phase 5 完成 | AlertDialog 已实现 |
 | Model/Agent 文本显示 | Capsule 按钮含模型名 | Phase 5b 实现 | 当前 Android 仅图标 |
 | 消息历史分页 | pull-to-refresh | Phase 5b 修复 | 当前 Android 滚动检测方向反转 |
+| 消息模型标注 | caption 显示 provider/model | Phase 5b 实现 | Android 数据已有但未渲染 |
 
 ---
 
@@ -195,7 +200,7 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 | 2 | Part 渲染、权限审批、构建修复、集成测试 | ✅ 完成 (2026-02-24) |
 | 3 | Bug 修复、Markdown 渲染、模型选择、Context Usage、主题、平板布局 | ✅ 完成 (2026-03-02) |
 | 5 | UX 对齐 iOS：Chat toolbar 重排、Session Rename UI、草稿持久化、Model/Agent per-session 记忆 | ✅ 完成 (2026-03-14) |
-| 5b | 消息历史分页修复、Model/Agent 文本化 Capsule、平板 toolbar 适配 | 🔲 进行中 |
+| 5b | 消息历史分页修复、Model/Agent 文本化 Capsule、平板 toolbar 适配、消息模型标注 | 🔲 进行中 |
 | 4 | SSH Tunnel、Session 变更文件列表 | 🔲 未来可选 |
 
 ---

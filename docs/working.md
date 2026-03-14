@@ -258,4 +258,16 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 - 方案：调整平板模式下的按钮布局使左右更平衡
 - 改动文件：`ChatTopBar.kt`、可能 `MainActivity.kt`
 
-**文档更新**：PRD v1.2、RFC §5.5/§5.6/§5.7 已更新
+**文档更新**：PRD v1.2、RFC §5.5/§5.6/§5.7/§5.8 已更新
+
+**实现完成**：
+
+- `ChatMessageContent.kt`：
+  - 修复分页 stale closure bug：`remember` 添加 `(isLoading, messages.size, messageLimit)` 作为 keys
+  - 分页 loading indicator 仅在 `messages.size >= messageLimit` 时显示（区分初始加载和分页）
+  - assistant 消息顶部新增模型标注：`labelSmall` + 60% alpha `onSurfaceVariant`，显示 `providerId/modelId`
+- `ChatTopBar.kt`：
+  - Model 选择器：IconButton(Tune) → Capsule(primary 背景 + white text shortName + chevron)
+  - Agent 选择器：IconButton(SmartToy) → Capsule(surfaceVariant 背景 + secondary text + chevron)
+  - 平板模式（`showSessionListInTopBar = false && showNewSessionInTopBar = false`）：隐藏 Rename 按钮，左侧只保留标题
+- `MainViewModel.kt`：`ModelOption` 新增 `shortName` 计算属性（Opus/Sonnet/Haiku/Gemini/GPT/Grok + fallback）

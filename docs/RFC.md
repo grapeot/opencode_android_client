@@ -614,7 +614,32 @@ data class ModelOption(val displayName: String, val providerId: String, val mode
 - `ChatTopBar.kt`：根据 `showSessionListInTopBar` 和 `showNewSessionInTopBar` 的组合调整布局
 - `MainActivity.kt`：可能调整传给 ChatScreen 的参数
 
-### 5.8 Chat 自动跟随策略
+### 5.8 消息模型标注（Phase 5b，对齐 iOS）
+
+**背景**：iOS 在用户消息下方显示回复该消息的模型信息（`MessageRowView.swift` lines 124-129），格式为 `providerID/modelID`，使用 `.caption2` 字号和 `.tertiary` 颜色。Android 的 `MessageWithParts.info.resolvedModel` 已包含同样的数据（且在 `MainViewModel` 的 context usage 计算中已使用），但消息 UI 渲染中未展示。
+
+**实现方案**：
+
+在 `ChatMessageContent.kt` 的 `MessageRow` composable 中，对 assistant 消息添加模型标签：
+
+```kotlin
+// 在 MessageRow 中，message parts 渲染之后（或之前）
+message.info.resolvedModel?.let { model ->
+    Text(
+        text = "${model.providerId}/${model.modelId}",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+    )
+}
+```
+
+**位置**：放在 assistant 消息 content 的顶部（模型名在消息内容上方），与 iOS 的位置对应。仅对 `role == "assistant"` 的消息显示。
+
+**影响范围**：
+- `ChatMessageContent.kt`：`MessageRow` 函数内新增条件渲染
+
+### 5.9 Chat 自动跟随策略
 
 - Chat 列表使用 `reverseLayout = true`，底部为索引 0
 - 当列表当前停留在底部时，新消息、tool call、streaming delta 到来后自动滚动到索引 0，适合 monitor session
@@ -759,7 +784,7 @@ app/
 | 2 | Part 渲染、权限审批、主题、语音输入 | 已完成 |
 | 3 | 文件树、Markdown / 图片预览、Diff、平板布局 | 已完成 |
 | 5 | UX 对齐 iOS：Chat toolbar 重排（§5.4）、Session Rename UI、草稿持久化（§4.3）、Model/Agent per-session（§4.4） | ✅ 完成 |
-| 5b | 消息历史分页修复（§5.5）、Model/Agent Capsule 文本化（§5.6）、平板 toolbar 适配（§5.7） | 1-2 天 |
+| 5b | 消息历史分页修复（§5.5）、Model/Agent Capsule 文本化（§5.6）、平板 toolbar 适配（§5.7）、消息模型标注（§5.8） | 1-2 天 |
 | 4 | SSH Tunnel（可选） | 1 周 |
 
 ---
