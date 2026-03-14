@@ -93,7 +93,9 @@ internal fun ChatMessageList(
         }
     }
 
-    val shouldLoadMore = remember {
+    // remember keys prevent stale-closure: isLoading/messages/messageLimit are plain values, not State.
+    // reverseLayout=true: highest index = visual top (oldest). lastVisible >= total-3 fires there.
+    val shouldLoadMore = remember(isLoading, messages.size, messageLimit) {
         derivedStateOf {
             if (isLoading || messages.isEmpty()) return@derivedStateOf false
             if (messages.size < messageLimit) return@derivedStateOf false
@@ -134,8 +136,8 @@ internal fun ChatMessageList(
                 onFileClick = onFileClick
             )
         }
-        if (isLoading) {
-            item {
+        if (isLoading && messages.size >= messageLimit) {
+            item(key = "load-more-indicator") {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     contentAlignment = Alignment.Center
@@ -170,6 +172,16 @@ private fun MessageRow(
     val isUser = message.info.isUser
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        if (!isUser) {
+            message.info.resolvedModel?.let { model ->
+                Text(
+                    text = "${model.providerId}/${model.modelId}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                )
+            }
+        }
         var i = 0
         while (i < message.parts.size) {
             val part = message.parts[i]
