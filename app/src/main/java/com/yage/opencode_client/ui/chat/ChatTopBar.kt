@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui.chat
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -125,17 +126,15 @@ internal fun ChatTopBar(
                         Spacer(modifier = Modifier.width(4.dp))
                     }
 
-                    if (showSessionListInTopBar || showNewSessionInTopBar) {
-                        IconButton(
-                            onClick = { showRenameDialog = true },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Rename session",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                    IconButton(
+                        onClick = { showRenameDialog = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Rename session",
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
 
                     if (showNewSessionInTopBar) {
@@ -155,8 +154,11 @@ internal fun ChatTopBar(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f, fill = false)) {
                         Surface(
                             onClick = { showModelMenu = true },
                             shape = RoundedCornerShape(50),
@@ -170,7 +172,8 @@ internal fun ChatTopBar(
                                     text = availableModels.getOrNull(selectedModelIndex)?.shortName ?: "Model",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onPrimary
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    maxLines = 1
                                 )
                                 Icon(
                                     Icons.Default.KeyboardArrowDown,
@@ -215,9 +218,7 @@ internal fun ChatTopBar(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Box {
+                    Box(modifier = Modifier.weight(1f, fill = false)) {
                         Surface(
                             onClick = { showAgentMenu = true },
                             shape = RoundedCornerShape(50),
@@ -231,7 +232,8 @@ internal fun ChatTopBar(
                                     text = selectedAgent,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
                                 )
                                 Icon(
                                     Icons.Default.KeyboardArrowDown,
@@ -276,14 +278,11 @@ internal fun ChatTopBar(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
-
                     contextUsage?.let { usage ->
                         ContextUsageRing(usage = usage)
                     }
 
                     if (showSettingsButton) {
-                        Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
                             onClick = onNavigateToSettings,
                             modifier = Modifier.size(36.dp)

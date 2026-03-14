@@ -271,3 +271,8 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
   - Agent 选择器：IconButton(SmartToy) → Capsule(surfaceVariant 背景 + secondary text + chevron)
   - 平板模式（`showSessionListInTopBar = false && showNewSessionInTopBar = false`）：隐藏 Rename 按钮，左侧只保留标题
 - `MainViewModel.kt`：`ModelOption` 新增 `shortName` 计算属性（Opus/Sonnet/Haiku/Gemini/GPT/Grok + fallback）
+
+**Bug 修复**：
+- Model badge 移到 assistant 消息下方（原在上方）
+- 平板模式 Rename 按钮恢复显示（去掉 `showSessionListInTopBar || showNewSessionInTopBar` 条件）
+- 平板模式 Context ring 恢复显示：右侧 Row 改用 `spacedBy(4.dp)` + Capsule Box 加 `weight(1f, fill = false)` 防溢出
