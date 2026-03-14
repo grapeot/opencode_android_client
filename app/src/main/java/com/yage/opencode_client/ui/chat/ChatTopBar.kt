@@ -10,14 +10,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -125,15 +125,17 @@ internal fun ChatTopBar(
                         Spacer(modifier = Modifier.width(4.dp))
                     }
 
-                    IconButton(
-                        onClick = { showRenameDialog = true },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Rename session",
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (showSessionListInTopBar || showNewSessionInTopBar) {
+                        IconButton(
+                            onClick = { showRenameDialog = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Rename session",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
 
                     if (showNewSessionInTopBar) {
@@ -155,15 +157,28 @@ internal fun ChatTopBar(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {
-                        IconButton(
+                        Surface(
                             onClick = { showModelMenu = true },
-                            modifier = Modifier.size(36.dp)
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primary
                         ) {
-                            Icon(
-                                Icons.Default.Tune,
-                                contentDescription = "Switch LLM model",
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = availableModels.getOrNull(selectedModelIndex)?.shortName ?: "Model",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Switch LLM model",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
                         }
                         DropdownMenu(
                             expanded = showModelMenu,
@@ -203,15 +218,28 @@ internal fun ChatTopBar(
                     Spacer(modifier = Modifier.width(4.dp))
 
                     Box {
-                        IconButton(
+                        Surface(
                             onClick = { showAgentMenu = true },
-                            modifier = Modifier.size(36.dp)
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceVariant
                         ) {
-                            Icon(
-                                Icons.Default.SmartToy,
-                                contentDescription = "Agent",
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = selectedAgent,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Switch agent",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                         DropdownMenu(
                             expanded = showAgentMenu,

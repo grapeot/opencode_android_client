@@ -60,7 +60,18 @@ data class AppState(
     val aiBuilderConnectionError: String? = null,
     val isTestingAIBuilderConnection: Boolean = false
 ) {
-    data class ModelOption(val displayName: String, val providerId: String, val modelId: String)
+    data class ModelOption(val displayName: String, val providerId: String, val modelId: String) {
+        val shortName: String
+            get() = when {
+                "Opus" in displayName -> "Opus"
+                "Sonnet" in displayName -> "Sonnet"
+                "Haiku" in displayName -> "Haiku"
+                "Gemini" in displayName -> "Gemini"
+                "GPT" in displayName -> "GPT"
+                "Grok" in displayName -> "Grok"
+                else -> displayName.split(" ").firstOrNull() ?: displayName
+            }
+    }
 
     data class ContextUsage(val percentage: Float, val totalTokens: Int, val contextLimit: Int)
 
