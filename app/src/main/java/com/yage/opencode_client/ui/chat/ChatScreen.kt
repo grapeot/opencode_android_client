@@ -12,6 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -43,6 +46,10 @@ fun ChatScreen(
         }
     }
 
+    // Cache last non-null contextUsage so the ring stays visible during streaming
+    var cachedContextUsage by remember { mutableStateOf(state.contextUsage) }
+    state.contextUsage?.let { cachedContextUsage = it }
+
     Column(modifier = Modifier.fillMaxSize()) {
         ChatTopBar(
             sessions = state.sessions,
@@ -55,7 +62,7 @@ fun ChatScreen(
             selectedAgent = state.selectedAgentName,
             availableModels = state.availableModels,
             selectedModelIndex = state.selectedModelIndex,
-            contextUsage = state.contextUsage,
+            contextUsage = cachedContextUsage,
             onSelectSession = viewModel::selectSession,
             onCreateSession = { viewModel.createSession() },
             onDeleteSession = viewModel::deleteSession,

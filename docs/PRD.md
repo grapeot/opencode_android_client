@@ -61,7 +61,7 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 - **自动跟随**：当用户停留在底部时，新的消息 / tool call / 流式更新自动跟随；离开底部时保持当前位置 ✅
 - **模型选择**：从 `/provider` API 动态获取，TopBar 下拉菜单 ✅
 - **Agent 选择**：从 `/agent` API 动态获取 ✅
-- **Context Usage**：环形进度显示上下文占用（绿/橙/红三色） ✅
+- **Context Usage**：环形进度显示上下文占用（绿/橙/红三色），AI 回答中也始终可见 ✅
 - **权限审批**：手动批准/拒绝 permission 请求 ✅
 - **Abort**：中止当前任务 ✅
 - **语音输入**：通过 AI Builder WebSocket API 录音转写，partial transcript 实时回填输入框，可在录音中继续发送已有文本 ✅

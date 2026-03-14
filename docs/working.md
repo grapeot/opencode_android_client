@@ -276,3 +276,4 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 - Model badge 移到 assistant 消息下方（原在上方）
 - 平板模式 Rename 按钮恢复显示（去掉 `showSessionListInTopBar || showNewSessionInTopBar` 条件）
 - 平板模式 Context ring 恢复显示：右侧 Row 改用 `spacedBy(4.dp)` + Capsule Box 加 `weight(1f, fill = false)` 防溢出
+- Context ring streaming 期间保持可见：ChatScreen 缓存最后非 null contextUsage，避免 streaming 时新 assistant 消息无 tokens 导致 ring 消失
