@@ -10,7 +10,7 @@
 | **标题** | OpenCode Android Client 技术方案 |
 | **状态** | Accepted (Implemented) |
 | **创建日期** | 2026-02 |
-| **最后更新** | 2026-03-14 |
+| **最后更新** | 2026-03-14b |
 | **PRD 引用** | [PRD.md](PRD.md) |
 
 ---
@@ -480,7 +480,141 @@ fun RenameSessionDialog(
 - `MainViewModel.kt`：`updateSessionTitle()` 已存在，无需改动
 - `ChatUiTuning.kt`：可能新增标题字号、按钮间距等常量
 
-### 5.5 Chat 自动跟随策略
+### 5.5 消息历史分页修复（Phase 5b）
+
+**Bug 根因**：Chat 列表使用 `reverseLayout = true`，视觉上最新消息在底部（索引 0），最旧消息在顶部（最大索引）。`ChatMessageContent.kt` 中的 `shouldLoadMore` 检测 `lastVisible >= total - 3`，这在反转布局下实际是在最新消息处触发，而非最旧消息处。
+
+**修复方案**：
+
+```kotlin
+// 当前（错误）：在列表"底部"（最新消息）触发
+val lastVisible = visible.maxOfOrNull { it.index } ?: return@derivedStateOf false
+lastVisible >= total - 3
+
+// 修复后：在列表"顶部"（最旧消息）触发
+// reverseLayout = true 时，firstVisibleItemIndex 接近 total - 1 表示用户滚到了视觉顶部
+val firstVisible = visible.minOfOrNull { it.index } ?: return@derivedStateOf false
+firstVisible >= total - 3  // 用户滚到了最旧消息附近
+```
+
+**Loading 指示器**：在消息列表顶部（`reverseLayout` 下即 `lastItem`）增加 `CircularProgressIndicator`，当 `isLoading && messages.size >= messageLimit` 时显示。
+
+**影响范围**：
+- `ChatMessageContent.kt`：修复 `shouldLoadMore` 方向，新增顶部 loading 指示器
+- 其他文件无需改动，`loadMoreMessages()` 后端逻辑（增大 limit 重新拉取）已正确
+
+### 5.6 Model/Agent Capsule 文本化（Phase 5b，对齐 iOS）
+
+**背景**：当前 Model 和 Agent 选择器仅显示 icon（`Icons.Default.Tune` / `Icons.Default.SmartToy`），用户无法一眼看到当前选择。iOS 使用 Capsule 样式按钮显示文本名称。
+
+**实现方案**：将 `IconButton` 替换为自定义 Capsule Composable：
+
+```kotlin
+// Model Capsule — accent gradient 背景，白色文字
+@Composable
+fun ModelCapsule(
+    modelName: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primary
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = modelName,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimary,
+                maxLines = 1
+            )
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onPrimary
+            )
+        }
+    }
+}
+
+// Agent Capsule — 灰色背景，secondary 文字
+@Composable
+fun AgentCapsule(
+    agentName: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = agentName,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+```
+
+**shortName 计算属性**：给 `AppState.ModelOption` 新增 `shortName`，逻辑对齐 iOS `ModelPreset.shortName`：
+
+```kotlin
+data class ModelOption(val displayName: String, val providerId: String, val modelId: String) {
+    val shortName: String
+        get() = when {
+            "Opus" in displayName -> "Opus"
+            "Sonnet" in displayName -> "Sonnet"
+            "Haiku" in displayName -> "Haiku"
+            "Gemini" in displayName -> "Gemini"
+            "GPT" in displayName -> "GPT"
+            "Grok" in displayName -> "Grok"
+            else -> displayName.split(" ").firstOrNull() ?: displayName
+        }
+}
+```
+
+**ChatTopBar 中的接线**：
+- Model Capsule 显示 `availableModels.getOrNull(selectedModelIndex)?.shortName ?: "Model"`
+- Agent Capsule 显示 `selectedAgent`（agent name 本身通常已经足够简短）
+- DropdownMenu 逻辑保持不变，只是触发按钮从 IconButton 变为 Capsule
+
+**影响范围**：
+- `ChatTopBar.kt`：替换 Model/Agent 的 IconButton 为 Capsule
+- `MainViewModel.kt`：`ModelOption` data class 新增 `shortName`
+- `ModelPresets.kt`：无需改动（`shortName` 是计算属性）
+
+### 5.7 平板 Toolbar 适配（Phase 5b）
+
+**背景**：平板布局下 `showSessionListInTopBar = false`、`showNewSessionInTopBar = false`，左侧只剩 Rename 一个按钮，视觉不平衡。
+
+**方案**：平板模式下左侧增加 session title 的内联显示（因为平板左侧已有 session list panel），使 Rename 按钮旁有足够的视觉元素。或者将 Rename 移到右侧和其他控件并排，左侧只保留大标题。具体方案在实现时根据视觉效果决定。
+
+**影响范围**：
+- `ChatTopBar.kt`：根据 `showSessionListInTopBar` 和 `showNewSessionInTopBar` 的组合调整布局
+- `MainActivity.kt`：可能调整传给 ChatScreen 的参数
+
+### 5.8 Chat 自动跟随策略
 
 - Chat 列表使用 `reverseLayout = true`，底部为索引 0
 - 当列表当前停留在底部时，新消息、tool call、streaming delta 到来后自动滚动到索引 0，适合 monitor session
@@ -488,7 +622,7 @@ fun RenameSessionDialog(
 - 输入栏右侧操作按钮根据输入框高度在横排 / 竖排之间切换；该阈值已收口到 `ChatUiTuning`
 - 录音中允许继续发送已有文本，转写中仍阻止重复录音
 
-### 5.5 文件预览模式
+### 5.9 文件预览模式
 
 - Markdown：直接渲染为视觉化预览
 - Text：使用等宽字体原样显示
@@ -624,7 +758,8 @@ app/
 | 1 | 项目搭建、网络层、SSE、Session、消息发送、流式渲染 | 已完成 |
 | 2 | Part 渲染、权限审批、主题、语音输入 | 已完成 |
 | 3 | 文件树、Markdown / 图片预览、Diff、平板布局 | 已完成 |
-| 5 | UX 对齐 iOS：Chat toolbar 重排（§5.4）、Session Rename UI、草稿持久化（§4.3）、Model/Agent per-session（§4.4） | 2-3 天 |
+| 5 | UX 对齐 iOS：Chat toolbar 重排（§5.4）、Session Rename UI、草稿持久化（§4.3）、Model/Agent per-session（§4.4） | ✅ 完成 |
+| 5b | 消息历史分页修复（§5.5）、Model/Agent Capsule 文本化（§5.6）、平板 toolbar 适配（§5.7） | 1-2 天 |
 | 4 | SSH Tunnel（可选） | 1 周 |
 
 ---

@@ -237,3 +237,25 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
   - `launchLoadMessages()`：per-session 保存的 model/agent 优先于 message 推断
   - `launchSendMessage()`：新增 onSuccess 回调参数
 - `MainViewModelTest.kt`：新增 per-session draft/model/agent 相关测试
+
+**Phase 5b 调研与计划**（`feature/ux-parity-phase5b`）
+
+三个新问题调研完成：
+
+**5b.1 消息历史分页 Bug**
+- 根因：`ChatMessageContent.kt` 的 `shouldLoadMore` 检测 `lastVisible >= total - 3`，在 `reverseLayout = true` 下实际在最新消息处触发，而非最旧消息处
+- 修复：改为检测 `firstVisible >= total - 3`（用户滚到视觉顶部/最旧消息附近时触发）
+- 改动文件：`ChatMessageContent.kt`
+
+**5b.2 Model/Agent Capsule 文本化**
+- 现状：Android Model/Agent 选择器仅显示 icon（Tune / SmartToy），iOS 显示 Capsule 文本按钮
+- 方案：替换 IconButton 为 Capsule Composable（Model: primary 背景白色文字；Agent: surfaceVariant 背景），显示 shortName + chevron
+- 需要给 `AppState.ModelOption` 新增 `shortName` 计算属性
+- 改动文件：`ChatTopBar.kt`、`MainViewModel.kt`
+
+**5b.3 平板 Toolbar 适配**
+- 现状：平板下 `showSessionListInTopBar = false` + `showNewSessionInTopBar = false`，左侧只剩 Rename
+- 方案：调整平板模式下的按钮布局使左右更平衡
+- 改动文件：`ChatTopBar.kt`、可能 `MainActivity.kt`
+
+**文档更新**：PRD v1.2、RFC §5.5/§5.6/§5.7 已更新

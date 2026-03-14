@@ -7,9 +7,9 @@
 | 字段 | 值 |
 |------|------|
 | **产品名称** | OpenCode Android Client |
-| **状态** | v1.1 (UX Parity) |
+| **状态** | v1.2 (UX Parity Phase 5b) |
 | **创建日期** | 2026-02 |
-| **最后更新** | 2026-03-14 |
+| **最后更新** | 2026-03-14b |
 | **参考** | iOS Client PRD |
 
 ---
@@ -96,6 +96,30 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 
 模型和 Agent 的选择按 sessionID 存储。切换 session 时，优先从持久化存储恢复该 session 上次的选择；若无记录则从最后一条 assistant message 推断（当前已有此逻辑）；推断不到时保持全局默认值。
 
+#### 消息历史分页（Phase 5b — Bug 修复）
+
+当前滚动到消息列表顶部（最早的消息）时无法加载更多历史消息。`loadMoreMessages()` 后端已实现（增大 limit 参数重新拉取），但 UI 滚动检测逻辑方向反转：`reverseLayout = true` 下，列表视觉顶部对应高索引，而当前检测逻辑在低索引处触发，实际效果是在最新消息处触发加载而非最旧消息处。需修复检测方向并在列表顶部增加 loading 指示器。
+
+#### Model/Agent 选择器文本化（Phase 5b — 对齐 iOS）
+
+当前 Model 和 Agent 选择器仅显示图标（Tune / SmartToy），用户无法直接看到选中了哪个模型和 Agent。iOS 端使用 Capsule 样式按钮显示文本（模型名 + chevron.down），Android 需对齐：
+
+```
+┌─────────────────────────────────────────────────┐
+│  Session Title                                  │
+├─────────────────────────────────────────────────┤
+│  [☰] [✏] [+]    [Opus 4 ▾] [build ▾] [◔]      │
+└─────────────────────────────────────────────────┘
+```
+
+- Model 按钮：Capsule 形状，accent 渐变背景，白色文字显示 `shortName`（如 "Opus"），下拉 chevron
+- Agent 按钮：Capsule 形状，灰色背景，secondary 文字显示 `shortName`（如 "build"），下拉 chevron
+- 需要给 ModelOption 新增 `shortName` 计算属性（对齐 iOS ModelPreset.shortName）
+
+#### 平板 Chat Toolbar 适配（Phase 5b）
+
+平板三栏布局下 Chat 面板的 toolbar 在 Phase 5 中已使用新两行布局，但由于 `showSessionListInTopBar = false` 和 `showNewSessionInTopBar = false`，左侧只剩一个 Rename 按钮，视觉上不平衡。需要调整平板布局下的 toolbar 样式，使左右分布更合理。
+
 #### Files Tab
 
 - **文件树**：递归展示工作目录，支持 git 状态颜色标记 ✅
@@ -154,10 +178,12 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 | 安全存储 | Keychain | Keystore + EncryptedSharedPreferences | 功能等价 |
 | 语音输入 | AI Builder WebSocket 实时转写 | AI Builder WebSocket 实时转写 | 功能已对齐 |
 | 图片预览 | fit / zoom / pan / share | fit / zoom / pan / Android share sheet | 功能已对齐 |
-| Chat Toolbar 布局 | 左 Session 操作 / 右 Model+Agent+Context | Phase 5 对齐 | 当前 Android 按钮全在右侧 |
-| 草稿持久化 | 按 Session 存储 | Phase 5 实现 | 当前 Android 为全局 inputText |
-| Model/Agent 按 Session 记忆 | 按 Session 存储 | Phase 5 实现 | 当前 Android 为全局 + 推断 |
-| Session Rename UI | Toolbar pencil 按钮 | Phase 5 实现 | 当前 Android 有后端无 UI |
+| Chat Toolbar 布局 | 左 Session 操作 / 右 Model+Agent+Context | ✅ Phase 5 完成 | 两行布局已对齐 |
+| 草稿持久化 | 按 Session 存储 | ✅ Phase 5 完成 | JSON Map in EncryptedSharedPreferences |
+| Model/Agent 按 Session 记忆 | 按 Session 存储 | ✅ Phase 5 完成 | per-session > 推断 > 全局 |
+| Session Rename UI | Toolbar pencil 按钮 | ✅ Phase 5 完成 | AlertDialog 已实现 |
+| Model/Agent 文本显示 | Capsule 按钮含模型名 | Phase 5b 实现 | 当前 Android 仅图标 |
+| 消息历史分页 | pull-to-refresh | Phase 5b 修复 | 当前 Android 滚动检测方向反转 |
 
 ---
 
@@ -168,7 +194,8 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 | 1 | 项目搭建、网络层、SSE、Session、消息发送 | ✅ 完成 (2026-02-23) |
 | 2 | Part 渲染、权限审批、构建修复、集成测试 | ✅ 完成 (2026-02-24) |
 | 3 | Bug 修复、Markdown 渲染、模型选择、Context Usage、主题、平板布局 | ✅ 完成 (2026-03-02) |
-| 5 | UX 对齐 iOS：Chat toolbar 重排、Session Rename UI、草稿持久化、Model/Agent per-session 记忆 | 🔲 进行中 |
+| 5 | UX 对齐 iOS：Chat toolbar 重排、Session Rename UI、草稿持久化、Model/Agent per-session 记忆 | ✅ 完成 (2026-03-14) |
+| 5b | 消息历史分页修复、Model/Agent 文本化 Capsule、平板 toolbar 适配 | 🔲 进行中 |
 | 4 | SSH Tunnel、Session 变更文件列表 | 🔲 未来可选 |
 
 ---
