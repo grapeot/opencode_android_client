@@ -60,6 +60,7 @@ import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.theme.ToolWritePatchBackgroundDark
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
+import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.flow.collect
@@ -344,7 +345,7 @@ private fun TextPart(
         } else {
             SelectionContainer {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                    Markdown(content = text, typography = markdownTypographyCompact(), modifier = innerModifier)
+                    Markdown(content = text, typography = markdownTypographyCompact(), modifier = innerModifier, imageTransformer = DataUriImageTransformer)
                 }
             }
         }
@@ -374,7 +375,8 @@ private fun ResolvedMarkdownText(
             Markdown(
                 content = resolvedText ?: text,
                 typography = markdownTypographyCompact(),
-                modifier = modifier
+                modifier = modifier,
+                imageTransformer = DataUriImageTransformer
             )
         }
     }
@@ -424,7 +426,8 @@ private fun ReasoningCard(
                         Markdown(
                             content = text,
                             typography = markdownTypographyCompact(),
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            imageTransformer = DataUriImageTransformer
                         )
                     }
                 }

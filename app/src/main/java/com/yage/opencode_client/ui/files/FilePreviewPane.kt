@@ -48,6 +48,7 @@ import com.mikepenz.markdown.m3.Markdown
 import com.yage.opencode_client.data.model.FileContent
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
+import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import java.io.File
 import kotlin.math.max
@@ -127,7 +128,8 @@ private fun PreviewMarkdown(
             Markdown(
                 content = resolvedContent ?: content,
                 typography = markdownTypographyCompact(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                imageTransformer = DataUriImageTransformer
             )
         }
     }
