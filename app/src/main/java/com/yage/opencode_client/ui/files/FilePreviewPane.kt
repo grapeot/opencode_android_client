@@ -49,6 +49,7 @@ import com.yage.opencode_client.data.model.FileContent
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
 import com.yage.opencode_client.ui.util.DataUriImageTransformer
+import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import java.io.File
 import kotlin.math.max
@@ -110,6 +111,7 @@ private fun PreviewMarkdown(
     repository: OpenCodeRepository
 ) {
     var resolvedContent by remember(content, filePath) { mutableStateOf<String?>(null) }
+    var imageVersion by remember(content, filePath) { mutableStateOf(0) }
 
     LaunchedEffect(content, filePath, repository) {
         resolvedContent = null
@@ -118,6 +120,12 @@ private fun PreviewMarkdown(
             markdownFilePath = filePath,
             fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
         )
+        val finalText = resolvedContent ?: content
+        val httpsUrls = """!\[[^\]]*\]\((https?://[^)]+)\)""".toRegex().findAll(finalText).map { it.groupValues[1] }.toList().distinct()
+        for (url in httpsUrls) {
+            HttpImageHolder.prefetch(url)
+        }
+        if (httpsUrls.isNotEmpty()) imageVersion++
     }
 
     LazyColumn(

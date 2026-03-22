@@ -61,6 +61,7 @@ import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.theme.ToolWritePatchBackgroundDark
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
 import com.yage.opencode_client.ui.util.DataUriImageTransformer
+import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.flow.collect
@@ -360,6 +361,7 @@ private fun ResolvedMarkdownText(
     modifier: Modifier = Modifier
 ) {
     var resolvedText by remember(text, workspaceDirectory) { mutableStateOf<String?>(null) }
+    var imageVersion by remember(text) { mutableStateOf(0) }
 
     LaunchedEffect(text, workspaceDirectory, repository) {
         resolvedText = null
@@ -368,6 +370,12 @@ private fun ResolvedMarkdownText(
             workspaceDirectory = workspaceDirectory,
             fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
         )
+        val finalText = resolvedText ?: text
+        val httpsUrls = """!\[[^\]]*\]\((https?://[^)]+)\)""".toRegex().findAll(finalText).map { it.groupValues[1] }.toList().distinct()
+        for (url in httpsUrls) {
+            HttpImageHolder.prefetch(url)
+        }
+        if (httpsUrls.isNotEmpty()) imageVersion++
     }
 
     SelectionContainer {
