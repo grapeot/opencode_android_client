@@ -159,6 +159,7 @@ private fun PhoneLayout(viewModel: MainViewModel, repository: OpenCodeRepository
             composable(Screen.Chat.route) {
                 ChatScreen(
                     viewModel = viewModel,
+                    repository = repository,
                     onNavigateToFiles = { path ->
                         viewModel.showFileInFiles(path, originRoute = Screen.Chat.route)
                         navigateToTopLevel(Screen.Files.route)
@@ -269,6 +270,7 @@ private fun TabletLayout(viewModel: MainViewModel, repository: OpenCodeRepositor
             ) {
                 ChatScreen(
                     viewModel = viewModel,
+                    repository = repository,
                     onNavigateToFiles = { path ->
                         viewModel.showFileInFiles(path)
                     },

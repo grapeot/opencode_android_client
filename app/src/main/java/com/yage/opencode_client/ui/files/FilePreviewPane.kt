@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.mikepenz.markdown.m3.Markdown
 import com.yage.opencode_client.data.model.FileContent
+import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
+import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
@@ -55,6 +58,7 @@ import kotlin.math.min
 internal fun FilePreviewPane(
     path: String,
     fileContent: FileContent,
+    repository: OpenCodeRepository,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -87,7 +91,11 @@ internal fun FilePreviewPane(
 
         when {
             imagePayload != null -> ImageViewer(bitmap = imagePayload.bitmap)
-            previewKind == FilePreviewUtils.PreviewContentKind.MARKDOWN -> PreviewMarkdown(content = content)
+            previewKind == FilePreviewUtils.PreviewContentKind.MARKDOWN -> PreviewMarkdown(
+                content = content,
+                filePath = path,
+                repository = repository
+            )
             previewKind == FilePreviewUtils.PreviewContentKind.BINARY -> PreviewBinaryFallback()
             else -> PreviewPlainText(content = content)
         }
@@ -95,14 +103,29 @@ internal fun FilePreviewPane(
 }
 
 @Composable
-private fun PreviewMarkdown(content: String) {
+private fun PreviewMarkdown(
+    content: String,
+    filePath: String,
+    repository: OpenCodeRepository
+) {
+    var resolvedContent by remember(content, filePath) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(content, filePath, repository) {
+        resolvedContent = null
+        resolvedContent = MarkdownImageResolver.resolveImages(
+            text = content,
+            markdownFilePath = filePath,
+            fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp)
     ) {
         item {
             Markdown(
-                content = content,
+                content = resolvedContent ?: content,
                 typography = markdownTypographyCompact(),
                 modifier = Modifier.fillMaxWidth()
             )

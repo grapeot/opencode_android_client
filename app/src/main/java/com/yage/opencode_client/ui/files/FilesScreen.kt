@@ -162,6 +162,7 @@ fun FilesScreen(
                 FilePreviewPane(
                     path = selectedFilePath!!,
                     fileContent = selectedFileContent!!,
+                    repository = repository,
                     onClose = {
                         selectedFilePath = null
                         selectedFileContent = null

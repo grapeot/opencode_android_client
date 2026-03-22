@@ -57,8 +57,10 @@ import com.mikepenz.markdown.m3.Markdown
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.TodoItem
+import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.theme.ToolWritePatchBackgroundDark
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
+import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.flow.collect
 
@@ -69,6 +71,8 @@ internal fun ChatMessageList(
     streamingReasoningPart: Part?,
     isLoading: Boolean,
     messageLimit: Int,
+    repository: OpenCodeRepository,
+    workspaceDirectory: String?,
     onLoadMore: () -> Unit,
     onFileClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit
@@ -138,6 +142,8 @@ internal fun ChatMessageList(
             MessageRow(
                 message = message,
                 streamingPartTexts = streamingPartTexts,
+                repository = repository,
+                workspaceDirectory = workspaceDirectory,
                 onFileClick = onFileClick,
                 onForkFromMessage = onForkFromMessage
             )
@@ -173,6 +179,8 @@ internal fun ChatMessageList(
 private fun MessageRow(
     message: MessageWithParts,
     streamingPartTexts: Map<String, String>,
+    repository: OpenCodeRepository,
+    workspaceDirectory: String?,
     onFileClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit
 ) {
@@ -204,6 +212,8 @@ private fun MessageRow(
                                 part = p,
                                 isUser = isUser,
                                 streamingTextOverride = streamingPartTexts["${message.info.id}:${p.id}"],
+                                repository = repository,
+                                workspaceDirectory = workspaceDirectory,
                                 onFileClick = onFileClick,
                                 modifier = Modifier.weight(1f)
                             )
@@ -213,7 +223,15 @@ private fun MessageRow(
                 }
                 i = j
             } else {
-                PartView(part, isUser, streamingText, onFileClick, Modifier.fillMaxWidth())
+                PartView(
+                    part = part,
+                    isUser = isUser,
+                    streamingTextOverride = streamingText,
+                    repository = repository,
+                    workspaceDirectory = workspaceDirectory,
+                    onFileClick = onFileClick,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 i += 1
             }
         }
@@ -272,11 +290,19 @@ private fun PartView(
     part: Part,
     isUser: Boolean,
     streamingTextOverride: String?,
+    repository: OpenCodeRepository,
+    workspaceDirectory: String?,
     onFileClick: (String) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     when {
-        part.isText -> TextPart(streamingTextOverride ?: part.text ?: "", isUser, modifier)
+        part.isText -> TextPart(
+            text = streamingTextOverride ?: part.text ?: "",
+            isUser = isUser,
+            modifier = modifier,
+            repository = repository,
+            workspaceDirectory = workspaceDirectory
+        )
         part.isReasoning -> ReasoningCard(streamingTextOverride ?: part.text ?: "", part.toolReason, false, modifier)
         part.isTool -> ToolCard(part.tool ?: "", part.stateDisplay, part.toolReason, part.filePathsForNavigationFiltered, part.toolTodos, onFileClick, modifier)
         part.isPatch && part.filePathsForNavigationFiltered.isNotEmpty() -> PatchCard(part.filePathsForNavigationFiltered, onFileClick, modifier)
@@ -284,7 +310,13 @@ private fun PartView(
 }
 
 @Composable
-private fun TextPart(text: String, isUser: Boolean, modifier: Modifier = Modifier.fillMaxWidth()) {
+private fun TextPart(
+    text: String,
+    isUser: Boolean,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    repository: OpenCodeRepository? = null,
+    workspaceDirectory: String? = null
+) {
     val innerModifier = modifier.padding(12.dp)
     if (isUser) {
         Surface(
@@ -302,10 +334,48 @@ private fun TextPart(text: String, isUser: Boolean, modifier: Modifier = Modifie
             }
         }
     } else {
-        SelectionContainer {
-            CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                Markdown(content = text, typography = markdownTypographyCompact(), modifier = innerModifier)
+        if (repository != null) {
+            ResolvedMarkdownText(
+                text = text,
+                repository = repository,
+                workspaceDirectory = workspaceDirectory,
+                modifier = innerModifier
+            )
+        } else {
+            SelectionContainer {
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                    Markdown(content = text, typography = markdownTypographyCompact(), modifier = innerModifier)
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun ResolvedMarkdownText(
+    text: String,
+    repository: OpenCodeRepository,
+    workspaceDirectory: String?,
+    modifier: Modifier = Modifier
+) {
+    var resolvedText by remember(text, workspaceDirectory) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(text, workspaceDirectory, repository) {
+        resolvedText = null
+        resolvedText = MarkdownImageResolver.resolveImages(
+            text = text,
+            workspaceDirectory = workspaceDirectory,
+            fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
+        )
+    }
+
+    SelectionContainer {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            Markdown(
+                content = resolvedText ?: text,
+                typography = markdownTypographyCompact(),
+                modifier = modifier
+            )
         }
     }
 }
