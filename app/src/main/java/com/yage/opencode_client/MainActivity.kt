@@ -34,7 +34,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.chat.ChatScreen
 import com.yage.opencode_client.ui.files.FilesScreen
@@ -80,9 +79,6 @@ val screens = listOf(Screen.Chat, Screen.Files, Screen.Settings)
 @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    @Inject
-    lateinit var repository: OpenCodeRepository
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -105,9 +101,9 @@ class MainActivity : ComponentActivity() {
 
             OpenCodeTheme(darkTheme = darkTheme) {
                 if (isTablet) {
-                    TabletLayout(viewModel = viewModel, repository = repository)
+                    TabletLayout(viewModel = viewModel)
                 } else {
-                    PhoneLayout(viewModel = viewModel, repository = repository)
+                    PhoneLayout(viewModel = viewModel)
                 }
             }
         }
@@ -115,7 +111,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PhoneLayout(viewModel: MainViewModel, repository: OpenCodeRepository) {
+private fun PhoneLayout(viewModel: MainViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -160,7 +156,6 @@ private fun PhoneLayout(viewModel: MainViewModel, repository: OpenCodeRepository
             composable(Screen.Chat.route) {
                 ChatScreen(
                     viewModel = viewModel,
-                    repository = repository,
                     onNavigateToFiles = { path ->
                         viewModel.showFileInFiles(path, originRoute = Screen.Chat.route)
                         navigateToTopLevel(Screen.Files.route)
@@ -197,7 +192,7 @@ private fun PhoneLayout(viewModel: MainViewModel, repository: OpenCodeRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TabletLayout(viewModel: MainViewModel, repository: OpenCodeRepository) {
+private fun TabletLayout(viewModel: MainViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val onOpenSettings: () -> Unit = { selectedTab = 1 }
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -273,7 +268,6 @@ private fun TabletLayout(viewModel: MainViewModel, repository: OpenCodeRepositor
             ) {
                 ChatScreen(
                     viewModel = viewModel,
-                    repository = repository,
                     onNavigateToFiles = { path ->
                         viewModel.showFileInFiles(path)
                     },

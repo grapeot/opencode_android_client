@@ -122,7 +122,7 @@ data class AppState(
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val repository: OpenCodeRepository,
+    internal val repository: OpenCodeRepository,
     private val settingsManager: SettingsManager,
     private val audioRecorderManager: AudioRecorderManager
 ) : ViewModel() {
