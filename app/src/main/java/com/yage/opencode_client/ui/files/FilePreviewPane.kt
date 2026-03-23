@@ -111,7 +111,6 @@ private fun PreviewMarkdown(
     repository: OpenCodeRepository
 ) {
     var resolvedContent by remember(content, filePath) { mutableStateOf<String?>(null) }
-    var imageVersion by remember(content, filePath) { mutableStateOf(0) }
 
     LaunchedEffect(content, filePath, repository) {
         resolvedContent = null
@@ -125,7 +124,6 @@ private fun PreviewMarkdown(
         for (url in httpsUrls) {
             HttpImageHolder.prefetch(url)
         }
-        if (httpsUrls.isNotEmpty()) imageVersion++
     }
 
     LazyColumn(

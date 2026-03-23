@@ -361,7 +361,6 @@ private fun ResolvedMarkdownText(
     modifier: Modifier = Modifier
 ) {
     var resolvedText by remember(text, workspaceDirectory) { mutableStateOf<String?>(null) }
-    var imageVersion by remember(text) { mutableStateOf(0) }
 
     LaunchedEffect(text, workspaceDirectory, repository) {
         resolvedText = null
@@ -375,7 +374,6 @@ private fun ResolvedMarkdownText(
         for (url in httpsUrls) {
             HttpImageHolder.prefetch(url)
         }
-        if (httpsUrls.isNotEmpty()) imageVersion++
     }
 
     SelectionContainer {

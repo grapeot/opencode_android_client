@@ -6,6 +6,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -59,30 +60,33 @@ object DataUriImageTransformer : ImageTransformer {
 }
 
 object HttpImageHolder {
-    private var cachedBitmap: Bitmap? = null
-    private var cachedUrl: String? = null
+    private val cachedBitmaps = mutableStateMapOf<String, Bitmap>()
+    private val inflightUrls = mutableSetOf<String>()
 
     @Composable
     fun load(url: String): ImageData? {
-        if (url == cachedUrl && cachedBitmap != null) {
-            return bitmapToImageData(cachedBitmap!!)
-        }
-        return cachedBitmap?.let { bitmapToImageData(it) }
+        return cachedBitmaps[url]?.let(::bitmapToImageData)
     }
 
     suspend fun prefetch(url: String) {
-        if (url == cachedUrl) return
+        if (cachedBitmaps.containsKey(url) || !inflightUrls.add(url)) return
         try {
-            cachedBitmap = withContext(Dispatchers.IO) {
+            val bitmap = withContext(Dispatchers.IO) {
                 val connection = URL(url).openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
                 connection.readTimeout = 15000
                 connection.connect()
-                BitmapFactory.decodeStream(connection.inputStream)
+                connection.inputStream.use { BitmapFactory.decodeStream(it) }
             }
-            cachedUrl = url
+            if (bitmap != null) {
+                cachedBitmaps[url] = bitmap
+            } else {
+                Log.w(TAG, "Decoded null bitmap for markdown image: ${url.take(120)}")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to prefetch image from $url", e)
+        } finally {
+            inflightUrls.remove(url)
         }
     }
 }

@@ -5,6 +5,13 @@
 - 默认发送模型从 `zai-coding-plan/glm-5` 切换为预设里的 `openai/gpt-5.4`；新安装和未保存过模型选择的 session 会直接使用 GPT-5.4。
 - 模型预设里的 GLM 选项已同步改为显示 `GLM-5-Turbo`，并将底层 model ID 从 `glm-5` 更新为 `glm-5-turbo`。
 
+## 2026-03-22
+
+- 修复 Markdown 内嵌图片渲染：新增 `MarkdownImageResolver`，在渲染前把相对路径图片读取为 base64 data URI，Files 预览与 Chat 消息均可显示嵌入图片。
+- 修复 HTTPS Markdown 图片在 Android 端仅显示 placeholder 的问题：`DataUriImageTransformer` 现在支持远程 URL，并通过按 URL 的可观察缓存触发 Compose 重组；`Cursor Bench Benchmark Analysis` 已实机确认恢复显示。
+- 修复文件预览与聊天 Markdown 的图片预取路径，移除无效的 `imageVersion` 状态和排障临时日志，重新验证 `./gradlew assembleDebug` 与 `./gradlew testDebugUnitTest` 均通过。
+- 新增 `docs/code_review.md`，完成一轮中文系统性代码审查，覆盖架构、安全与测试问题，并整理后续修复优先级。
+
 ## 2026-03-17
 
 - 全局 oh-my-opencode.json 默认 agent 从 GLM-5 切换为 sisyphus ultraworker（Claude Opus 4.6）。
