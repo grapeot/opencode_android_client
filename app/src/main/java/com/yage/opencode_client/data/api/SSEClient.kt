@@ -76,7 +76,7 @@ class SSEClient(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                close()
+                close(Exception("SSE connection closed by server"))
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {

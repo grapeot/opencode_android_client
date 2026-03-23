@@ -9,6 +9,9 @@ import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.mockwebserver.MockResponse
@@ -244,6 +247,43 @@ class OpenCodeRepositoryTest {
             assertEquals("2.0.0", result.getOrThrow().version)
             assertEquals(0, server.requestCount)
             assertEquals("Basic bmV3OnNlY3JldA==", replacementServer.takeRequest().getHeader("Authorization"))
+        } finally {
+            replacementServer.shutdown()
+        }
+    }
+
+    @Test
+    fun `configure is thread-safe under concurrent calls`() = runBlocking {
+        val replacementServer = MockWebServer()
+        replacementServer.start()
+        val mutex = Mutex()
+        var maxConcurrent = 0
+        var activeCount = 0
+
+        try {
+            replacementServer.enqueue(
+                MockResponse()
+                    .setBody("""{"healthy": true, "version": "3.0.0"}""")
+                    .setHeader("Content-Type", "application/json")
+            )
+
+            val jobs = List(10) {
+                launch {
+                    mutex.withLock { activeCount++ }
+                    maxConcurrent = maxOf(maxConcurrent, activeCount)
+                    repository.configure(
+                        baseUrl = replacementServer.url("/").toString().trimEnd('/'),
+                        username = "user$it",
+                        password = "pass$it"
+                    )
+                    activeCount--
+                }
+            }
+            jobs.forEach { it.join() }
+
+            val result = repository.checkHealth()
+            assertTrue(result.isSuccess)
+            assertEquals("3.0.0", result.getOrThrow().version)
         } finally {
             replacementServer.shutdown()
         }

@@ -10,6 +10,9 @@
 # EncryptedSharedPreferences / Tink - errorprone annotations are compile-only
 -dontwarn com.google.errorprone.annotations.**
 
+# MikePenz markdown-renderer - keep classes used via reflection in Compose
+-keep class com.mikepenz.markdown.** { *; }
+
 # Hilt - applied via consumerProguardFiles from dependencies
 # Retrofit/OkHttp - applied via consumerProguardFiles
 

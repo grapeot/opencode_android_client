@@ -65,6 +65,7 @@ class OpenCodeRepository @Inject constructor() {
             .build()
     }
 
+    @Synchronized
     private fun rebuildClients() {
         okHttpClient = buildOkHttpClient()
         retrofit = buildRetrofit()
@@ -72,6 +73,7 @@ class OpenCodeRepository @Inject constructor() {
         sseClient = SSEClient(okHttpClient)
     }
 
+    @Synchronized
     fun configure(baseUrl: String, username: String? = null, password: String? = null) {
         this.baseUrl = baseUrl
         this.username = username
