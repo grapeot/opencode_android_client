@@ -76,6 +76,130 @@ data class AppState(
 
     data class ContextUsage(val percentage: Float, val totalTokens: Int, val contextLimit: Int)
 
+    data class ConnectionState(
+        val isConnected: Boolean = false,
+        val isConnecting: Boolean = false,
+        val serverVersion: String? = null
+    )
+
+    data class SessionState(
+        val sessions: List<Session> = emptyList(),
+        val currentSessionId: String? = null,
+        val sessionStatuses: Map<String, SessionStatus> = emptyMap(),
+        val expandedSessionIds: Set<String> = emptySet(),
+        val loadedSessionLimit: Int = MainViewModelTimings.sessionPageSize,
+        val hasMoreSessions: Boolean = true,
+        val isLoadingMoreSessions: Boolean = false,
+        val messageLimit: Int = 30,
+        val pendingPermissions: List<PermissionRequest> = emptyList(),
+        val pendingQuestions: List<QuestionRequest> = emptyList()
+    ) {
+        val currentSession: Session?
+            get() = sessions.find { it.id == currentSessionId }
+
+        val currentSessionStatus: SessionStatus?
+            get() = currentSessionId?.let { sessionStatuses[it] }
+
+        val isCurrentSessionBusy: Boolean
+            get() = currentSessionStatus?.isBusy == true
+
+        val canLoadMoreSessions: Boolean
+            get() = hasMoreSessions && !isLoadingMoreSessions
+    }
+
+    data class ChatState(
+        val messages: List<MessageWithParts> = emptyList(),
+        val streamingPartTexts: Map<String, String> = emptyMap(),
+        val streamingReasoningPart: Part? = null,
+        val isLoadingMessages: Boolean = false,
+        val inputText: String = ""
+    )
+
+    data class SpeechState(
+        val isRecording: Boolean = false,
+        val isTranscribing: Boolean = false,
+        val speechError: String? = null,
+        val isTestingAIBuilderConnection: Boolean = false,
+        val aiBuilderConnectionOK: Boolean = false,
+        val aiBuilderConnectionError: String? = null
+    )
+
+    data class FileUiState(
+        val filePathToShowInFiles: String? = null,
+        val filePreviewOriginRoute: String? = null
+    )
+
+    data class SettingsState(
+        val error: String? = null,
+        val themeMode: ThemeMode = ThemeMode.SYSTEM,
+        val selectedModelIndex: Int = 0,
+        val selectedAgentName: String = "build",
+        val availableModels: List<ModelOption> = ModelPresets.list,
+        val contextUsage: ContextUsage? = null,
+        val agents: List<AgentInfo> = emptyList(),
+        val providers: ProvidersResponse? = null,
+        val isRecording: Boolean = false
+    )
+
+    val connectionState: ConnectionState
+        get() = ConnectionState(
+            isConnected = isConnected,
+            isConnecting = isConnecting,
+            serverVersion = serverVersion
+        )
+
+    val sessionState: SessionState
+        get() = SessionState(
+            sessions = sessions,
+            currentSessionId = currentSessionId,
+            sessionStatuses = sessionStatuses,
+            expandedSessionIds = expandedSessionIds,
+            loadedSessionLimit = loadedSessionLimit,
+            hasMoreSessions = hasMoreSessions,
+            isLoadingMoreSessions = isLoadingMoreSessions,
+            messageLimit = messageLimit,
+            pendingPermissions = pendingPermissions,
+            pendingQuestions = pendingQuestions
+        )
+
+    val chatState: ChatState
+        get() = ChatState(
+            messages = messages,
+            streamingPartTexts = streamingPartTexts,
+            streamingReasoningPart = streamingReasoningPart,
+            isLoadingMessages = isLoadingMessages,
+            inputText = inputText
+        )
+
+    val speechState: SpeechState
+        get() = SpeechState(
+            isRecording = isRecording,
+            isTranscribing = isTranscribing,
+            speechError = speechError,
+            isTestingAIBuilderConnection = isTestingAIBuilderConnection,
+            aiBuilderConnectionOK = aiBuilderConnectionOK,
+            aiBuilderConnectionError = aiBuilderConnectionError
+        )
+
+    val fileUiState: FileUiState
+        get() = FileUiState(
+            filePathToShowInFiles = filePathToShowInFiles,
+            filePreviewOriginRoute = filePreviewOriginRoute
+        )
+
+    val settingsState: SettingsState
+        get() = SettingsState(
+            error = error,
+            themeMode = themeMode,
+            selectedModelIndex = selectedModelIndex,
+            selectedAgentName = selectedAgentName,
+            availableModels = availableModels,
+            contextUsage = contextUsage,
+            agents = agents,
+            providers = providers,
+            isRecording = isRecording
+        )
+
     val currentSession: Session?
         get() = sessions.find { it.id == currentSessionId }
 
