@@ -51,40 +51,50 @@ import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
 
+internal data class ChatTopBarState(
+    val sessions: List<Session>,
+    val currentSessionId: String?,
+    val sessionStatuses: Map<String, SessionStatus>,
+    val hasMoreSessions: Boolean,
+    val isLoadingMoreSessions: Boolean,
+    val expandedSessionIds: Set<String> = emptySet(),
+    val agents: List<AgentInfo>,
+    val selectedAgent: String,
+    val availableModels: List<AppState.ModelOption>,
+    val selectedModelIndex: Int,
+    val contextUsage: AppState.ContextUsage?,
+    val showSettingsButton: Boolean = true,
+    val showNewSessionInTopBar: Boolean = true,
+    val showSessionListInTopBar: Boolean = true
+)
+
+internal data class ChatTopBarActions(
+    val onSelectSession: (String) -> Unit,
+    val onCreateSession: () -> Unit,
+    val onDeleteSession: (String) -> Unit,
+    val onLoadMoreSessions: () -> Unit,
+    val onToggleSessionExpanded: (String) -> Unit = {},
+    val onSelectAgent: (String) -> Unit,
+    val onSelectModel: (Int) -> Unit,
+    val onNavigateToSettings: () -> Unit = {},
+    val onRenameSession: (String) -> Unit = {}
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatTopBar(
-    sessions: List<Session>,
-    currentSessionId: String?,
-    sessionStatuses: Map<String, SessionStatus>,
-    hasMoreSessions: Boolean,
-    isLoadingMoreSessions: Boolean,
-    expandedSessionIds: Set<String> = emptySet(),
-    agents: List<AgentInfo>,
-    selectedAgent: String,
-    availableModels: List<AppState.ModelOption>,
-    selectedModelIndex: Int,
-    contextUsage: AppState.ContextUsage?,
-    onSelectSession: (String) -> Unit,
-    onCreateSession: () -> Unit,
-    onDeleteSession: (String) -> Unit,
-    onLoadMoreSessions: () -> Unit,
-    onToggleSessionExpanded: (String) -> Unit = {},
-    onSelectAgent: (String) -> Unit,
-    onSelectModel: (Int) -> Unit,
-    onNavigateToSettings: () -> Unit = {},
-    showSettingsButton: Boolean = true,
-    showNewSessionInTopBar: Boolean = true,
-    showSessionListInTopBar: Boolean = true,
-    onRenameSession: (String) -> Unit = {}
+    state: ChatTopBarState,
+    actions: ChatTopBarActions,
+    modifier: Modifier = Modifier
 ) {
-    val currentSession = sessions.find { it.id == currentSessionId }
+    val currentSession = state.sessions.find { it.id == state.currentSessionId }
     var showSessionSheet by remember { mutableStateOf(false) }
     var showAgentMenu by remember { mutableStateOf(false) }
     var showModelMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
 
     Surface(
+        modifier = modifier,
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp
     ) {
@@ -112,7 +122,7 @@ internal fun ChatTopBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (showSessionListInTopBar) {
+                    if (state.showSessionListInTopBar) {
                         IconButton(
                             onClick = { showSessionSheet = true },
                             modifier = Modifier.size(36.dp)
@@ -137,10 +147,10 @@ internal fun ChatTopBar(
                         )
                     }
 
-                    if (showNewSessionInTopBar) {
+                    if (state.showNewSessionInTopBar) {
                         Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
-                            onClick = onCreateSession,
+                            onClick = actions.onCreateSession,
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
@@ -169,7 +179,7 @@ internal fun ChatTopBar(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text(
-                                    text = availableModels.getOrNull(selectedModelIndex)?.shortName ?: "Model",
+                                    text = state.availableModels.getOrNull(state.selectedModelIndex)?.shortName ?: "Model",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onPrimary,
@@ -187,7 +197,7 @@ internal fun ChatTopBar(
                             expanded = showModelMenu,
                             onDismissRequest = { showModelMenu = false }
                         ) {
-                            if (availableModels.isEmpty()) {
+                            if (state.availableModels.isEmpty()) {
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -198,19 +208,19 @@ internal fun ChatTopBar(
                                     onClick = { }
                                 )
                             }
-                            availableModels.forEachIndexed { index, model ->
+                            state.availableModels.forEachIndexed { index, model ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             model.displayName,
-                                            color = if (index == selectedModelIndex)
+                                            color = if (index == state.selectedModelIndex)
                                                 MaterialTheme.colorScheme.primary
                                             else
                                                 MaterialTheme.colorScheme.onSurface
                                         )
                                     },
                                     onClick = {
-                                        onSelectModel(index)
+                                        actions.onSelectModel(index)
                                         showModelMenu = false
                                     }
                                 )
@@ -229,7 +239,7 @@ internal fun ChatTopBar(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text(
-                                    text = selectedAgent,
+                                    text = state.selectedAgent,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -247,7 +257,7 @@ internal fun ChatTopBar(
                             expanded = showAgentMenu,
                             onDismissRequest = { showAgentMenu = false }
                         ) {
-                            if (agents.isEmpty()) {
+                            if (state.agents.isEmpty()) {
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -258,19 +268,19 @@ internal fun ChatTopBar(
                                     onClick = { }
                                 )
                             }
-                            agents.forEach { agent ->
+                            state.agents.forEach { agent ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             agent.name,
-                                            color = if (agent.name == selectedAgent)
+                                            color = if (agent.name == state.selectedAgent)
                                                 MaterialTheme.colorScheme.primary
                                             else
                                                 MaterialTheme.colorScheme.onSurface
                                         )
                                     },
                                     onClick = {
-                                        onSelectAgent(agent.name)
+                                        actions.onSelectAgent(agent.name)
                                         showAgentMenu = false
                                     }
                                 )
@@ -278,13 +288,13 @@ internal fun ChatTopBar(
                         }
                     }
 
-                    contextUsage?.let { usage ->
+                    state.contextUsage?.let { usage ->
                         ContextUsageRing(usage = usage)
                     }
 
-                    if (showSettingsButton) {
+                    if (state.showSettingsButton) {
                         IconButton(
-                            onClick = onNavigateToSettings,
+                            onClick = actions.onNavigateToSettings,
                             modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
@@ -309,26 +319,26 @@ internal fun ChatTopBar(
                     .height(ChatUiTuning.sessionSheetHeight)
             ) {
                 SessionList(
-                    sessions = sessions,
-                    currentSessionId = currentSessionId,
-                    sessionStatuses = sessionStatuses,
-                    hasMoreSessions = hasMoreSessions,
-                    isLoadingMoreSessions = isLoadingMoreSessions,
-                    expandedSessionIds = expandedSessionIds,
+                    sessions = state.sessions,
+                    currentSessionId = state.currentSessionId,
+                    sessionStatuses = state.sessionStatuses,
+                    hasMoreSessions = state.hasMoreSessions,
+                    isLoadingMoreSessions = state.isLoadingMoreSessions,
+                    expandedSessionIds = state.expandedSessionIds,
                     onSelectSession = {
-                        onSelectSession(it)
+                        actions.onSelectSession(it)
                         showSessionSheet = false
                     },
                     onCreateSession = {
-                        onCreateSession()
+                        actions.onCreateSession()
                         showSessionSheet = false
                     },
                     onDeleteSession = {
-                        onDeleteSession(it)
+                        actions.onDeleteSession(it)
                         showSessionSheet = false
                     },
-                    onLoadMoreSessions = onLoadMoreSessions,
-                    onToggleSessionExpanded = onToggleSessionExpanded,
+                    onLoadMoreSessions = actions.onLoadMoreSessions,
+                    onToggleSessionExpanded = actions.onToggleSessionExpanded,
                     onOpenSettings = null
                 )
             }
@@ -358,7 +368,7 @@ internal fun ChatTopBar(
                 TextButton(
                     onClick = {
                         if (renameText.isNotBlank()) {
-                            onRenameSession(renameText.trim())
+                            actions.onRenameSession(renameText.trim())
                         }
                         showRenameDialog = false
                     }
