@@ -38,6 +38,7 @@ import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.chat.ChatScreen
 import com.yage.opencode_client.ui.files.FilesScreen
+import com.yage.opencode_client.ui.files.FilesViewModel
 import com.yage.opencode_client.ui.session.SessionList
 import com.yage.opencode_client.ui.settings.SettingsScreen
 import com.yage.opencode_client.ui.theme.OpenCodeTheme
@@ -172,8 +173,9 @@ private fun PhoneLayout(viewModel: MainViewModel, repository: OpenCodeRepository
             }
             composable(Screen.Files.route) {
                 val state by viewModel.state.collectAsStateWithLifecycle()
+                val filesViewModel: FilesViewModel = hiltViewModel()
                 FilesScreen(
-                    repository = repository,
+                    viewModel = filesViewModel,
                     pathToShow = state.filePathToShowInFiles,
                     sessionDirectory = state.currentSession?.directory,
                     onCloseFile = {
@@ -246,13 +248,14 @@ private fun TabletLayout(viewModel: MainViewModel, repository: OpenCodeRepositor
                 colorScheme = MaterialTheme.colorScheme,
                 typography = compactTypography(MaterialTheme.typography)
             ) {
+                val filesViewModel: FilesViewModel = hiltViewModel()
                 FilesScreen(
-                repository = repository,
-                pathToShow = state.filePathToShowInFiles,
-                sessionDirectory = state.currentSession?.directory,
-                onCloseFile = { viewModel.clearFileToShow() },
-                onFileClick = { }
-            )
+                    viewModel = filesViewModel,
+                    pathToShow = state.filePathToShowInFiles,
+                    sessionDirectory = state.currentSession?.directory,
+                    onCloseFile = { viewModel.clearFileToShow() },
+                    onFileClick = { }
+                )
             }
         }
 
