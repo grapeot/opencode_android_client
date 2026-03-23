@@ -145,25 +145,20 @@ showSessionListInTopBar, onRenameSession
 -keep class com.mikepenz.markdown.model.** { *; }
 ```
 
-### 2.2 [HIGH] SSE 重连机制失效
+### 2.2 [~~HIGH~~ MEDIUM → 已修复] SSE onClosed 不触发重连
 
-**文件**: `SSEClient.kt:25-36, 83`
+**文件**: `SSEClient.kt:78-84`
 
-`connect()` 方法使用 `retryWhen` 实现指数退避重连（初始 1s，乘以 2，上限 30s）：
+**原始判断修正**: 经过深入分析 kotlinx-coroutines 1.7.3 的 `retryWhen` + `callbackFlow` 行为，原始审查中的"重连逻辑是死代码"这一结论**不完全正确**。
 
-```kotlin
-fun connect(...): Flow<Result<SSEEvent>> = connectOnce(...)
-    .retryWhen { _, attempt ->
-        val delayMs = (INITIAL_RETRY_DELAY_MS * Math.pow(RETRY_MULTIPLIER, attempt.toDouble()))
-            .toLong().coerceAtMost(MAX_RETRY_DELAY_MS)
-        delay(delayMs)
-        true  // 永远重试
-    }
-```
+| 场景 | `callbackFlow.close()` 调用 | Flow 完成方式 | `retryWhen` 触发? |
+|---|---|---|---|
+| `onFailure`（网络错误） | `close(throwable)` | 异常完成 | **是** — 重连有效 |
+| `onClosed`（服务器优雅断开） | `close()`（无参） | 正常完成 | **否** — 不会重连 |
 
-但 `connectOnce` 内部的 `callbackFlow` 在连接失败时调用 `close(t)`（第 83 行），这会终止整个 Flow。`retryWhen` 无法重启已关闭的 `callbackFlow`，因此**重连逻辑实际上是死代码**。SSE 连接一旦失败，整个 Flow 永久终止，不会自动恢复。
+`onFailure` 路径的 `close(throwable)` 会导致异常完成，`retryWhen` 可以捕获并重连——这条路径一直是有效的。只有 `onClosed`（服务器正常关闭连接）不会触发重试。
 
-**修复建议**: 不使用 `callbackFlow.close()` 处理可重试的错误，改为通过 `trySend` 发送错误事件，让 `retryWhen` 控制重连。或者在 `connect()` 层面使用 `flow { while(true) { emitAll(connectOnce(...)) } }` 手动管理重连循环。
+**已修复**: `onClosed` 改为 `close(Exception("SSE connection closed by server"))`，使优雅断开也能触发重连。见 PR #14。
 
 ### 2.3 [MEDIUM] Certificate Pinning 缺失
 
@@ -287,31 +282,57 @@ Kover 插件已配置，`./gradlew koverHtmlReport` 可生成覆盖率报告，�
 
 ## 五、改进建议汇总
 
-按优先级排序，建议分两批处理：
+按优先级排序，建议分批处理。
 
-### 立即修复（阻断性问题）
+### 立即修复（阻断性问题）— 已全部完成 ✅
 
-| # | 问题 | 严重程度 | 预估工作量 |
-|---|------|---------|-----------|
-| 1 | 添加 MikePenz ProGuard 规则 | CRITICAL | 5 分钟 |
-| 2 | Repository.configure() 线程安全 | CRITICAL | 2-4 小时 |
-| 3 | SSE 重连机制修复 | HIGH | 4-8 小时 |
+| # | 问题 | 严重程度 | 状态 | PR |
+|---|------|---------|------|-----|
+| 1 | 添加 MikePenz ProGuard 规则 | CRITICAL | ✅ 已修复 | #14 |
+| 2 | Repository.configure() 线程安全 | CRITICAL | ✅ 已修复 | #14 |
+| 3 | SSE onClosed 重连 | HIGH | ✅ 已修复 | #14 |
 
-### 短期改进（1-2 个迭代）
+### 短期改进计划 — 已全部完成 ✅
 
-| # | 问题 | 严重程度 | 预估工作量 |
-|---|------|---------|-----------|
-| 4 | 创建 FilesViewModel | HIGH | 1-2 天 |
-| 5 | 拆分 AppState | HIGH | 1-2 天 |
-| 6 | testConnection 添加防抖 | MEDIUM | 30 分钟 |
-| 7 | 补充 Repository 单元测试 | HIGH | 1-2 天 |
-| 8 | 补充 ViewModel 关键路径测试 | MEDIUM | 1 天 |
+以下 Sprint A/B/C 的所有 MEDIUM 及以上改进项已全部实施并通过测试。
+
+#### Sprint A：数据层加固 ✅
+
+**#4 创建 FilesViewModel** — HIGH ✅
+
+新增 `FilesViewModel`（Hilt 注入），FilesScreen 不再直接接收 `OpenCodeRepository`。
+同时移除了 MainActivity → PhoneLayout/TabletLayout → ChatScreen 的 repository 参数链。
+附带 6 个 `FilesViewModelTest` 测试。
+
+**#7 补充 Repository 单元测试** — HIGH ✅
+
+覆盖率从 27%（7/26 方法）提升到 100%（43 个测试覆盖全部 26 个公开方法）。
+
+#### Sprint B：架构优化 ✅
+
+**#5 拆分 AppState** — HIGH ✅
+
+新增 6 个子状态 data class（ConnectionState、SessionState、ChatState、SpeechState、FileUiState、SettingsState）。
+纯增量改动，原有 flat API 不变，为后续逐步迁移铺路。
+
+**#8 补充 ViewModel 关键路径测试** — MEDIUM ✅
+
+新增 10 个 MainViewModel 测试，覆盖 abortSession、deleteSession、updateSessionTitle、respondPermission、loadPendingPermissions、replyQuestion、rejectQuestion、testConnection 防抖、SSE 事件（message.created、question.asked、question.rejected）。
+
+#### Sprint C：体验优化 ✅
+
+**#6 testConnection 添加防抖** — MEDIUM ✅
+
+在 MainViewModel 中添加 30 秒冷却，避免屏幕旋转等场景触发冗余网络请求。
+
+**#9 ChatTopBar 参数归并** — MEDIUM ✅
+
+23 个参数归并为 `ChatTopBarState`（14 字段）+ `ChatTopBarActions`（9 回调）。
 
 ### 长期改进（技术债）
 
 | # | 问题 | 严重程度 | 预估工作量 |
 |---|------|---------|-----------|
-| 9 | ChatTopBar 参数归并 | MEDIUM | 2 小时 |
 | 10 | 图片扩展名列表去重 | LOW | 30 分钟 |
 | 11 | 添加 Certificate Pinning | MEDIUM | 2-4 小时 |
 | 12 | 创建 FakeRepository | MEDIUM | 1 天 |

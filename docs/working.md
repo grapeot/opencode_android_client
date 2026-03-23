@@ -12,6 +12,23 @@
 - 修复文件预览与聊天 Markdown 的图片预取路径，移除无效的 `imageVersion` 状态和排障临时日志，重新验证 `./gradlew assembleDebug` 与 `./gradlew testDebugUnitTest` 均通过。
 - 新增 `docs/code_review.md`，完成一轮中文系统性代码审查，覆盖架构、安全与测试问题，并整理后续修复优先级。
 
+### Code Review 修复（Sprint A/B/C）
+
+**Sprint A — 数据层加固**
+- 新增 `FilesViewModel`（Hilt 注入），将 FilesScreen 的 6 次直接 repository 调用移入 ViewModel，状态通过 StateFlow 暴露，FilesScreen 不再接收 OpenCodeRepository 参数
+- 移除 Composable 参数链中的 repository 透传：ChatScreen、PhoneLayout、TabletLayout 不再传递 repository，改用 `viewModel.repository`（MainViewModel.repository 从 private 改为 internal）
+- MainActivity 不再持有 `@Inject lateinit var repository` 字段
+- Repository 单元测试从 7/26（27%）提升到 43 个测试覆盖全部 26 个方法
+- 新增 `FilesViewModelTest`（6 个测试）
+
+**Sprint B — 架构优化**
+- AppState 新增 6 个逻辑子状态 data class（ConnectionState、SessionState、ChatState、SpeechState、FileUiState、SettingsState），通过派生属性暴露；原有 flat API 不变，纯增量改动
+- MainViewModel 补充 10 个测试：abortSession、deleteSession、updateSessionTitle、respondPermission、loadPendingPermissions、replyQuestion、rejectQuestion、testConnection 30s 防抖、SSE 事件（message.created、question.asked、question.rejected）
+
+**Sprint C — 体验优化**
+- testConnection 添加 30 秒防抖，避免屏幕旋转、后台切换时触发 5+ 次冗余网络请求和 SSE 重连
+- ChatTopBar 23 个参数归并为 `ChatTopBarState`（14 字段）+ `ChatTopBarActions`（9 回调），调用端从 22 行参数传递简化为结构化构造
+
 ## 2026-03-17
 
 - 全局 oh-my-opencode.json 默认 agent 从 GLM-5 切换为 sisyphus ultraworker（Claude Opus 4.6）。
