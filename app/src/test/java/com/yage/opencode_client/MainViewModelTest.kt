@@ -6,9 +6,12 @@ import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.PermissionRequest
+import com.yage.opencode_client.data.model.PermissionResponse
+import com.yage.opencode_client.data.model.QuestionRequest
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.model.SSEEvent
 import com.yage.opencode_client.data.model.SSEPayload
+import com.yage.opencode_client.data.model.HealthResponse
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.MainViewModel
@@ -31,6 +34,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -762,6 +766,277 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         assertEquals(3, viewModel.state.value.selectedModelIndex)
+    }
+
+    @Test
+    fun `abortSession calls repository for current session`() = runTest {
+        coEvery { repository.abortSession("session-1") } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        viewModel.abortSession()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.abortSession("session-1") }
+    }
+
+    @Test
+    fun `deleteSession removes deleted session from state`() = runTest {
+        coEvery { repository.deleteSession("session-1") } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                sessions = listOf(
+                    com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/one"),
+                    com.yage.opencode_client.data.model.Session(id = "session-2", directory = "/tmp/two")
+                ),
+                currentSessionId = "session-2"
+            )
+        }
+
+        viewModel.deleteSession("session-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.deleteSession("session-1") }
+        assertEquals(listOf("session-2"), viewModel.state.value.sessions.map { it.id })
+    }
+
+    @Test
+    fun `updateSessionTitle calls repository and updates session title`() = runTest {
+        val updated = com.yage.opencode_client.data.model.Session(
+            id = "session-1",
+            directory = "/tmp/project",
+            title = "Updated Title"
+        )
+        coEvery { repository.updateSession("session-1", "Updated Title") } returns Result.success(updated)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                sessions = listOf(
+                    com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project", title = "Old Title")
+                )
+            )
+        }
+
+        viewModel.updateSessionTitle("session-1", "Updated Title")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.updateSession("session-1", "Updated Title") }
+        assertEquals("Updated Title", viewModel.state.value.sessions.single().title)
+    }
+
+    @Test
+    fun `respondPermission calls repository and removes pending permission`() = runTest {
+        coEvery {
+            repository.respondPermission("session-1", "perm-1", PermissionResponse.ALWAYS)
+        } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                pendingPermissions = listOf(
+                    PermissionRequest(id = "perm-1", sessionId = "session-1", permission = "file.write"),
+                    PermissionRequest(id = "perm-2", sessionId = "session-2", permission = "file.read")
+                )
+            )
+        }
+
+        viewModel.respondPermission("session-1", "perm-1", PermissionResponse.ALWAYS)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            repository.respondPermission("session-1", "perm-1", PermissionResponse.ALWAYS)
+        }
+        assertEquals(listOf("perm-2"), viewModel.state.value.pendingPermissions.map { it.id })
+    }
+
+    @Test
+    fun `loadPendingPermissions loads permissions into state`() = runTest {
+        val permissions = listOf(
+            PermissionRequest(id = "perm-1", sessionId = "session-1", permission = "file.read"),
+            PermissionRequest(id = "perm-2", sessionId = "session-2", permission = "command.exec")
+        )
+        coEvery { repository.getPendingPermissions() } returns Result.success(permissions)
+
+        val viewModel = createViewModel()
+
+        viewModel.loadPendingPermissions()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.getPendingPermissions() }
+        assertEquals(permissions, viewModel.state.value.pendingPermissions)
+    }
+
+    @Test
+    fun `replyQuestion calls repository and removes answered question`() = runTest {
+        val answers = listOf(listOf("React"), listOf("Custom"))
+        coEvery { repository.replyQuestion("question-1", answers) } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                pendingQuestions = listOf(
+                    QuestionRequest(
+                        id = "question-1",
+                        sessionId = "session-1",
+                        questions = emptyList()
+                    ),
+                    QuestionRequest(
+                        id = "question-2",
+                        sessionId = "session-2",
+                        questions = emptyList()
+                    )
+                )
+            )
+        }
+
+        viewModel.replyQuestion("question-1", answers)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.replyQuestion("question-1", answers) }
+        assertEquals(listOf("question-2"), viewModel.state.value.pendingQuestions.map { it.id })
+    }
+
+    @Test
+    fun `rejectQuestion calls repository and removes rejected question`() = runTest {
+        coEvery { repository.rejectQuestion("question-1") } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                pendingQuestions = listOf(
+                    QuestionRequest(
+                        id = "question-1",
+                        sessionId = "session-1",
+                        questions = emptyList()
+                    ),
+                    QuestionRequest(
+                        id = "question-2",
+                        sessionId = "session-2",
+                        questions = emptyList()
+                    )
+                )
+            )
+        }
+
+        viewModel.rejectQuestion("question-1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.rejectQuestion("question-1") }
+        assertEquals(listOf("question-2"), viewModel.state.value.pendingQuestions.map { it.id })
+    }
+
+    @Test
+    fun `testConnection skips second health check within cooldown`() = runTest {
+        coEvery { repository.checkHealth() } returns Result.success(HealthResponse(healthy = false, version = "1.0"))
+
+        val viewModel = createViewModel()
+
+        viewModel.testConnection()
+        viewModel.testConnection()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.checkHealth() }
+    }
+
+    @Test
+    fun `handleSSEEvent message created refreshes messages for current session`() = runTest {
+        val messages = listOf(MessageWithParts(info = Message(id = "m1", role = "assistant")))
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
+
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.created",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                    }
+                )
+            )
+        )
+        advanceTimeBy(400)
+        advanceUntilIdle()
+
+        assertEquals(messages, viewModel.state.value.messages)
+    }
+
+    @Test
+    fun `handleSSEEvent question asked appends pending question`() = runTest {
+        val viewModel = createViewModel()
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "question.asked",
+                    properties = buildJsonObject {
+                        put("id", JsonPrimitive("question-1"))
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "questions",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("question", JsonPrimitive("What framework do you use?"))
+                                        put("header", JsonPrimitive("Framework Choice"))
+                                        put(
+                                            "options",
+                                            buildJsonArray {
+                                                add(
+                                                    buildJsonObject {
+                                                        put("label", JsonPrimitive("React"))
+                                                        put("description", JsonPrimitive("Popular UI library"))
+                                                    }
+                                                )
+                                            }
+                                        )
+                                        put("multiple", JsonPrimitive(false))
+                                        put("custom", JsonPrimitive(true))
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            )
+        )
+
+        assertEquals(listOf("question-1"), viewModel.state.value.pendingQuestions.map { it.id })
+        assertEquals("session-1", viewModel.state.value.pendingQuestions.single().sessionId)
+    }
+
+    @Test
+    fun `handleSSEEvent question rejected removes pending question`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                pendingQuestions = listOf(
+                    QuestionRequest(id = "question-1", sessionId = "session-1", questions = emptyList()),
+                    QuestionRequest(id = "question-2", sessionId = "session-2", questions = emptyList())
+                )
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "question.rejected",
+                    properties = buildJsonObject {
+                        put("requestID", JsonPrimitive("question-1"))
+                    }
+                )
+            )
+        )
+
+        assertEquals(listOf("question-2"), viewModel.state.value.pendingQuestions.map { it.id })
     }
 
     @org.junit.After
