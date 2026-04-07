@@ -62,22 +62,22 @@ internal fun launchSpeechTranscription(
                     )
                 }
             }.onFailure { error ->
-                Log.e(tag, "Transcription failed", error)
+                Log.e(tag, "Speech transcription failed at ${speechLogStage(error, "speech.remote")}", error)
                 state.update {
                     it.copy(
                         inputText = existingInput,
                         isTranscribing = false,
-                        speechError = errorMessageOrFallback(error, "Transcription failed")
+                        speechError = speechErrorMessage(error, "Transcription failed")
                     )
                 }
             }
         } catch (error: Exception) {
-            Log.e(tag, "Speech processing failed", error)
+            Log.e(tag, "Speech processing failed at ${speechLogStage(error, "speech.local")}", error)
             state.update {
                 it.copy(
                     inputText = existingInput,
                     isTranscribing = false,
-                    speechError = errorMessageOrFallback(error, "Transcription failed")
+                    speechError = speechErrorMessage(error, "Transcription failed")
                 )
             }
         }

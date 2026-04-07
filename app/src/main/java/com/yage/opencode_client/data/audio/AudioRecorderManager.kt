@@ -85,30 +85,40 @@ class AudioRecorderManager @Inject constructor(
     }
 
     suspend fun convertToPCM(m4aFile: File): ByteArray = withContext(Dispatchers.Default) {
-        Log.d(TAG, "Converting M4A to PCM: ${m4aFile.absolutePath}")
-        val decodeResult = decodeM4aToPCM(m4aFile)
-        val pcmSamples = if (decodeResult.sampleRate != AudioRecorderConfig.targetPcmSampleRate) {
-            resamplePCM(
-                decodeResult.samples,
-                decodeResult.sampleRate,
-                AudioRecorderConfig.targetPcmSampleRate
+        try {
+            Log.d(TAG, "Converting M4A to PCM: ${m4aFile.absolutePath}")
+            val decodeResult = decodeM4aToPCM(m4aFile)
+            val pcmSamples = if (decodeResult.sampleRate != AudioRecorderConfig.targetPcmSampleRate) {
+                resamplePCM(
+                    decodeResult.samples,
+                    decodeResult.sampleRate,
+                    AudioRecorderConfig.targetPcmSampleRate
+                )
+            } else {
+                decodeResult.samples
+            }
+
+            val pcmBytes = ByteBuffer
+                .allocate(pcmSamples.size * 2)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            pcmSamples.forEach { sample ->
+                pcmBytes.putShort(sample)
+            }
+
+            Log.d(
+                TAG,
+                "PCM conversion complete. inputRate=${decodeResult.sampleRate}, outputRate=${AudioRecorderConfig.targetPcmSampleRate}, bytes=${pcmBytes.array().size}"
             )
-        } else {
-            decodeResult.samples
+            pcmBytes.array()
+        } catch (error: Exception) {
+            Log.e(TAG, "speech.audio.decode failed for ${m4aFile.absolutePath}", error)
+            throw SpeechTranscriptionException(
+                kind = SpeechFailureKind.LOCAL_AUDIO,
+                stage = "speech.audio.decode",
+                detail = error.message ?: "Failed to decode recorded audio",
+                cause = error
+            )
         }
-
-        val pcmBytes = ByteBuffer
-            .allocate(pcmSamples.size * 2)
-            .order(ByteOrder.LITTLE_ENDIAN)
-        pcmSamples.forEach { sample ->
-            pcmBytes.putShort(sample)
-        }
-
-        Log.d(
-            TAG,
-            "PCM conversion complete. inputRate=${decodeResult.sampleRate}, outputRate=${AudioRecorderConfig.targetPcmSampleRate}, bytes=${pcmBytes.array().size}"
-        )
-        pcmBytes.array()
     }
 
     private fun decodeM4aToPCM(m4aFile: File): DecodedPCM {

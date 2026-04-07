@@ -19,6 +19,22 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
+internal enum class SpeechFailureKind {
+    LOCAL_AUDIO,
+    CLIENT,
+    CONFIG,
+    NETWORK,
+    SERVER,
+    UNKNOWN
+}
+
+internal class SpeechTranscriptionException(
+    val kind: SpeechFailureKind,
+    val stage: String,
+    detail: String,
+    cause: Throwable? = null
+) : IOException(detail, cause)
+
 data class TranscriptionResponse(
     val requestId: String,
     val text: String
@@ -73,7 +89,11 @@ object AIBuildersAudioClient {
             val normalizedBase = normalizedBaseURL(baseURL)
             val cleanedToken = sanitizeBearerToken(token)
             if (cleanedToken.isEmpty()) {
-                throw IOException("AI Builder token is empty")
+                throw SpeechTranscriptionException(
+                    kind = SpeechFailureKind.CONFIG,
+                    stage = "speech.config.token",
+                    detail = "AI Builder token is empty"
+                )
             }
 
             val session = createRealtimeSession(
@@ -203,20 +223,55 @@ object AIBuildersAudioClient {
             .post(payload.toString().toRequestBody(AudioTranscriptionConfig.jsonMediaType.toMediaType()))
             .build()
 
-        client.newCall(request).execute().use { response ->
-            if (response.code >= 400) {
-                throw IOException("Create session failed with status ${response.code}")
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.code >= 400) {
+                    val message = "HTTP ${response.code} while creating realtime session"
+                    Log.e(TAG, "speech.server.session.create failed: $message")
+                    throw SpeechTranscriptionException(
+                        kind = SpeechFailureKind.SERVER,
+                        stage = "speech.server.session.create",
+                        detail = message
+                    )
+                }
+
+                val bodyText = response.body?.string()
+                if (bodyText.isNullOrBlank()) {
+                    Log.e(TAG, "speech.server.session.create failed: empty response body")
+                    throw SpeechTranscriptionException(
+                        kind = SpeechFailureKind.SERVER,
+                        stage = "speech.server.session.create",
+                        detail = "Empty response body while creating realtime session"
+                    )
+                }
+                val bodyJson = try {
+                    JSONObject(bodyText)
+                } catch (error: Exception) {
+                    Log.e(TAG, "speech.server.session.create failed: invalid JSON response", error)
+                    throw SpeechTranscriptionException(
+                        kind = SpeechFailureKind.SERVER,
+                        stage = "speech.server.session.create",
+                        detail = "Invalid JSON response while creating realtime session",
+                        cause = error
+                    )
+                }
+                val sessionId = bodyJson.getString("session_id")
+                val wsUrl = bodyJson.getString("ws_url")
+
+                return RealtimeSessionResponse(
+                    sessionId = sessionId,
+                    wsUrl = wsUrl
+                )
             }
-
-            val bodyText = response.body?.string()
-                ?: throw IOException("Create session returned empty body")
-            val bodyJson = JSONObject(bodyText)
-            val sessionId = bodyJson.getString("session_id")
-            val wsUrl = bodyJson.getString("ws_url")
-
-            return RealtimeSessionResponse(
-                sessionId = sessionId,
-                wsUrl = wsUrl
+        } catch (error: SpeechTranscriptionException) {
+            throw error
+        } catch (error: Exception) {
+            Log.e(TAG, "speech.net.session.create failed", error)
+            throw SpeechTranscriptionException(
+                kind = SpeechFailureKind.NETWORK,
+                stage = "speech.net.session.create",
+                detail = error.message ?: "Failed to create realtime session",
+                cause = error
             )
         }
     }
@@ -228,6 +283,15 @@ object AIBuildersAudioClient {
         pcmAudio: ByteArray,
         onPartialTranscript: ((String) -> Unit)?
     ): TranscriptionResponse {
+        if (pcmAudio.isEmpty()) {
+            Log.e(TAG, "speech.audio.empty failed for session=$sessionId: PCM payload is empty")
+            throw SpeechTranscriptionException(
+                kind = SpeechFailureKind.LOCAL_AUDIO,
+                stage = "speech.audio.empty",
+                detail = "Recorded audio produced an empty PCM payload"
+            )
+        }
+
         val readySignal = CompletableDeferred<Unit>()
         val resultSignal = CompletableDeferred<TranscriptionResponse>()
         val closed = AtomicBoolean(false)
@@ -290,24 +354,66 @@ object AIBuildersAudioClient {
                             val message = event.optString("message").ifEmpty {
                                 event.optString("code", "Unknown websocket error")
                             }
+                            Log.e(TAG, "speech.server.transcription failed for session=$sessionId: $message")
                             if (closed.compareAndSet(false, true)) {
-                                resultSignal.completeExceptionally(IOException(message))
+                                resultSignal.completeExceptionally(
+                                    SpeechTranscriptionException(
+                                        kind = SpeechFailureKind.SERVER,
+                                        stage = "speech.server.transcription",
+                                        detail = message
+                                    )
+                                )
                             }
                         }
                     }
                 } catch (error: Exception) {
+                    Log.e(TAG, "speech.client.ws.parse failed for session=$sessionId", error)
                     if (closed.compareAndSet(false, true)) {
-                        resultSignal.completeExceptionally(error)
+                        resultSignal.completeExceptionally(
+                            SpeechTranscriptionException(
+                                kind = SpeechFailureKind.CLIENT,
+                                stage = "speech.client.ws.parse",
+                                detail = error.message ?: "Failed to parse websocket event",
+                                cause = error
+                            )
+                        )
                     }
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                val responseCode = response?.code
+                val kind = if (responseCode != null && responseCode >= 400) {
+                    SpeechFailureKind.SERVER
+                } else {
+                    SpeechFailureKind.NETWORK
+                }
+                val stage = if (kind == SpeechFailureKind.SERVER) {
+                    "speech.server.ws.connect"
+                } else {
+                    "speech.net.ws.connect"
+                }
+                val detail = if (responseCode != null && responseCode >= 400) {
+                    "WebSocket upgrade failed with HTTP $responseCode"
+                } else {
+                    t.message ?: "WebSocket connection failed"
+                }
+                Log.e(
+                    TAG,
+                    "$stage failed for session=$sessionId responseCode=${responseCode ?: "none"}",
+                    t
+                )
+                val failure = SpeechTranscriptionException(
+                    kind = kind,
+                    stage = stage,
+                    detail = detail,
+                    cause = t
+                )
                 if (!readySignal.isCompleted) {
-                    readySignal.completeExceptionally(t)
+                    readySignal.completeExceptionally(failure)
                 }
                 if (closed.compareAndSet(false, true)) {
-                    resultSignal.completeExceptionally(t)
+                    resultSignal.completeExceptionally(failure)
                 }
             }
         }
@@ -334,13 +440,23 @@ object AIBuildersAudioClient {
                         .toByteString()
                 )
                 if (!sent) {
-                    throw IOException("Failed to send audio chunk")
+                    Log.e(TAG, "speech.net.ws.send failed for session=$sessionId: audio chunk send returned false")
+                    throw SpeechTranscriptionException(
+                        kind = SpeechFailureKind.NETWORK,
+                        stage = "speech.net.ws.send",
+                        detail = "Failed to send audio chunk"
+                    )
                 }
                 chunkStart = chunkEnd
             }
 
             if (!webSocket.send("{\"type\":\"commit\"}")) {
-                throw IOException("Failed to send commit event")
+                Log.e(TAG, "speech.net.ws.send failed for session=$sessionId: commit send returned false")
+                throw SpeechTranscriptionException(
+                    kind = SpeechFailureKind.NETWORK,
+                    stage = "speech.net.ws.send",
+                    detail = "Failed to send commit event"
+                )
             }
             Log.d(TAG, "Commit event sent")
 
