@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -15,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.List
@@ -202,7 +204,8 @@ internal fun ChatTopBar(
                         }
                         DropdownMenu(
                             expanded = showModelMenu,
-                            onDismissRequest = { showModelMenu = false }
+                            onDismissRequest = { showModelMenu = false },
+                            modifier = Modifier.heightIn(max = 360.dp)
                         ) {
                             if (state.availableModels.isEmpty()) {
                                 DropdownMenuItem(
@@ -216,16 +219,28 @@ internal fun ChatTopBar(
                                 )
                             }
                             state.availableModels.forEachIndexed { index, model ->
+                                val isSelected = index == state.selectedModelIndex
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             model.displayName,
-                                            color = if (index == state.selectedModelIndex)
+                                            color = if (isSelected)
                                                 MaterialTheme.colorScheme.primary
                                             else
-                                                MaterialTheme.colorScheme.onSurface
+                                                MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                         )
                                     },
+                                    trailingIcon = if (isSelected) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    } else null,
                                     onClick = {
                                         actions.onSelectModel(index)
                                         showModelMenu = false

@@ -2,4 +2,11 @@
 <resources>
 
     <style name="Theme.Opencode_client" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Base application theme. -->
+    <style name="Base.Theme.Opencode_android_client" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+    </style>
+
+    <style name="Theme.Opencode_android_client" parent="Base.Theme.Opencode_android_client" />
 </resources>

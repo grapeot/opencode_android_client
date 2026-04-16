@@ -60,7 +60,8 @@ data class AppState(
     val speechError: String? = null,
     val aiBuilderConnectionOK: Boolean = false,
     val aiBuilderConnectionError: String? = null,
-    val isTestingAIBuilderConnection: Boolean = false
+    val isTestingAIBuilderConnection: Boolean = false,
+    val attachedImages: List<ImageAttachment> = emptyList()
 ) {
     data class ModelOption(val displayName: String, val providerId: String, val modelId: String) {
         val shortName: String
@@ -114,7 +115,8 @@ data class AppState(
         val streamingPartTexts: Map<String, String> = emptyMap(),
         val streamingReasoningPart: Part? = null,
         val isLoadingMessages: Boolean = false,
-        val inputText: String = ""
+        val inputText: String = "",
+        val attachedImages: List<ImageAttachment> = emptyList()
     )
 
     data class SpeechState(
@@ -136,7 +138,7 @@ data class AppState(
         val themeMode: ThemeMode = ThemeMode.SYSTEM,
         val selectedModelIndex: Int = 0,
         val selectedAgentName: String = "build",
-        val availableModels: List<ModelOption> = ModelPresets.list,
+        val availableModels: List<ModelOption> = emptyList(),
         val contextUsage: ContextUsage? = null,
         val agents: List<AgentInfo> = emptyList(),
         val providers: ProvidersResponse? = null,
@@ -171,7 +173,8 @@ data class AppState(
             streamingPartTexts = streamingPartTexts,
             streamingReasoningPart = streamingReasoningPart,
             isLoadingMessages = isLoadingMessages,
-            inputText = inputText
+            inputText = inputText,
+            attachedImages = attachedImages
         )
 
     val speechState: SpeechState
@@ -218,9 +221,17 @@ data class AppState(
     val visibleAgents: List<AgentInfo>
         get() = agents.filter { it.isVisible }
 
-    /** Curated model list (filtered like iOS), not the full API response. */
+    /** Dynamically fetched model list from the API, falling back to curated list if not available yet. */
     val availableModels: List<ModelOption>
-        get() = ModelPresets.list
+        get() = providers?.providers?.flatMap { provider ->
+            provider.models.values.filter { it.available }.map { model ->
+                ModelOption(
+                    displayName = model.name.takeIf { !it.isNullOrBlank() } ?: model.id,
+                    providerId = provider.id,
+                    modelId = model.id
+                )
+            }
+        }?.ifEmpty { ModelPresets.list } ?: ModelPresets.list
 
     private val providerModelsIndex: Map<String, ProviderModel>
         get() = providers?.providers?.flatMap { provider ->
@@ -463,10 +474,19 @@ class MainViewModel @Inject constructor(
         launchDeleteSession(viewModelScope, repository, _state, sessionId, ::selectSession)
     }
 
+    fun attachImage(image: ImageAttachment) {
+        _state.update { it.copy(attachedImages = it.attachedImages + image) }
+    }
+
+    fun removeAttachedImage(image: ImageAttachment) {
+        _state.update { it.copy(attachedImages = it.attachedImages - image) }
+    }
+
     fun sendMessage() {
         val sessionId = _state.value.currentSessionId ?: return
         val text = _state.value.inputText.trim()
-        if (text.isEmpty()) return
+        val images = _state.value.attachedImages
+        if (text.isEmpty() && images.isEmpty()) return
 
         val agent = _state.value.selectedAgentName
         val model = buildSelectedModel(_state.value)
@@ -477,10 +497,14 @@ class MainViewModel @Inject constructor(
             state = _state,
             sessionId = sessionId,
             text = text,
+            images = images,
             agent = agent,
             model = model,
             onRefreshMessages = ::loadMessagesWithRetry,
-            onSuccess = { settingsManager.setDraftText(sessionId, "") }
+            onSuccess = { 
+                settingsManager.setDraftText(sessionId, "") 
+                _state.update { it.copy(attachedImages = emptyList()) }
+            }
         )
     }
 
@@ -517,7 +541,7 @@ class MainViewModel @Inject constructor(
     }
 
     fun selectModel(index: Int) {
-        val clamped = index.coerceIn(0, ModelPresets.list.size - 1)
+        val clamped = index.coerceIn(0, (_state.value.availableModels.size - 1).coerceAtLeast(0))
         settingsManager.selectedModelIndex = clamped
         _state.update { it.copy(selectedModelIndex = clamped) }
         _state.value.currentSessionId?.let { settingsManager.setModelForSession(it, clamped) }

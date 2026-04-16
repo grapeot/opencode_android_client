@@ -89,13 +89,16 @@ data class Part(
     val id: String,
     @SerialName("messageID") val messageId: String? = null,
     @SerialName("sessionID") val sessionId: String? = null,
-    val type: String,
+        val type: String,
     val text: String? = null,
     val tool: String? = null,
     @SerialName("callID") val callId: String? = null,
     val state: PartState? = null,
     val metadata: PartMetadata? = null,
-    @Serializable(with = PartFilesSerializer::class) val files: List<FileChange>? = null
+    @Serializable(with = PartFilesSerializer::class) val files: List<FileChange>? = null,
+    val url: String? = null,
+    val mime: String? = null,
+    val filename: String? = null
 ) {
     val isText: Boolean get() = type == "text"
     val isReasoning: Boolean get() = type == "reasoning"
@@ -103,6 +106,7 @@ data class Part(
     val isPatch: Boolean get() = type == "patch"
     val isStepStart: Boolean get() = type == "step-start"
     val isStepFinish: Boolean get() = type == "step-finish"
+    val isFile: Boolean get() = type == "file"
 
     val stateDisplay: String? get() = state?.displayString
     val toolReason: String? get() = state?.title

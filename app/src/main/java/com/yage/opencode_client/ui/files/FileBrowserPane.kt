@@ -24,19 +24,23 @@ import com.yage.opencode_client.ui.theme.DeletedFile
 import com.yage.opencode_client.ui.theme.ModifiedFile
 import com.yage.opencode_client.ui.theme.UntrackedFile
 
+import androidx.compose.foundation.text.selection.SelectionContainer
+
 @Composable
 internal fun FileBrowserPane(
     files: List<FileNode>,
     fileStatuses: Map<String, String>,
     onFileSelected: (FileNode) -> Unit
 ) {
-    LazyColumn(modifier = Modifier.fillMaxWidth()) {
-        items(files, key = { it.path }) { file ->
-            FileRow(
-                file = file,
-                status = fileStatuses[file.path],
-                onClick = { onFileSelected(file) }
-            )
+    SelectionContainer {
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            items(files, key = { it.path }) { file ->
+                FileRow(
+                    file = file,
+                    status = fileStatuses[file.path],
+                    onClick = { onFileSelected(file) }
+                )
+            }
         }
     }
 }

@@ -107,11 +107,25 @@ class OpenCodeRepository @Inject constructor() {
     suspend fun sendMessage(
         sessionId: String,
         text: String,
+        images: List<ImageAttachment> = emptyList(),
         agent: String = "build",
         model: Message.ModelInfo? = null
     ): Result<Unit> = runCatching {
+        val parts = mutableListOf<PromptRequest.PartInput>()
+        if (text.isNotEmpty()) {
+            parts.add(PromptRequest.PartInput(type = "text", text = text))
+        }
+        images.forEach { image ->
+            parts.add(PromptRequest.PartInput(
+                type = "file",
+                url = image.asDataUrl,
+                mime = image.mimeType,
+                filename = image.filename
+            ))
+        }
+
         val request = PromptRequest(
-            parts = listOf(PromptRequest.PartInput(text = text)),
+            parts = parts,
             agent = agent,
             model = model?.let { PromptRequest.ModelInput(it.providerId, it.modelId) }
         )

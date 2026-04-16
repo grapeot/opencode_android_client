@@ -1,6 +1,7 @@
 package com.yage.opencode_client.ui
 
 import com.yage.opencode_client.data.model.Message
+import com.yage.opencode_client.data.model.ImageAttachment
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
@@ -173,7 +174,7 @@ internal fun launchLoadMessages(
                 if (sessionId == state.value.currentSessionId) {
                     val lastAssistant = messages.lastOrNull { it.info.isAssistant }
                     val inferredModelIndex = lastAssistant?.info?.resolvedModel?.let { model ->
-                        ModelPresets.list.indexOfFirst {
+                        state.value.availableModels.indexOfFirst {
                             it.providerId == model.providerId && it.modelId == model.modelId
                         }.takeIf { it >= 0 }
                     }
@@ -374,13 +375,14 @@ internal fun launchSendMessage(
     state: MutableStateFlow<AppState>,
     sessionId: String,
     text: String,
+    images: List<ImageAttachment> = emptyList(),
     agent: String,
     model: Message.ModelInfo?,
     onRefreshMessages: (String, Boolean) -> Unit,
     onSuccess: (() -> Unit)? = null
 ) {
     scope.launch {
-        repository.sendMessage(sessionId, text, agent, model)
+        repository.sendMessage(sessionId, text, images, agent, model)
             .onSuccess {
                 state.update {
                     it.copy(

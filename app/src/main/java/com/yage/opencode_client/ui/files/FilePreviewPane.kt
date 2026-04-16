@@ -23,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -133,17 +134,19 @@ private fun PreviewMarkdown(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp)
-    ) {
-        item {
-            Markdown(
-                content = resolvedContent ?: content,
-                typography = markdownTypographyCompact(),
-                modifier = Modifier.fillMaxWidth(),
-                imageTransformer = DataUriImageTransformer
-            )
+    SelectionContainer {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            item {
+                Markdown(
+                    content = resolvedContent ?: content,
+                    typography = markdownTypographyCompact(),
+                    modifier = Modifier.fillMaxWidth(),
+                    imageTransformer = DataUriImageTransformer
+                )
+            }
         }
     }
 }
@@ -164,16 +167,18 @@ private fun PreviewBinaryFallback() {
 
 @Composable
 private fun PreviewPlainText(content: String) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp)
-    ) {
-        item {
-            Text(
-                text = content,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace
-            )
+    SelectionContainer {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            item {
+                Text(
+                    text = content,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
         }
     }
 }

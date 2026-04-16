@@ -7,7 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.unit.dp
@@ -55,7 +55,7 @@ sealed class Screen(
     object Chat : Screen(
         "chat",
         "Chat",
-        Icons.Default.Chat,
+        Icons.AutoMirrored.Filled.Chat,
         Icons.Outlined.ChatBubbleOutline
     )
 
@@ -180,7 +180,9 @@ private fun PhoneLayout(viewModel: MainViewModel) {
                             navigateToTopLevel(Screen.Chat.route)
                         }
                     },
-                    onFileClick = { }
+                    onFileClick = { path ->
+                        viewModel.showFileInFiles(path)
+                    }
                 )
             }
             composable(Screen.Settings.route) {
@@ -251,7 +253,9 @@ private fun TabletLayout(viewModel: MainViewModel) {
                     pathToShow = state.filePathToShowInFiles,
                     sessionDirectory = state.currentSession?.directory,
                     onCloseFile = { viewModel.clearFileToShow() },
-                    onFileClick = { }
+                    onFileClick = { path ->
+                        viewModel.showFileInFiles(path)
+                    }
                 )
             }
         }

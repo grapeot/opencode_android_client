@@ -64,6 +64,11 @@ import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.flow.collect
 
 @Composable
@@ -308,6 +313,41 @@ private fun PartView(
         part.isReasoning -> ReasoningCard(streamingTextOverride ?: part.text ?: "", part.toolReason, false, modifier)
         part.isTool -> ToolCard(part.tool ?: "", part.stateDisplay, part.toolReason, part.filePathsForNavigationFiltered, part.toolTodos, onFileClick, modifier)
         part.isPatch && part.filePathsForNavigationFiltered.isNotEmpty() -> PatchCard(part.filePathsForNavigationFiltered, onFileClick, modifier)
+        part.isFile -> FilePart(part, modifier)
+    }
+}
+
+@Composable
+private fun FilePart(
+    part: Part,
+    modifier: Modifier = Modifier.fillMaxWidth()
+) {
+    val url = part.url
+    if (url != null && url.startsWith("data:image/")) {
+        val base64Data = url.substringAfter("base64,")
+        val bitmap = remember(base64Data) {
+            try {
+                val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        
+        if (bitmap != null) {
+            Box(modifier = modifier.padding(vertical = 4.dp, horizontal = 12.dp)) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = part.filename ?: "Attached image",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).clip(RoundedCornerShape(8.dp))
+                )
+            }
+        } else {
+            Text(text = "Image attached: ${part.filename ?: "Unknown"}", modifier = modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+        }
+    } else {
+        Text(text = "File attached: ${part.filename ?: "Unknown"}", modifier = modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
     }
 }
 

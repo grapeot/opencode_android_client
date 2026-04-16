@@ -2,19 +2,19 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
+# Keep generic signatures for Retrofit and Serialization
+-keepattributes Signature, *Annotation*, EnclosingMethod, InnerClasses
+
 # Kotlinx Serialization - keep @Serializable class names for reflection
--keepattributes *Annotation*, InnerClasses
 -dontwarn kotlinx.serialization.**
 -keep,includedescriptorclasses class com.yage.opencode_client.data.model.** { *; }
+-keep,includedescriptorclasses class com.yage.opencode_client.data.api.** { *; }
 
-# EncryptedSharedPreferences / Tink - errorprone annotations are compile-only
--dontwarn com.google.errorprone.annotations.**
-
-# MikePenz markdown-renderer - keep classes used via reflection in Compose
--keep class com.mikepenz.markdown.** { *; }
-
-# Hilt - applied via consumerProguardFiles from dependencies
-# Retrofit/OkHttp - applied via consumerProguardFiles
+# Retrofit
+-dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+-keepattributes Signature
+-keepattributes Exceptions
 
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface

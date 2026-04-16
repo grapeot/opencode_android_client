@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "opencode_client"
 include(":app")
+include(":app")

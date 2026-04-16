@@ -129,11 +129,14 @@ fun ChatScreen(
         if (state.currentSessionId != null) {
             ChatInputBar(
                 text = state.inputText,
+                attachedImages = state.attachedImages,
                 isBusy = state.isCurrentSessionBusy,
                 isRecording = state.isRecording,
                 isTranscribing = state.isTranscribing,
                 isSpeechConfigured = state.aiBuilderConnectionOK && aiBuilderToken.isNotEmpty(),
                 onTextChange = viewModel::setInputText,
+                onAttachImage = { viewModel.attachImage(it) },
+                onRemoveImage = { viewModel.removeAttachedImage(it) },
                 onSend = { viewModel.sendMessage() },
                 onAbort = { viewModel.abortSession() },
                 onToggleRecording = {

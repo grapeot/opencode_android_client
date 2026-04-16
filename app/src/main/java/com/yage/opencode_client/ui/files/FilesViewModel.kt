@@ -70,8 +70,7 @@ class FilesViewModel @Inject constructor(
     }
 
     fun syncPathToShow(pathToShow: String?, sessionDirectory: String?) {
-        if (pathToShow == null) {
-            closePreview()
+        if (pathToShow == null || pathToShow == _state.value.selectedFilePath) {
             return
         }
 

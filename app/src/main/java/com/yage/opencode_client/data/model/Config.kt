@@ -37,7 +37,8 @@ data class ProviderModel(
     val name: String? = null,
     @SerialName("providerID") val providerId: String? = null,
     @SerialName("providerId") val providerIdAlt: String? = null,
-    val limit: ProviderModelLimit? = null
+    val limit: ProviderModelLimit? = null,
+    val available: Boolean = true
 ) {
     val resolvedProviderId: String? get() = providerId ?: providerIdAlt
 }

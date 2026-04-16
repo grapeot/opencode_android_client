@@ -40,52 +40,93 @@ import androidx.compose.ui.unit.dp
 import com.yage.opencode_client.data.model.PermissionRequest
 import com.yage.opencode_client.data.model.PermissionResponse
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.ui.platform.LocalContext
+import com.yage.opencode_client.data.model.ImageAttachment
+import com.yage.opencode_client.util.ImageUtils
+
 @Composable
 internal fun ChatInputBar(
     text: String,
+    attachedImages: List<ImageAttachment>,
     isBusy: Boolean,
     isRecording: Boolean,
     isTranscribing: Boolean,
     isSpeechConfigured: Boolean,
     onTextChange: (String) -> Unit,
+    onAttachImage: (ImageAttachment) -> Unit,
+    onRemoveImage: (ImageAttachment) -> Unit,
     onSend: () -> Unit,
     onAbort: () -> Unit,
     onToggleRecording: () -> Unit
 ) {
     val density = LocalDensity.current
+    val context = LocalContext.current
     var textFieldHeightPx by remember { mutableIntStateOf(0) }
     val useVerticalActions = with(density) {
         shouldUseVerticalChatActions(textFieldHeightPx.toDp())
+    }
+
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        uris.forEach { uri ->
+            ImageUtils.uriToBase64(context, uri)?.let { pair ->
+                val base64 = pair.first
+                val filename = pair.second
+                val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+                onAttachImage(ImageAttachment(base64, mimeType, filename))
+            }
+        }
     }
 
     Surface(
         modifier = Modifier.fillMaxWidth().imePadding(),
         tonalElevation = 2.dp
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = if (useVerticalActions) Alignment.Bottom else Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier.weight(1f).onGloballyPositioned { textFieldHeightPx = it.size.height },
-                placeholder = { Text("Type a message...") },
-                maxLines = 4,
-                enabled = true
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            ChatInputActions(
-                isBusy = isBusy,
-                isRecording = isRecording,
-                isTranscribing = isTranscribing,
-                isSpeechConfigured = isSpeechConfigured,
-                useVerticalActions = useVerticalActions,
-                canSend = text.isNotBlank() && !isTranscribing,
-                onAbort = onAbort,
-                onToggleRecording = onToggleRecording,
-                onSend = onSend
-            )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (attachedImages.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(attachedImages) { image ->
+                        ImageAttachmentView(image = image, onRemove = { onRemoveImage(image) })
+                    }
+                }
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp, top = if (attachedImages.isNotEmpty()) 0.dp else 12.dp),
+                verticalAlignment = if (useVerticalActions) Alignment.Bottom else Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { pickMedia.launch("image/*") }) {
+                    Icon(Icons.Default.Image, contentDescription = "Attach Image", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.weight(1f).onGloballyPositioned { textFieldHeightPx = it.size.height },
+                    placeholder = { Text("Type a message...") },
+                    maxLines = 4,
+                    enabled = true
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                ChatInputActions(
+                    isBusy = isBusy,
+                    isRecording = isRecording,
+                    isTranscribing = isTranscribing,
+                    isSpeechConfigured = isSpeechConfigured,
+                    useVerticalActions = useVerticalActions,
+                    canSend = (text.isNotBlank() || attachedImages.isNotEmpty()) && !isTranscribing,
+                    onAbort = onAbort,
+                    onToggleRecording = onToggleRecording,
+                    onSend = onSend
+                )
+            }
         }
     }
 }
