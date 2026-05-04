@@ -344,9 +344,10 @@ private fun TextPart(
                 modifier = innerModifier
             )
         } else {
+            val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
             SelectionContainer {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                    Markdown(content = text, typography = markdownTypographyCompact(), modifier = innerModifier, imageTransformer = DataUriImageTransformer)
+                    Markdown(content = normalizedText, typography = markdownTypographyCompact(), modifier = innerModifier, imageTransformer = DataUriImageTransformer)
                 }
             }
         }
@@ -361,15 +362,16 @@ private fun ResolvedMarkdownText(
     modifier: Modifier = Modifier
 ) {
     var resolvedText by remember(text, workspaceDirectory) { mutableStateOf<String?>(null) }
+    val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
 
-    LaunchedEffect(text, workspaceDirectory, repository) {
+    LaunchedEffect(normalizedText, workspaceDirectory, repository) {
         resolvedText = null
         resolvedText = MarkdownImageResolver.resolveImages(
-            text = text,
+            text = normalizedText,
             workspaceDirectory = workspaceDirectory,
             fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
         )
-        val finalText = resolvedText ?: text
+        val finalText = resolvedText ?: normalizedText
         val httpsUrls = """!\[[^\]]*\]\((https?://[^)]+)\)""".toRegex().findAll(finalText).map { it.groupValues[1] }.toList().distinct()
         for (url in httpsUrls) {
             HttpImageHolder.prefetch(url)
@@ -379,7 +381,7 @@ private fun ResolvedMarkdownText(
     SelectionContainer {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             Markdown(
-                content = resolvedText ?: text,
+                content = resolvedText ?: normalizedText,
                 typography = markdownTypographyCompact(),
                 modifier = modifier,
                 imageTransformer = DataUriImageTransformer
@@ -427,10 +429,11 @@ private fun ReasoningCard(
                 }
             }
             if ((expanded || isStreaming) && text.isNotBlank()) {
+                val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
                 SelectionContainer {
                     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
                         Markdown(
-                            content = text,
+                            content = normalizedText,
                             typography = markdownTypographyCompact(),
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             imageTransformer = DataUriImageTransformer

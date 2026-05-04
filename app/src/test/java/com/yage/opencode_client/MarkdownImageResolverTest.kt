@@ -9,6 +9,43 @@ import org.junit.Test
 
 class MarkdownImageResolverTest {
     @Test
+    fun `normalizeStandaloneImageBlocks separates image from caption`() {
+        val markdown = """
+            ![雍和宫入口](https://example.com/yonghe.jpg)
+            *图注文字*
+        """.trimIndent()
+
+        val normalized = MarkdownImageResolver.normalizeStandaloneImageBlocks(markdown)
+
+        assertEquals(
+            """
+                ![雍和宫入口](https://example.com/yonghe.jpg)
+
+                *图注文字*
+            """.trimIndent(),
+            normalized
+        )
+    }
+
+    @Test
+    fun `normalizeStandaloneImageBlocks leaves existing blank line`() {
+        val markdown = """
+            ![chart](assets/chart.png)
+
+            Caption
+        """.trimIndent()
+
+        assertEquals(markdown, MarkdownImageResolver.normalizeStandaloneImageBlocks(markdown))
+    }
+
+    @Test
+    fun `normalizeStandaloneImageBlocks keeps true inline image text unchanged`() {
+        val markdown = "Before ![inline](assets/icon.png) after"
+
+        assertEquals(markdown, MarkdownImageResolver.normalizeStandaloneImageBlocks(markdown))
+    }
+
+    @Test
     fun `normalizeImagePath resolves markdown relative path into workspace path`() {
         val resolved = MarkdownImageResolver.normalizeImagePath(
             rawUrl = "./output/screenshot.png",

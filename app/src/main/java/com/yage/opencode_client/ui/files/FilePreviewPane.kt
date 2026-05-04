@@ -114,19 +114,20 @@ private fun PreviewMarkdown(
     sessionDirectory: String?
 ) {
     var resolvedContent by remember(content, filePath) { mutableStateOf<String?>(null) }
+    val normalizedContent = remember(content) { MarkdownImageResolver.normalizeStandaloneImageBlocks(content) }
     val resolverMarkdownPath = remember(filePath, sessionDirectory) {
         resolveRelativePreviewPath(filePath, sessionDirectory)
     }
 
-    LaunchedEffect(content, resolverMarkdownPath, sessionDirectory, repository) {
+    LaunchedEffect(normalizedContent, resolverMarkdownPath, sessionDirectory, repository) {
         resolvedContent = null
         resolvedContent = MarkdownImageResolver.resolveImages(
-            text = content,
+            text = normalizedContent,
             markdownFilePath = resolverMarkdownPath,
             workspaceDirectory = sessionDirectory,
             fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
         )
-        val finalText = resolvedContent ?: content
+        val finalText = resolvedContent ?: normalizedContent
         val httpsUrls = """!\[[^\]]*\]\((https?://[^)]+)\)""".toRegex().findAll(finalText).map { it.groupValues[1] }.toList().distinct()
         for (url in httpsUrls) {
             HttpImageHolder.prefetch(url)
@@ -139,7 +140,7 @@ private fun PreviewMarkdown(
     ) {
         item {
             Markdown(
-                content = resolvedContent ?: content,
+                content = resolvedContent ?: normalizedContent,
                 typography = markdownTypographyCompact(),
                 modifier = Modifier.fillMaxWidth(),
                 imageTransformer = DataUriImageTransformer
