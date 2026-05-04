@@ -3,6 +3,7 @@
 ## 2026-05-03
 
 - 模型预设里的 GLM 选项从 `GLM-5-turbo` / `glm-5-turbo` 更新为 `GLM-5.1` / `glm-5.1`，对齐 iOS 客户端。
+- 修复 Markdown 图片后紧跟 caption 时的渲染问题：`MarkdownImageResolver.normalizeStandaloneImageBlocks()` 会在渲染前把单独一行图片与下一行非空文本分开，避免 renderer 把图片当成 paragraph 内 inline image，导致图片尺寸异常。File Preview、Chat 消息和 Reasoning 卡片渲染前统一应用该 normalizer，并新增 3 个单元测试覆盖 caption、已有空行和真正 inline image 三种情况。验证：`./gradlew testDebugUnitTest` 通过。
 
 ## 2026-05-02
 
