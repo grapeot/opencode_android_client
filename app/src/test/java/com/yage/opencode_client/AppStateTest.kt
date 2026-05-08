@@ -27,7 +27,7 @@ class AppStateTest {
         assertFalse(state.isLoadingMessages)
         assertTrue(state.agents.isEmpty())
         assertEquals("build", state.selectedAgentName)
-        assertEquals(1, state.selectedModelIndex)
+        assertEquals(2, state.selectedModelIndex)
         assertNull(state.providers)
         assertTrue(state.pendingPermissions.isEmpty())
         assertEquals("", state.inputText)
