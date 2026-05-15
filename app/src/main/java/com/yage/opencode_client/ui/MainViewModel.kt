@@ -259,7 +259,7 @@ class MainViewModel @Inject constructor(
 
     private var sseJob: Job? = null
     private var pollJob: Job? = null
-    private var lastHealthCheckTime = 0L
+    private var connectionTestJob: Job? = null
 
     init {
         loadSettings()
@@ -368,10 +368,8 @@ class MainViewModel @Inject constructor(
     }
 
     fun testConnection() {
-        val now = System.currentTimeMillis()
-        if (now - lastHealthCheckTime < 30_000) return
-        lastHealthCheckTime = now
-        launchConnectionTest(viewModelScope, repository, _state) {
+        connectionTestJob?.cancel()
+        connectionTestJob = launchConnectionTest(viewModelScope, repository, _state) {
             loadInitialData()
             startSSE()
             startBusyPolling()
