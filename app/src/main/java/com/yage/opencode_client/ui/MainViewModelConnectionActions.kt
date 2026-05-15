@@ -4,6 +4,7 @@ import com.yage.opencode_client.data.audio.AIBuildersAudioClient
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -49,8 +50,8 @@ internal fun launchConnectionTest(
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
     onHealthyConnection: () -> Unit
-) {
-    scope.launch {
+): Job {
+    return scope.launch {
         state.update { it.copy(isConnecting = true, error = null) }
         repository.checkHealth()
             .onSuccess { health ->

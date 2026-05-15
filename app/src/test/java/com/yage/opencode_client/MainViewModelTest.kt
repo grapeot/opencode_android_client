@@ -991,7 +991,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `testConnection skips second health check within cooldown`() = runTest {
+    fun `testConnection cancels previous test and starts a new one`() = runTest {
         coEvery { repository.checkHealth() } returns Result.success(HealthResponse(healthy = false, version = "1.0"))
 
         val viewModel = createViewModel()
