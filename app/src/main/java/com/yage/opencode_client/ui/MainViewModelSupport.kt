@@ -1,6 +1,8 @@
 package com.yage.opencode_client.ui
 
 import android.util.Log
+import com.yage.opencode_client.data.audio.SpeechFailureKind
+import com.yage.opencode_client.data.audio.SpeechTranscriptionException
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.QuestionRequest
 import com.yage.opencode_client.data.model.SSEEvent
@@ -46,6 +48,28 @@ internal fun aiBuilderSignature(baseURL: String, token: String): String {
 internal fun errorMessageOrFallback(throwable: Throwable?, fallback: String): String {
     val message = throwable?.message?.trim().orEmpty()
     return if (message.isEmpty()) fallback else message
+}
+
+internal fun speechLogStage(throwable: Throwable?, fallback: String): String {
+    return (throwable as? SpeechTranscriptionException)?.stage ?: fallback
+}
+
+internal fun speechErrorMessage(throwable: Throwable?, fallback: String): String {
+    val stage = speechLogStage(throwable, "speech.unknown")
+    val detail = errorMessageOrFallback(throwable, fallback)
+    val prefix = when ((throwable as? SpeechTranscriptionException)?.kind ?: SpeechFailureKind.UNKNOWN) {
+        SpeechFailureKind.LOCAL_AUDIO -> "Local audio processing failed"
+        SpeechFailureKind.CLIENT -> "Client-side speech handling failed"
+        SpeechFailureKind.CONFIG -> "Speech recognition configuration failed"
+        SpeechFailureKind.NETWORK -> "Network upload or connection failed"
+        SpeechFailureKind.SERVER -> "Server transcription failed"
+        SpeechFailureKind.UNKNOWN -> fallback
+    }
+    return if (prefix == fallback) {
+        detail
+    } else {
+        "$prefix ($stage): $detail"
+    }
 }
 
 internal fun parseSessionCreatedEvent(event: SSEEvent): SessionCreatedEvent? {
