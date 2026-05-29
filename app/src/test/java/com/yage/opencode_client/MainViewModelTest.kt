@@ -1,7 +1,6 @@
 package com.yage.opencode_client
 
 import android.util.Log
-import com.yage.opencode_client.data.audio.AudioRecorderManager
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
@@ -18,6 +17,8 @@ import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.ModelPresets
 import com.yage.opencode_client.util.SettingsManager
 import com.yage.opencode_client.util.ThemeMode
+import com.yage.voiceflowkit.VoiceFlowClient
+import com.yage.voiceflowkit.VoiceFlowMicrophone
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -53,7 +54,8 @@ class MainViewModelTest {
 
     private lateinit var repository: OpenCodeRepository
     private lateinit var settingsManager: SettingsManager
-    private lateinit var audioRecorderManager: AudioRecorderManager
+    private lateinit var voiceFlowClient: VoiceFlowClient
+    private lateinit var microphone: VoiceFlowMicrophone
 
     @Before
     fun setUp() {
@@ -65,7 +67,8 @@ class MainViewModelTest {
 
         repository = mockk(relaxed = true)
         settingsManager = mockk(relaxed = true)
-        audioRecorderManager = mockk(relaxed = true)
+        voiceFlowClient = mockk(relaxed = true)
+        microphone = mockk(relaxed = true)
 
         every { settingsManager.serverUrl } returns "http://server.test"
         every { settingsManager.username } returns null
@@ -109,7 +112,7 @@ class MainViewModelTest {
     }
 
     private fun createViewModel(): MainViewModel {
-        return MainViewModel(repository, settingsManager, audioRecorderManager)
+        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone)
     }
 
     private fun updateState(viewModel: MainViewModel, transform: (AppState) -> AppState) {
@@ -485,7 +488,6 @@ class MainViewModelTest {
     @Test
     fun `toggleRecording handles missing realtime session when stopping recording`() = runTest {
         every { settingsManager.aiBuilderToken } returns "token"
-        every { audioRecorderManager.stopRealtimeCapture() } just runs
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(isRecording = true, aiBuilderConnectionOK = true, inputText = "draft") }
 

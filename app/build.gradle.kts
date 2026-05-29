@@ -76,6 +76,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.security.crypto)
     
+    // VoiceFlowKit: realtime speech transcription pipeline, consumed remotely from
+    // grapeot/voiceflow-android via JitPack (com.github.<user>:<repo>:<tag>).
+    implementation("com.github.grapeot:voiceflow-android:0.1.0")
+
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.okhttp.sse)

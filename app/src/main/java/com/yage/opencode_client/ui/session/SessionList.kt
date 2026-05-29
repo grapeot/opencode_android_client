@@ -249,11 +249,12 @@ fun SessionList(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .testTag("session_list")
         ) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("session_list")
             ) {
             itemsIndexed(visibleRows, key = { _, (node, _) -> node.session.id }) { index, (node, depth) ->
                 val session = node.session

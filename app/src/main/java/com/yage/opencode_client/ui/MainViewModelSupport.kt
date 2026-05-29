@@ -36,6 +36,21 @@ internal data class MessagePartDeltaEvent(
     val delta: String?
 )
 
+/**
+ * Strip surrounding/hidden whitespace (including zero-width and BOM) from a bearer
+ * token. Previously lived on `AIBuildersAudioClient`; kept here as a UI-layer helper
+ * after the audio pipeline moved into the VoiceFlowKit library.
+ */
+internal fun sanitizeBearerToken(rawToken: String): String {
+    return rawToken
+        .trim()
+        .filterNot { ch ->
+            ch.isWhitespace() ||
+                Character.getType(ch) == Character.FORMAT.toInt() ||
+                ch == '﻿'
+        }
+}
+
 internal fun aiBuilderSignature(baseURL: String, token: String): String {
     val input = "$baseURL|$token"
     return MessageDigest.getInstance("SHA-256")

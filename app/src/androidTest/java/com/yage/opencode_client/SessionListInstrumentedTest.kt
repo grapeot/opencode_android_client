@@ -102,7 +102,12 @@ class SessionListInstrumentedTest {
         }
 
         composeRule.onNodeWithText("My Session").assertIsDisplayed()
-        composeRule.onNodeWithText("minutes ago").assertIsDisplayed()
+        // SessionList renders the relative time via DateUtils with
+        // FORMAT_ABBREV_RELATIVE, which produces an abbreviated form like
+        // "5 min. ago" — not the spelled-out "minutes ago". Match the
+        // abbreviated token (substring) so the assertion reflects what the
+        // component actually renders.
+        composeRule.onNode(hasText("min", substring = true)).assertIsDisplayed()
     }
 
     @Test

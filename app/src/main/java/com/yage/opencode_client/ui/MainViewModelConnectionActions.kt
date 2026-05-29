@@ -1,8 +1,9 @@
 package com.yage.opencode_client.ui
 
-import com.yage.opencode_client.data.audio.AIBuildersAudioClient
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
+import com.yage.voiceflowkit.VoiceFlowClient
+import com.yage.voiceflowkit.VoiceFlowConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -37,7 +38,7 @@ internal fun applySavedSettings(
     val savedSignature = settingsManager.aiBuilderLastOKSignature
     val currentSignature = aiBuilderSignature(
         settingsManager.aiBuilderBaseURL.trim(),
-        AIBuildersAudioClient.sanitizeBearerToken(settingsManager.aiBuilderToken)
+        sanitizeBearerToken(settingsManager.aiBuilderToken)
     )
     if (savedSignature != null && savedSignature == currentSignature) {
         state.update { it.copy(aiBuilderConnectionOK = true) }
@@ -80,11 +81,12 @@ internal fun launchConnectionTest(
 internal fun launchAIBuilderConnectionTest(
     scope: CoroutineScope,
     settingsManager: SettingsManager,
+    voiceFlowClient: VoiceFlowClient,
     state: MutableStateFlow<AppState>
 ) {
     scope.launch {
         state.update { it.copy(isTestingAIBuilderConnection = true, aiBuilderConnectionError = null) }
-        val token = AIBuildersAudioClient.sanitizeBearerToken(settingsManager.aiBuilderToken)
+        val token = sanitizeBearerToken(settingsManager.aiBuilderToken)
         if (token.isEmpty()) {
             state.update {
                 it.copy(
@@ -97,7 +99,15 @@ internal fun launchAIBuilderConnectionTest(
         }
 
         val baseURL = settingsManager.aiBuilderBaseURL.trim()
-        AIBuildersAudioClient.testConnection(baseURL, token)
+        // Refresh the library config with the current endpoint before probing so the
+        // reachability check hits the same backend the realtime session will use.
+        voiceFlowClient.updateConfig(
+            VoiceFlowConfig(
+                endpoint = baseURL.ifEmpty { VoiceFlowConfig.DEFAULT_ENDPOINT },
+                tokenProvider = { token },
+            )
+        )
+        runCatching { voiceFlowClient.testConnection() }
             .onSuccess {
                 val signature = aiBuilderSignature(baseURL, token)
                 settingsManager.aiBuilderLastOKSignature = signature

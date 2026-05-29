@@ -2,7 +2,8 @@ package com.yage.opencode_client
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.yage.opencode_client.data.audio.AIBuildersAudioClient
+import com.yage.voiceflowkit.VoiceFlowClient
+import com.yage.voiceflowkit.VoiceFlowConfig
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -27,15 +28,27 @@ class AIBuildersIntegrationTest {
         )
     }
 
+    private fun client(authToken: String): VoiceFlowClient =
+        VoiceFlowClient(
+            VoiceFlowConfig(
+                endpoint = baseURL,
+                tokenProvider = { authToken },
+            )
+        )
+
     @Test
     fun testConnectionSucceeds() = runBlocking {
-        val result = AIBuildersAudioClient.testConnection(baseURL, token)
-        assertTrue("testConnection should succeed: ${result.exceptionOrNull()?.message}", result.isSuccess)
+        // VoiceFlowClient.testConnection throws on failure; no throw == success.
+        val result = runCatching { client(token).testConnection() }
+        assertTrue(
+            "testConnection should succeed: ${result.exceptionOrNull()?.message}",
+            result.isSuccess
+        )
     }
 
     @Test
     fun testConnectionFailsWithBadToken() = runBlocking {
-        val result = AIBuildersAudioClient.testConnection(baseURL, "invalid-token-12345")
+        val result = runCatching { client("invalid-token-12345").testConnection() }
         assertTrue("testConnection should fail with bad token", result.isFailure)
     }
 }

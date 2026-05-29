@@ -1,107 +1,53 @@
 package com.yage.opencode_client.ui
 
 import android.util.Log
-import com.yage.opencode_client.data.audio.AIBuildersAudioClient
-import com.yage.opencode_client.data.audio.AudioRecorderManager
-import com.yage.opencode_client.data.audio.RealtimeSpeechStreamer
 import com.yage.opencode_client.util.SettingsManager
+import com.yage.voiceflowkit.VoiceFlowSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
 
 internal data class SpeechInputConfig(
     val token: String,
     val baseURL: String,
     val prompt: String,
-    val terminology: String
-)
+    val terminology: String,
+) {
+    /** Comma-separated terminology split into the VoiceFlowKit `terms` list. */
+    val terms: List<String>
+        get() = terminology
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+}
 
 internal fun currentSpeechInputConfig(settingsManager: SettingsManager): SpeechInputConfig {
     return SpeechInputConfig(
-        token = AIBuildersAudioClient.sanitizeBearerToken(settingsManager.aiBuilderToken),
+        token = sanitizeBearerToken(settingsManager.aiBuilderToken),
         baseURL = settingsManager.aiBuilderBaseURL.trim(),
         prompt = settingsManager.aiBuilderCustomPrompt.trim(),
-        terminology = settingsManager.aiBuilderTerminology.trim()
+        terminology = settingsManager.aiBuilderTerminology.trim(),
     )
 }
 
-internal fun launchSpeechTranscription(
-    scope: CoroutineScope,
-    state: MutableStateFlow<AppState>,
-    audioRecorderManager: AudioRecorderManager,
-    config: SpeechInputConfig,
-    recordingFile: File,
-    existingInput: String,
-    tag: String
-) {
-    scope.launch {
-        try {
-            Log.d(tag, "Converting recorded audio to PCM: ${recordingFile.absolutePath}")
-            val pcmData = audioRecorderManager.convertToPCM(recordingFile)
-            Log.d(tag, "Submitting audio for transcription: bytes=${pcmData.size}")
-            val result = AIBuildersAudioClient.transcribe(
-                baseURL = config.baseURL,
-                token = config.token,
-                pcmAudio = pcmData,
-                language = null,
-                prompt = config.prompt.ifEmpty { null },
-                terms = config.terminology.ifEmpty { null },
-                onPartialTranscript = { partial ->
-                    state.update { it.copy(inputText = mergedSpeechInput(existingInput, partial)) }
-                }
-            )
-
-            result.onSuccess { response ->
-                val cleaned = response.text.trim()
-                Log.d(tag, "Transcription success: chars=${cleaned.length}")
-                state.update {
-                    it.copy(
-                        inputText = mergedSpeechInput(existingInput, cleaned),
-                        isTranscribing = false
-                    )
-                }
-            }.onFailure { error ->
-                Log.e(tag, "Transcription failed", error)
-                state.update {
-                    it.copy(
-                        inputText = speechFailureInput(
-                            existingInput = existingInput,
-                            currentInput = it.inputText
-                        ),
-                        isTranscribing = false,
-                        speechError = errorMessageOrFallback(error, "Transcription failed")
-                    )
-                }
-            }
-        } catch (error: Exception) {
-            Log.e(tag, "Speech processing failed", error)
-            state.update {
-                it.copy(
-                    inputText = speechFailureInput(
-                        existingInput = existingInput,
-                        currentInput = it.inputText
-                    ),
-                    isTranscribing = false,
-                    speechError = errorMessageOrFallback(error, "Transcription failed")
-                )
-            }
-        }
-    }
-}
-
+/**
+ * Finalize a live VoiceFlowKit session: commit the audio, stream partial deltas into
+ * the input field, and write the final transcript. Mirrors the previous
+ * `RealtimeSpeechStreamer.commitAndStop` flow 1:1 — the library now owns recovery,
+ * cache replay, and finalize retry internally.
+ */
 internal fun launchRealtimeSpeechStop(
     scope: CoroutineScope,
     state: MutableStateFlow<AppState>,
-    streamer: RealtimeSpeechStreamer,
+    session: VoiceFlowSession,
     existingInput: String,
     tag: String,
-    onFinished: () -> Unit
+    onFinished: () -> Unit,
 ) {
     scope.launch {
         try {
-            val transcript = streamer.commitAndStop { partial ->
+            val transcript = session.commitAndStop { partial ->
                 state.update { it.copy(inputText = mergedSpeechInput(existingInput, partial)) }
             }
             val cleaned = transcript.trim()
@@ -109,23 +55,21 @@ internal fun launchRealtimeSpeechStop(
             state.update {
                 it.copy(
                     inputText = mergedSpeechInput(existingInput, cleaned),
-                    isTranscribing = false
+                    isTranscribing = false,
                 )
             }
-            streamer.cleanupCache()
         } catch (error: Exception) {
             Log.e(tag, "Realtime speech processing failed", error)
             state.update {
                 it.copy(
                     inputText = speechFailureInput(
                         existingInput = existingInput,
-                        currentInput = it.inputText
+                        currentInput = it.inputText,
                     ),
                     isTranscribing = false,
-                    speechError = errorMessageOrFallback(error, "Transcription failed")
+                    speechError = errorMessageOrFallback(error, "Transcription failed"),
                 )
             }
-            streamer.cleanupCache()
         } finally {
             onFinished()
         }
