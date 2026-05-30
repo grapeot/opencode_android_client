@@ -196,18 +196,9 @@ private fun MessageRow(
     val isUser = message.info.isUser
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-        // "OpenCode" header: not an avatar/icon, just a small accent title so it's
-        // obvious the AI is speaking (contrast with the user's blue left bar). The
-        // user side keeps its blue left color bar (rendered in TextPart) instead.
-        if (!isUser) {
-            Text(
-                text = "OpenCode",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp).testTag("assistant.header")
-            )
-        }
+        // No "OpenCode" speaker title — the user's blue left bar vs the
+        // assistant's container-less reply already make it clear who's speaking,
+        // so an extra blue label is redundant.
 
         var i = 0
         while (i < message.parts.size) {
