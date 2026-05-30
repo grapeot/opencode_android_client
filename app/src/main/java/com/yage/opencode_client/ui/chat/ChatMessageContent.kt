@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -49,7 +50,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -58,12 +58,10 @@ import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.data.repository.OpenCodeRepository
-import com.yage.opencode_client.ui.theme.ToolWritePatchBackgroundDark
 import com.yage.opencode_client.ui.theme.markdownTypographyCompact
 import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
-import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.flow.collect
 
 @Composable
@@ -322,17 +320,25 @@ private fun TextPart(
     val innerModifier = modifier.padding(12.dp)
     if (isUser) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+            shape = RoundedCornerShape(12.dp),
             modifier = modifier
         ) {
-            SelectionContainer {
-                Text(
-                    text = text,
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
                 )
+                SelectionContainer {
+                    Text(
+                        text = text,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
         }
     } else {
@@ -405,8 +411,9 @@ private fun ReasoningCard(
 
     Card(
         modifier = modifier.padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Column {
@@ -414,16 +421,26 @@ private fun ReasoningCard(
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Psychology,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(title ?: "Thinking", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    title ?: "Thinking",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 Spacer(modifier = Modifier.weight(1f))
                 if (!isStreaming) {
                     IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(24.dp)) {
                         Icon(
                             if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
                             contentDescription = if (expanded) "Collapse" else "Expand",
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -458,33 +475,48 @@ private fun ToolCard(
     val isRunning = status == "running"
     var expanded by remember { mutableStateOf(isRunning) }
     val firstFile = filePaths.firstOrNull()
-    val isWriteOrPatch = toolName == "write" || toolName == "patch" || toolName.contains("write")
-    val isDark = isSystemInDarkTheme()
-    val cardColor = if (isWriteOrPatch && isDark) ToolWritePatchBackgroundDark else MaterialTheme.colorScheme.surfaceContainerHighest
-    val contentColor = if (isWriteOrPatch && !isDark) MaterialTheme.colorScheme.primary else LocalContentColor.current
 
-    Card(modifier = modifier.padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cardColor)) {
-        CompositionLocalProvider(LocalContentColor provides contentColor) {
+    Card(
+        modifier = modifier.padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (isRunning) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(
+                            Icons.Default.Build,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = toolName.ifEmpty { reason ?: "tool" }, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = toolName.ifEmpty { reason ?: "tool" },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                     Spacer(modifier = Modifier.weight(1f))
                     if (firstFile != null) {
                         IconButton(onClick = { onFileClick(firstFile) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = "Show in Files", modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.OpenInNew,
+                                contentDescription = "Show in Files",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                     IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(24.dp)) {
                         Icon(
                             if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
                             contentDescription = if (expanded) "Collapse" else "Expand",
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -521,10 +553,16 @@ private fun ToolCard(
                                 text = path,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(onClick = { onFileClick(path) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = "Show in Files", modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.OpenInNew,
+                                    contentDescription = "Show in Files",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
@@ -540,17 +578,26 @@ private fun PatchCard(
     onFileClick: (String) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
-    val isDark = isSystemInDarkTheme()
-    val cardColor = if (isDark) ToolWritePatchBackgroundDark else MaterialTheme.colorScheme.surfaceContainerHighest
-    val contentColor = if (!isDark) MaterialTheme.colorScheme.primary else LocalContentColor.current
-
-    Card(modifier = modifier.padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cardColor)) {
-        CompositionLocalProvider(LocalContentColor provides contentColor) {
+    Card(
+        modifier = modifier.padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Patch", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "${filePaths.size} ${if (filePaths.size == 1) "file" else "files"} changed",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
                 Spacer(modifier = Modifier.size(8.dp))
                 filePaths.forEach { path ->
@@ -559,10 +606,16 @@ private fun PatchCard(
                             path,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(onClick = { onFileClick(path) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = "Show in Files", modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.OpenInNew,
+                                contentDescription = "Show in Files",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }

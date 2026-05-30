@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yage.opencode_client.ui.MainViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,6 +43,9 @@ fun SettingsScreen(
     var aiBuilderCustomPrompt by remember { mutableStateOf(savedAIBuilder.customPrompt) }
     var aiBuilderTerminology by remember { mutableStateOf(savedAIBuilder.terminology) }
     var showAIBuilderToken by remember { mutableStateOf(false) }
+    // Independent "Settings saved" notice for the Speech section, so it shows in
+    // its own section rather than reusing the server section's testResult.
+    var aiBuilderSaveMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.isConnecting) {
         if (!state.isConnecting && isTesting) {
@@ -54,6 +58,22 @@ fun SettingsScreen(
                     state.error ?: "Connection failed"
                 }
             )
+        }
+    }
+
+    // Auto-dismiss the transient "Settings saved" notices after a short delay,
+    // for both the server and speech sections. Connection results (success/error)
+    // stay until the user changes a field.
+    LaunchedEffect(testResult) {
+        if (testResult?.message == "Settings saved") {
+            delay(2000)
+            testResult = null
+        }
+    }
+    LaunchedEffect(aiBuilderSaveMessage) {
+        if (aiBuilderSaveMessage != null) {
+            delay(2000)
+            aiBuilderSaveMessage = null
         }
     }
 
@@ -132,12 +152,26 @@ fun SettingsScreen(
                 aiBuilderCustomPrompt = aiBuilderCustomPrompt,
                 aiBuilderTerminology = aiBuilderTerminology,
                 showAIBuilderToken = showAIBuilderToken,
-                onBaseUrlChange = { aiBuilderBaseURL = it },
-                onTokenChange = { aiBuilderToken = it },
-                onPromptChange = { aiBuilderCustomPrompt = it },
-                onTerminologyChange = { aiBuilderTerminology = it },
+                saveMessage = aiBuilderSaveMessage,
+                onBaseUrlChange = {
+                    aiBuilderBaseURL = it
+                    aiBuilderSaveMessage = null
+                },
+                onTokenChange = {
+                    aiBuilderToken = it
+                    aiBuilderSaveMessage = null
+                },
+                onPromptChange = {
+                    aiBuilderCustomPrompt = it
+                    aiBuilderSaveMessage = null
+                },
+                onTerminologyChange = {
+                    aiBuilderTerminology = it
+                    aiBuilderSaveMessage = null
+                },
                 onToggleTokenVisibility = { showAIBuilderToken = !showAIBuilderToken },
                 onTestConnection = {
+                    aiBuilderSaveMessage = null
                     viewModel.saveAIBuilderSettings(
                         buildAIBuilderSettings(
                             baseURL = aiBuilderBaseURL,
@@ -157,6 +191,7 @@ fun SettingsScreen(
                             terminology = aiBuilderTerminology
                         )
                     )
+                    aiBuilderSaveMessage = "Settings saved"
                 }
             )
 

@@ -1,57 +1,71 @@
 package com.yage.opencode_client.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+
+// Quiet Tech color schemes. Dynamic color (Material You) is deliberately NOT
+// used: the brand is a fixed electric blue across every device, matching the
+// iOS client which also pins its own primary blue rather than following the
+// system accent.
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = BrandPrimary,
+    onPrimary = OnSurfaceDark,
+    secondary = BrandPrimary,
+    tertiary = BrandGold,
+    background = BgDark,
+    onBackground = OnSurfaceDark,
+    surface = BgDark,
+    onSurface = OnSurfaceDark,
+    surfaceVariant = SurfaceDark,
+    onSurfaceVariant = OnSurfaceVariantDark,
+    // Material maps several "container" surfaces; point the ones the UI reads
+    // (cards, composer) at our neutral surface so nothing falls back to purple.
+    surfaceContainer = SurfaceDark,
+    surfaceContainerLow = ComposerDark,
+    surfaceContainerLowest = BgDark,
+    surfaceContainerHigh = SurfaceDark,
+    surfaceContainerHighest = SurfaceDark,
+    primaryContainer = BrandPrimary,
+    onPrimaryContainer = OnSurfaceDark,
+    outline = OutlineDark,
+    outlineVariant = OutlineDark
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    primary = BrandPrimaryLight,
+    onPrimary = BgLight,
+    secondary = BrandPrimaryLight,
+    tertiary = BrandGold,
+    background = BgLight,
+    onBackground = OnSurfaceLight,
+    surface = BgLight,
+    onSurface = OnSurfaceLight,
+    surfaceVariant = SurfaceLight,
+    onSurfaceVariant = OnSurfaceVariantLight,
+    surfaceContainer = SurfaceLight,
+    surfaceContainerLow = ComposerLight,
+    surfaceContainerLowest = BgLight,
+    surfaceContainerHigh = SurfaceLight,
+    surfaceContainerHighest = SurfaceLight,
+    primaryContainer = BrandPrimaryLight,
+    onPrimaryContainer = BgLight,
+    outline = OutlineLight,
+    outlineVariant = OutlineLight
 )
 
 @Composable
 fun OpenCodeTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
+    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

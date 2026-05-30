@@ -22,13 +22,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -155,6 +158,7 @@ internal fun ServerConnectionSection(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppearanceSection(
     themeMode: ThemeMode,
@@ -162,25 +166,35 @@ internal fun AppearanceSection(
 ) {
     SectionHeader(title = "Appearance")
 
-    ThemeMode.values().forEach { mode ->
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
+    val modes = ThemeMode.values()
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        modes.forEachIndexed { index, mode ->
+            SegmentedButton(
                 selected = themeMode == mode,
-                onClick = { onThemeSelected(mode) }
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                when (mode) {
-                    ThemeMode.LIGHT -> "Light"
-                    ThemeMode.DARK -> "Dark"
-                    ThemeMode.SYSTEM -> "System default"
-                }
-            )
+                onClick = { onThemeSelected(mode) },
+                shape = SegmentedButtonDefaults.itemShape(
+                    index = index,
+                    count = modes.size
+                ),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = MaterialTheme.colorScheme.primary,
+                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                    activeBorderColor = MaterialTheme.colorScheme.primary,
+                    inactiveContainerColor = MaterialTheme.colorScheme.surface,
+                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    inactiveBorderColor = MaterialTheme.colorScheme.outline
+                )
+            ) {
+                Text(
+                    when (mode) {
+                        ThemeMode.LIGHT -> "Light"
+                        ThemeMode.DARK -> "Dark"
+                        ThemeMode.SYSTEM -> "System"
+                    }
+                )
+            }
         }
     }
 }
@@ -193,6 +207,7 @@ internal fun SpeechRecognitionSection(
     aiBuilderCustomPrompt: String,
     aiBuilderTerminology: String,
     showAIBuilderToken: Boolean,
+    saveMessage: String? = null,
     onBaseUrlChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
     onPromptChange: (String) -> Unit,
@@ -282,7 +297,11 @@ internal fun SpeechRecognitionSection(
         }
     }
 
-    if (state.aiBuilderConnectionOK || state.aiBuilderConnectionError != null) {
+    // A "Settings saved" notice takes precedence (it's the most recent action and
+    // auto-dismisses); otherwise show the latest connection test result.
+    if (saveMessage != null) {
+        ResultCard(result = TestResult(success = true, message = saveMessage))
+    } else if (state.aiBuilderConnectionOK || state.aiBuilderConnectionError != null) {
         ResultCard(
             result = TestResult(
                 success = state.aiBuilderConnectionOK,

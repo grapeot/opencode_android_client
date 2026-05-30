@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,7 @@ import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
+import com.yage.opencode_client.ui.theme.BrandGold
 
 internal data class ChatTopBarState(
     val sessions: List<Session>,
@@ -137,7 +139,8 @@ internal fun ChatTopBar(
                             Icon(
                                 Icons.Default.List,
                                 contentDescription = "Sessions",
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Spacer(modifier = Modifier.width(4.dp))
@@ -150,7 +153,8 @@ internal fun ChatTopBar(
                         Icon(
                             Icons.Default.Edit,
                             contentDescription = "Rename session",
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -163,7 +167,8 @@ internal fun ChatTopBar(
                             Icon(
                                 Icons.Default.Add,
                                 contentDescription = "New session",
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -179,7 +184,11 @@ internal fun ChatTopBar(
                         Surface(
                             onClick = { showModelMenu = true },
                             shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.primary
+                            color = Color.Transparent,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                            )
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -189,14 +198,14 @@ internal fun ChatTopBar(
                                     text = state.availableModels.getOrNull(state.selectedModelIndex)?.shortName ?: "Model",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    color = MaterialTheme.colorScheme.primary,
                                     maxLines = 1
                                 )
                                 Icon(
                                     Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Switch LLM model",
                                     modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimary
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -307,7 +316,8 @@ internal fun ChatTopBar(
                             Icon(
                                 Icons.Default.Settings,
                                 contentDescription = "Settings",
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -398,7 +408,7 @@ internal fun ChatTopBar(
 internal fun ContextUsageRing(usage: AppState.ContextUsage) {
     val ringColor = when {
         usage.percentage >= 0.9f -> MaterialTheme.colorScheme.error
-        usage.percentage >= 0.7f -> Color(0xFFFFA726)
+        usage.percentage >= 0.7f -> BrandGold
         else -> MaterialTheme.colorScheme.primary
     }
 
@@ -409,7 +419,7 @@ internal fun ContextUsageRing(usage: AppState.ContextUsage) {
         CircularProgressIndicator(
             progress = { 1f },
             modifier = Modifier.size(ChatUiTuning.contextRingInnerSize),
-            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
             strokeWidth = 3.dp
         )
         CircularProgressIndicator(

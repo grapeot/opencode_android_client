@@ -7,6 +7,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.anchoredDraggable
@@ -25,6 +26,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
@@ -83,21 +86,13 @@ private fun SwipeRevealRow(
     isCollapsed: Boolean = true,
     onToggleCollapse: (() -> Unit)? = null
 ) {
-    val selectedBackgroundColor = lerp(
-        MaterialTheme.colorScheme.surface,
-        MaterialTheme.colorScheme.primaryContainer,
-        0.30f
-    )
     val swipeRevealBackgroundColor = lerp(
         MaterialTheme.colorScheme.surface,
         MaterialTheme.colorScheme.primaryContainer,
         0.28f
     )
-    val rowBackgroundColor = when {
-        isSelected -> selectedBackgroundColor
-        altBg -> MaterialTheme.colorScheme.surfaceContainerLow
-        else -> MaterialTheme.colorScheme.surface
-    }
+    val accentColor = MaterialTheme.colorScheme.primary
+    val selectionShape = RoundedCornerShape(12.dp)
     val titleColor = if (isBusy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
 
     Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
@@ -125,7 +120,22 @@ private fun SwipeRevealRow(
                     enabled = enabled,
                     reverseDirection = true
                 )
-                .background(rowBackgroundColor)
+                .background(MaterialTheme.colorScheme.surface)
+                .then(
+                    if (isSelected) {
+                        Modifier
+                            .clip(selectionShape)
+                            .background(accentColor.copy(alpha = 0.08f))
+                            .drawBehind {
+                                drawRect(
+                                    color = accentColor,
+                                    size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)
+                                )
+                            }
+                    } else {
+                        Modifier
+                    }
+                )
                 .clickable(onClick = onSelect)
                 .padding(start = (12 + depth * 24).dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -141,7 +151,9 @@ private fun SwipeRevealRow(
                         modifier = Modifier.size(16.dp)
                     )
                 }
-            } else if (hasChildren) {
+            } else {
+                // Reserve the chevron's width even when there's no chevron, so
+                // rows with and without children align their titles identically.
                 Spacer(modifier = Modifier.size(24.dp))
             }
             Column(
