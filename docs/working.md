@@ -1,5 +1,16 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-05-30
+
+- 工具卡渲染重做，同步 iOS 最新工具卡/对话/文件夹/todo 设计。全部落在 `ui/chat/ChatMessageContent.kt`，分类逻辑已先期抽到 `ui/chat/ToolCardClassifier.kt`（纯逻辑、可单测，对应 iOS `ToolCardClassifier.swift`）。
+- 说话区分：assistant 回复顶部加 "OpenCode" 文字标题（`primary` 电蓝 + SemiBold，`testTag("assistant.header")`）；用户蓝左竖条、assistant 末尾模型小字保持不动。
+- 工具卡两形态：`MessageRow` 攒连续 tool/patch run 后用 `ToolCardClassifier.split(run)` 拆成 fileParts + otherParts。fileParts 渲染成新 `FileCard`（doc 图标 + monospace basename + chevron），用 `chunked(2)+Row` 手动两列网格（Android 不能在 LazyColumn 嵌 LazyVGrid）；otherParts 合并成 `ToolCallsRow`（"N tool calls" 可展开行，展开复用 `ToolCard` 主体）。
+- 文件夹卡：`FileCard` 在 `isDirectoryRead` 时切 folder 图标，点击弹 `ModalBottomSheet` 列出 `parseDirectoryEntries(toolOutput)` 的 entries（子目录排前），不调 API。
+- todo 抽离：新增 `TodoListInline` composable（对齐 iOS `TodoListInlineView`）；`todowrite` 展开时只显示 todo、隐藏 input/output。
+- testTag 覆盖关键元素：`assistant.header`、`toolcard.file.<basename>`、`toolcard.folder.<basename>`、`toolcard.folder.sheet.<basename>`、`toolcard.folder.entry.<name>`、`toolcard.toolcalls`。本仓库暂无 iOS 那套 UITEST fixture 机制，UI 靠 testTag + 代码审查，分类逻辑由块 A 的 `ToolCardClassifierTest` 单测覆盖。
+- 文档：`docs/design.md` 增补「工具卡渲染重做（已实现 — 对齐 iOS）」一节（说话区分、2 列文件卡、N tool calls 合并行、文件夹卡、todo 抽离四类改动）。
+- 验证：`./gradlew :app:assembleDebug` 与 `:app:testDebugUnitTest` 均通过（仅余既有 `OpenInNew` AutoMirrored 弃用 warning，非本次引入）。未做 git，未上真机。
+
 ## 2026-05-25
 
 - 对齐 iOS 最终 realtime speech 方案：Android 语音输入从停止后 M4A 解码上传，改为点击麦克风后立即使用 `AudioRecord` 采集 PCM16 mono 24kHz chunk。

@@ -98,3 +98,50 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 ## 与 iOS 的对齐说明
 
 本 spec 的每条视觉决策都来自 iOS client 已落地并验证的实现（见 iOS `docs/design.md`）。Android 侧通过 Material 3 `ColorScheme` 映射达到同样的观感；平台手段不同，视觉语言一致。两个 app 因此有家族感。
+
+---
+
+# 工具卡渲染重做（已实现 — 对齐 iOS）
+
+这一节就在上面 Quiet Tech 语言内，不引入任何新视觉质感——保持现有干净图标、细分隔、中性卡身。要改的是**信息组织方式**，不是皮肤：谁在说话怎么区分、工具结果怎么呈现。落点全在 `ui/chat/ChatMessageContent.kt`，分类逻辑抽到 `ui/chat/ToolCardClassifier.kt`（纯逻辑、可单测）。
+
+之前的现状问题：(a) AI 回复和用户消息区分太弱，看不出谁在说话；(b) 所有工具一律走"通用展开式 ToolCard + 扳手图标"，patch 单独做成导航卡，工具卡彼此没有语义区分，读起来是一堆同质灰卡。
+
+四个具体改动：(1) 说话区分；(2) 文件操作渲染成 2 列文件卡网格；(3) 其余工具合并成可展开的 "N tool calls" 行；(4) 文件夹读取展开成内容卡。
+
+## 一、说话区分（不要头像，但要标题）
+
+- **用户消息**：保留现有的**蓝色左竖条**（3dp accent 左 bar + `primary.copy(alpha=0.10f)` muted 底，12dp 圆角），由 `TextPart(isUser=true)` 渲染。
+- **OpenCode 回复**：**不要头像/圆形图标**，在回复顶部加一个 **"OpenCode" 文字标题**（`labelMedium` + SemiBold + `primary` 电蓝，`testTag("assistant.header")`），让人一眼知道这是 AI 在说话；并**保留现有的"模型小字"**——每条 assistant 回复末尾那一行 `providerId/modelId` 的小灰字，位置和现状一样、不动。回复正文无容器、无左 bar。
+- iOS 在 user 和 assistant 两侧末尾都放模型小字；Android 现状只 assistant 末尾有——本次保持 assistant 有即可，user 那行（fork 菜单已带 model 小字）不动。
+
+核心是用**不同的 visual style**（标题 + 模型小字 vs 蓝左竖条）把两边分开，不靠头像。
+
+## 二、文件卡（2 列网格）
+
+**文件操作工具**渲染成新的 `FileCard` composable：左侧 `Icons.Default.Description`（doc 图标，电蓝 accent），中间该文件的 monospace basename，右侧 `ChevronRight`。一个工具一张卡，按 **2 列网格**排列——Android **不能**在 `LazyColumn` 里嵌 `LazyVGrid`，所以沿用现有的 `chunked(2) + Row` 手动两列手法（与 iPhone 2-up 一致）。
+
+判断依据封装在 `ToolCardClassifier.isFileOperation(part)`：patch（**Android 特有要求**：须带可导航文件路径 `filePathsForNavigationFiltered.isNotEmpty()`，否则无路径的 patch 会掉出网格落到无处），或 `tool ∈ {apply_patch, edit_file, write_file, read_file}`（含 `patch/edit/write/read` 历史别名，lowercase 前缀匹配）。
+
+basename/displayPath 优先级照 iOS：`metadata.path` → `state.pathFromInput` → `filePathsForNavigation.first`，取最后一段。点击复用现有打开文件逻辑（`onFileClick`）。`testTag("toolcard.file.<basename>")`。
+
+## 三、合并成 "N tool calls"
+
+**其余所有工具（bash / 测试 / grep / glob / list / webfetch / task …）合并成一行** `ToolCallsRow`，文案 **"N tool calls"**（N = `otherParts.size`）——刻意抽象、不暴露具体类型。点 chevron 展开后逐条复用 `ToolCard` 的展开主体（tool 名 + reason + input/output）。收起是默认态。`testTag("toolcard.toolcalls")`。
+
+一个 run 产出"文件卡网格（若有 fileParts）+ 一个 N tool calls 行（若有 otherParts）"。分类用 `ToolCardClassifier.split(run) -> Pair<fileParts, otherParts>`。排列是**版式优先的近时间序**：相邻文件卡聚成网格，相邻非文件工具聚成一行，不分组、不加分区标题。
+
+## 四、文件夹卡
+
+当 `ToolCardClassifier.isDirectoryRead(part)`（服务端在 read 输出里嵌 `<type>directory</type>`）时，`FileCard` 切换成 folder 分支：图标改 `Icons.Default.Folder`（电蓝），点击弹一个 `ModalBottomSheet` 列出 `parseDirectoryEntries(part.toolOutput)` 的 entries（子目录排前，folder/file 图标区分）。**不调 API**——output 里已有 `<entries>…</entries>` 内容，直接解析渲染（在文件预览里打开文件夹本来就打不开）。`testTag("toolcard.folder.<basename>"、"toolcard.folder.entry.<name>"、"toolcard.folder.sheet.<basename>")`。
+
+## todo 抽离
+
+`todowrite` 工具展开时**只显示 todo、隐藏 input/output**（对齐 iOS）。todo 渲染抽成独立的 `TodoListInline` composable（对齐 iOS `TodoListInlineView`），其余工具若也带 todos 同样复用它。
+
+## 不做 / 边界
+
+- 不引入像素风、不分组、不加分区标题。
+- 文件卡保留 doc 图标、2 列网格；AI 回复不要头像但要 "OpenCode" 标题；模型小字保留不动。
+- 模型选择器不动，不要右上角用户头像。
+- 两形态都用现有 Quiet Tech 中性卡身（`surfaceVariant` 底、无描边、12dp 圆角），彩色只落在图标和 chevron 上——全屏至多一处蓝。
