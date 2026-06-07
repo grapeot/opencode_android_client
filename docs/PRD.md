@@ -34,6 +34,18 @@ OpenCode Android Client 是 OpenCode AI 编程助手的原生 Android 客户端�
 - 查看 Markdown diff、代码变更
 - 必要时中止或排队新指令
 
+### 产品设计哲学（详细论述见 iOS PRD §1–§2）
+
+Android Client 与 iOS Client 共享同一套产品范式，核心概念是 **Steer（统领）**：这个 App 不只是一个"手机上看 AI 进度"的监控器，而是一个**决策审查与方向控制终端**。AI 负责执行和探索，人类负责判断和方向。交互围绕三个载体展开：
+
+- **Markdown 作为 AI-人类交互窗口**：AI 通过 Markdown 向人类汇报分析报告、设计文档、部署结果（可嵌入截图）。因此 Markdown 渲染质量优先级远高于代码语法高亮——用户审的是 AI 的思考和产物，不是代码美学。
+- **文件卡片预览**：快速确认 AI 的改动。Files Tab 是兜底入口，主工作流中用户通过 Chat 窗口的 tool/patch 卡片直接跳转预览。
+- **语音输入**：让方向控制尽可能低摩擦，避免手机打字。
+
+重度用户每次打开 App 都不是"瞄一眼"级别的操作，而是重量级交互：阅读 Markdown 报告、语音对话、在 Session 间频繁切换追踪多线任务。产品优化的优先级排序为：Markdown 渲染质量 > 语音输入流畅度 > Session 辨识度 > 文件树功能。
+
+一个已知的工程缺口：当 AI 停下来等待人类决策时（question / permission），用户目前收不到任何通知，两端空转。解决方案不在 UX 而是在平台层——需要 Android 的前台服务 / 通知机制来主动触达用户。这同样是 Steer 闭环的关键增强项。
+
 ### 目标用户
 
 - 使用 OpenCode 进行日常开发的程序员
@@ -135,6 +147,8 @@ iOS 在每条 assistant 消息旁显示回复该消息的模型名称（如 `ant
 **实现参考**：`ChatTopBar.kt` 的 `DropdownMenu` + `IconButton` 模式可直接复用。
 
 #### Files Tab
+
+> Files Tab 是兜底入口——主工作流中文件访问通过 Chat 窗口的 tool/patch 卡片跳转完成。
 
 - **文件树**：递归展示工作目录，支持 git 状态颜色标记 ✅
 - **文件预览**：文本文件等宽字体显示，Markdown 文件渲染 ✅
