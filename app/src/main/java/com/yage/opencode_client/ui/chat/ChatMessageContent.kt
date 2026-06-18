@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,6 +78,11 @@ import com.yage.opencode_client.ui.theme.markdownTypographyCompact
 import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.flow.collect
 
 @Composable
@@ -203,6 +209,7 @@ private fun MessageRow(
     onEditFromMessage: (String) -> Unit
 ) {
     val isUser = message.info.isUser
+    val context = LocalContext.current
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         // No "OpenCode" speaker title — the user's blue left bar vs the
@@ -317,6 +324,26 @@ private fun MessageRow(
                             }
                         )
                     } else {
+                        DropdownMenuItem(
+                            text = { Text("Copy message") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMenu = false
+                                val textToCopy = message.parts
+                                    .filter { it.isText }
+                                    .mapNotNull { it.text }
+                                    .joinToString("\n")
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("message", textToCopy)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Fork from here") },
                             leadingIcon = {
