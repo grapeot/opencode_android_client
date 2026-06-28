@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -133,7 +134,7 @@ private fun SwipeRevealRow(
         positionalThreshold = { total: Float -> total * 0.5f }
     )
 
-    Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
+    Box(modifier = Modifier.fillMaxWidth().wrapContentHeight().clipToBounds()) {
         SwipeActionBackground(
             isArchived = isArchived,
             backgroundColor = swipeRevealBackgroundColor,
