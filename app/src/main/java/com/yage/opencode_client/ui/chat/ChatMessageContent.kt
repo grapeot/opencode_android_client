@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
@@ -54,6 +56,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -90,6 +93,7 @@ internal fun ChatMessageList(
     messageLimit: Int,
     repository: OpenCodeRepository,
     workspaceDirectory: String?,
+    completedTurnActivities: List<TurnActivity>,
     onLoadMore: () -> Unit,
     onFileClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit,
@@ -137,6 +141,37 @@ internal fun ChatMessageList(
         if (shouldLoadMore.value) onLoadMore()
     }
 
+    // Interleave completed turn activity rows after each assistant turn, matching iOS.
+    val interleaved = remember(messages, completedTurnActivities) {
+        if (completedTurnActivities.isEmpty()) {
+            messages.map { ChatItem.Message(it) }
+        } else {
+            val activityByUserId = completedTurnActivities.associateBy { it.id }
+            val items = mutableListOf<ChatItem>()
+            var currentUserId: String? = null
+            var seenAssistantForCurrentUser = false
+            for (message in messages) {
+                if (message.info.isUser) {
+                    if (currentUserId != null && seenAssistantForCurrentUser) {
+                        activityByUserId[currentUserId]?.let { items.add(ChatItem.Activity(it)) }
+                    }
+                    currentUserId = message.info.id
+                    seenAssistantForCurrentUser = false
+                    items.add(ChatItem.Message(message))
+                } else if (message.info.isAssistant) {
+                    if (currentUserId != null) seenAssistantForCurrentUser = true
+                    items.add(ChatItem.Message(message))
+                } else {
+                    items.add(ChatItem.Message(message))
+                }
+            }
+            if (currentUserId != null && seenAssistantForCurrentUser) {
+                activityByUserId[currentUserId]?.let { items.add(ChatItem.Activity(it)) }
+            }
+            items
+        }
+    }
+
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -156,16 +191,24 @@ internal fun ChatMessageList(
                 }
             }
         }
-        items(messages.reversed(), key = { it.info.id }) { message ->
-            MessageRow(
-                message = message,
-                streamingPartTexts = streamingPartTexts,
-                repository = repository,
-                workspaceDirectory = workspaceDirectory,
-                onFileClick = onFileClick,
-                onForkFromMessage = onForkFromMessage,
-                onEditFromMessage = onEditFromMessage
-            )
+        items(interleaved.reversed(), key = {
+            when (it) {
+                is ChatItem.Message -> it.message.info.id
+                is ChatItem.Activity -> "activity-${it.activity.id}"
+            }
+        }) { item ->
+            when (item) {
+                is ChatItem.Message -> MessageRow(
+                    message = item.message,
+                    streamingPartTexts = streamingPartTexts,
+                    repository = repository,
+                    workspaceDirectory = workspaceDirectory,
+                    onFileClick = onFileClick,
+                    onForkFromMessage = onForkFromMessage,
+                    onEditFromMessage = onEditFromMessage
+                )
+                is ChatItem.Activity -> TurnActivityRow(activity = item.activity)
+            }
         }
         if (isLoading && messages.size >= messageLimit) {
             item(key = "load-more-indicator") {
@@ -1023,5 +1066,51 @@ private fun PatchCard(
                 }
             }
         }
+    }
+}
+
+private sealed class ChatItem {
+    data class Message(val message: MessageWithParts) : ChatItem()
+    data class Activity(val activity: TurnActivity) : ChatItem()
+}
+
+@Composable
+private fun TurnActivityRow(activity: TurnActivity) {
+    val nowMillis by produceState(initialValue = System.currentTimeMillis(), activity.isRunning, activity.endedAtMillis) {
+        if (activity.isRunning) {
+            while (true) {
+                value = System.currentTimeMillis()
+                kotlinx.coroutines.delay(1_000)
+            }
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (activity.isRunning) Icons.Default.Schedule else Icons.Default.CheckCircle,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = activity.text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = activity.elapsedString(nowMillis),
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
     }
 }

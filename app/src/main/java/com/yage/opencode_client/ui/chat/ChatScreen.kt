@@ -77,6 +77,7 @@ fun ChatScreen(
             state.visibleMessages,
         state.streamingReasoningPart,
         state.streamingPartTexts,
+        state.sessionSendTimestamps,
     ) {
         currentSessionActivity(
             sessionId = state.currentSessionId,
@@ -84,6 +85,21 @@ fun ChatScreen(
             messages = state.visibleMessages,
             streamingReasoningPart = state.streamingReasoningPart,
             streamingPartTexts = state.streamingPartTexts,
+            sendTimestamp = state.currentSessionId?.let { state.sessionSendTimestamps[it] },
+        )
+    }
+    val completedTurnActivities = remember(
+        state.currentSessionId,
+        state.visibleMessages,
+        currentSessionIsRunning,
+        currentActivity?.text,
+    ) {
+        turnActivitiesForSession(
+            sessionId = state.currentSessionId,
+            messages = state.visibleMessages,
+            isSessionBusy = currentSessionIsRunning,
+            activityText = currentActivity?.text ?: "",
+            mode = TurnActivityMode.CompletedOnly,
         )
     }
 
@@ -151,6 +167,7 @@ fun ChatScreen(
                     messageLimit = state.messageLimit,
                     repository = viewModel.repository,
                     workspaceDirectory = state.currentSession?.directory,
+                    completedTurnActivities = completedTurnActivities,
                     onLoadMore = { viewModel.loadMoreMessages() },
                     onFileClick = onNavigateToFiles,
                     onForkFromMessage = { messageId ->
@@ -261,9 +278,11 @@ private fun currentSessionActivity(
     messages: List<MessageWithParts>,
     streamingReasoningPart: Part?,
     streamingPartTexts: Map<String, String>,
+    sendTimestamp: Long? = null,
 ): CurrentSessionActivity? {
     val sid = sessionId ?: return null
-    val startedAt = messages.lastOrNull { it.info.sessionId == sid && it.info.isUser }?.info?.time?.created
+    val userStartedAt = messages.lastOrNull { it.info.sessionId == sid && it.info.isUser }?.info?.time?.created
+    val startedAt = userStartedAt ?: sendTimestamp
     val text = bestSessionActivityText(sid, status, messages, streamingReasoningPart, streamingPartTexts)
     return CurrentSessionActivity(text = text, startedAtMillis = startedAt)
 }
