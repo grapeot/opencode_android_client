@@ -78,6 +78,7 @@ data class AppState(
     val isTestingAIBuilderConnection: Boolean = false,
     val sessionTodos: Map<String, List<TodoItem>> = emptyMap(),
     val sendingSessionIds: Set<String> = emptySet(),
+    val sessionSendTimestamps: Map<String, Long> = emptyMap(),
     val imageAttachments: List<ComposerImageAttachment> = emptyList(),
     val hostProfiles: List<HostProfile> = emptyList(),
     val currentHostProfileId: String? = null,
@@ -854,7 +855,12 @@ class MainViewModel @Inject constructor(
         val attachments = _state.value.imageAttachments
         if (text.isEmpty() && attachments.isEmpty()) return
 
-        _state.update { state -> state.copy(sendingSessionIds = state.sendingSessionIds + sessionId) }
+        _state.update { state ->
+            state.copy(
+                sendingSessionIds = state.sendingSessionIds + sessionId,
+                sessionSendTimestamps = state.sessionSendTimestamps + (sessionId to System.currentTimeMillis())
+            )
+        }
 
         val agent = _state.value.selectedAgentName
         val model = buildSelectedModel(_state.value)
@@ -877,7 +883,12 @@ class MainViewModel @Inject constructor(
                     _state.update { it.copy(imageAttachments = emptyList()) }
                 },
                 onComplete = {
-                    _state.update { state -> state.copy(sendingSessionIds = state.sendingSessionIds - sessionId) }
+                    _state.update { state ->
+                        state.copy(
+                            sendingSessionIds = state.sendingSessionIds - sessionId,
+                            sessionSendTimestamps = state.sessionSendTimestamps - sessionId
+                        )
+                    }
                 }
             )
         }

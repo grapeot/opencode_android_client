@@ -77,6 +77,7 @@ fun ChatScreen(
             state.visibleMessages,
         state.streamingReasoningPart,
         state.streamingPartTexts,
+        state.sessionSendTimestamps,
     ) {
         currentSessionActivity(
             sessionId = state.currentSessionId,
@@ -84,6 +85,7 @@ fun ChatScreen(
             messages = state.visibleMessages,
             streamingReasoningPart = state.streamingReasoningPart,
             streamingPartTexts = state.streamingPartTexts,
+            sendTimestamp = state.currentSessionId?.let { state.sessionSendTimestamps[it] },
         )
     }
     val completedTurnActivities = remember(
@@ -276,9 +278,11 @@ private fun currentSessionActivity(
     messages: List<MessageWithParts>,
     streamingReasoningPart: Part?,
     streamingPartTexts: Map<String, String>,
+    sendTimestamp: Long? = null,
 ): CurrentSessionActivity? {
     val sid = sessionId ?: return null
-    val startedAt = messages.lastOrNull { it.info.sessionId == sid && it.info.isUser }?.info?.time?.created
+    val userStartedAt = messages.lastOrNull { it.info.sessionId == sid && it.info.isUser }?.info?.time?.created
+    val startedAt = userStartedAt ?: sendTimestamp
     val text = bestSessionActivityText(sid, status, messages, streamingReasoningPart, streamingPartTexts)
     return CurrentSessionActivity(text = text, startedAtMillis = startedAt)
 }
