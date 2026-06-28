@@ -86,6 +86,20 @@ fun ChatScreen(
             streamingPartTexts = state.streamingPartTexts,
         )
     }
+    val completedTurnActivities = remember(
+        state.currentSessionId,
+        state.visibleMessages,
+        currentSessionIsRunning,
+        currentActivity?.text,
+    ) {
+        turnActivitiesForSession(
+            sessionId = state.currentSessionId,
+            messages = state.visibleMessages,
+            isSessionBusy = currentSessionIsRunning,
+            activityText = currentActivity?.text ?: "",
+            mode = TurnActivityMode.CompletedOnly,
+        )
+    }
 
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -151,6 +165,7 @@ fun ChatScreen(
                     messageLimit = state.messageLimit,
                     repository = viewModel.repository,
                     workspaceDirectory = state.currentSession?.directory,
+                    completedTurnActivities = completedTurnActivities,
                     onLoadMore = { viewModel.loadMoreMessages() },
                     onFileClick = onNavigateToFiles,
                     onForkFromMessage = { messageId ->

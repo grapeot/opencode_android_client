@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
@@ -316,7 +317,7 @@ fun SessionList(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(stringResource(R.string.sessions_title), style = MaterialTheme.typography.titleSmall)
@@ -326,7 +327,14 @@ fun SessionList(
                 } else if (hasMoreSessions) {
                     TextButton(onClick = onLoadMoreSessions) { Text(stringResource(R.string.sessions_load_older)) }
                 }
-                TextButton(onClick = onCreateSession) { Text(stringResource(R.string.sessions_new)) }
+                IconButton(onClick = onCreateSession, modifier = Modifier.size(44.dp)) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = stringResource(R.string.sessions_new),
+                        modifier = Modifier.size(28.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
                 if (onOpenSettings != null) {
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.nav_settings))
