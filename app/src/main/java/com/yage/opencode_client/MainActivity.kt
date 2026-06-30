@@ -166,7 +166,7 @@ class MainActivity : AppCompatActivity() {
         // NFC), NOT from the Composable body, so UI recomposition does NOT
         // re-trigger it.
         val now = System.currentTimeMillis()
-        if (now - lastNfcTriggerTimeMs < 300_000L) {
+        if (now - lastNfcTriggerTimeMs < 30_000L) {
             android.util.Log.d("MainActivity", "NFC debounce: ignored (${now - lastNfcTriggerTimeMs}ms since last)")
             return
         }
