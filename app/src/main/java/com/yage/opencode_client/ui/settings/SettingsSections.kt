@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -32,10 +33,16 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -420,6 +427,97 @@ internal fun SpeechRecognitionSection(
                 }
             )
         )
+    }
+}
+
+@Composable
+internal fun NfcExperimentalSection(
+    enabled: Boolean,
+    prompt: String,
+    autoSend: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onPromptChange: (String) -> Unit,
+    onAutoSendChange: (Boolean) -> Unit,
+    onWriteToTag: () -> Unit
+) {
+    SectionHeader(title = stringResource(R.string.nfc_section_title))
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Nfc, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.nfc_quick_prompt), style = MaterialTheme.typography.bodyLarge)
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    modifier = Modifier.testTag("nfc.enabled_switch")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = onPromptChange,
+                label = { Text(stringResource(R.string.nfc_prompt_label)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("nfc.prompt_input"),
+                minLines = 3,
+                maxLines = 8,
+                enabled = enabled
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            val promptBytes = prompt.toByteArray(Charsets.UTF_8).size
+            Text(
+                text = "$promptBytes / ${com.yage.opencode_client.util.SettingsManager.NFC_PROMPT_MAX_BYTES} bytes",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (promptBytes > com.yage.opencode_client.util.SettingsManager.NFC_PROMPT_MAX_BYTES) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.testTag("nfc.byte_counter")
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stringResource(R.string.nfc_auto_send), style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = autoSend,
+                    onCheckedChange = onAutoSendChange,
+                    modifier = Modifier.testTag("nfc.auto_send_switch"),
+                    enabled = enabled
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = onWriteToTag,
+                enabled = enabled && prompt.isNotBlank() && promptBytes <= com.yage.opencode_client.util.SettingsManager.NFC_PROMPT_MAX_BYTES,
+                modifier = Modifier.testTag("nfc.write_button")
+            ) {
+                Text(stringResource(R.string.nfc_write_to_tag))
+            }
+        }
     }
 }
 

@@ -78,6 +78,7 @@ Android Client 提供以下核心能力：
 | 权限审批 | 手动批准或拒绝 AI 请求的 shell 操作等权限 |
 | Markdown Web Preview | Files 中用 WebView 渲染 HTML-in-Markdown、CSS 卡片、inline SVG 和复杂 visual 报告 |
 | Host Profiles + SSH Tunnel | 管理多个连接配置，支持 Direct 与 SSH Tunnel transport，并与 iOS import/export JSON 对齐 |
+| NFC Quick Prompt (Experimental) | 将常用 prompt 写入 NFC tag，亮屏靠近即可自动拉起 App 新建 session 并发送 |
 
 ---
 
@@ -330,6 +331,7 @@ Android 端需要补齐 iOS 已有的连接能力，而不是继续把 Tailscale
 | 6 | 语音输入 realtime recovery：立即 PCM capture、本地 cache、session attach/replay、断线恢复 | ✅ 完成 (2026-05-25) |
 | 7 | Markdown Web Preview、Native/Web/Source 三态、平板 Sessions pane 折叠 | 🔲 规划中 (2026-06-14) |
 | 8 | Host Profiles、SSH Tunnel、iOS import/export parity、分阶段连接诊断 | 🔲 规划中 (2026-06-21) |
+| NFC | NFC Quick Prompt（Experimental）：写入 prompt 到 NTAG215、亮屏靠近自动拉起 App 新建 session 并发送 | ✅ 完成 (2026-06-30) |
 | Future | Session 变更文件列表、后台通知/Foreground Service | 🔲 未来可选 |
 
 ---

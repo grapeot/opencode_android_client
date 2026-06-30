@@ -168,7 +168,8 @@ internal fun launchLoadMessages(
     state: MutableStateFlow<AppState>,
     sessionId: String,
     resetLimit: Boolean = true,
-    settingsManager: SettingsManager? = null
+    settingsManager: SettingsManager? = null,
+    onMessagesLoaded: (() -> Unit)? = null
 ) {
     scope.launch {
         state.update { it.copy(isLoadingMessages = true) }
@@ -194,6 +195,7 @@ internal fun launchLoadMessages(
                             selectedAgentName = agentName ?: it.selectedAgentName
                         )
                     }
+                    onMessagesLoaded?.invoke()
                 } else {
                     state.update { it.copy(isLoadingMessages = false) }
                 }

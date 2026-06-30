@@ -180,4 +180,15 @@
     <string name="question_submit">Submit</string>
     <string name="question_of">%1$d of %2$d</string>
     <string name="question_empty">(No questions)</string>
+    <string name="nfc_section_title">Experimental</string>
+    <string name="nfc_quick_prompt">NFC Quick Prompt</string>
+    <string name="nfc_prompt_label">Prompt to write to NFC tag</string>
+    <string name="nfc_auto_send">Auto-send (skip confirmation)</string>
+    <string name="nfc_write_to_tag">Write to Tag</string>
+    <string name="nfc_prompt_empty">Prompt is empty. Enter a prompt before writing.</string>
+    <string name="nfc_prompt_too_large">URI is %1$d bytes, exceeds tag capacity %2$d bytes.</string>
+    <string name="nfc_not_available">NFC is not available on this device.</string>
+    <string name="nfc_hold_tag">Hold a tag near the back of your phone…</string>
+    <string name="nfc_write_success">Tag written successfully.</string>
+    <string name="nfc_write_failed">Failed to write tag.</string>
 </resources>
