@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui.settings
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -41,9 +42,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yage.opencode_client.R
+import com.yage.opencode_client.NfcWriterActivity
 import com.yage.opencode_client.data.model.BasicAuthConfig
 import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
@@ -59,6 +62,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedAIBuilder = remember(viewModel) { viewModel.getAIBuilderSettings() }
+    val context = LocalContext.current
 
     var showHostProfiles by remember { mutableStateOf(false) }
     var isTesting by remember { mutableStateOf(false) }
@@ -71,6 +75,9 @@ fun SettingsScreen(
     // Independent "Settings saved" notice for the Speech section, so it shows in
     // its own section rather than reusing the server section's testResult.
     var aiBuilderSaveMessage by remember { mutableStateOf<String?>(null) }
+    var nfcEnabled by remember { mutableStateOf(viewModel.getNfcEnabled()) }
+    var nfcPrompt by remember { mutableStateOf(viewModel.getNfcPrompt()) }
+    var nfcAutoSend by remember { mutableStateOf(viewModel.getNfcAutoSend()) }
 
     LaunchedEffect(state.isConnecting) {
         if (!state.isConnecting && isTesting) {
@@ -201,6 +208,31 @@ fun SettingsScreen(
                         )
                     )
                     aiBuilderSaveMessage = "Settings saved"
+                }
+            )
+
+            SettingsSectionDivider()
+
+            NfcExperimentalSection(
+                enabled = nfcEnabled,
+                prompt = nfcPrompt,
+                autoSend = nfcAutoSend,
+                onEnabledChange = {
+                    nfcEnabled = it
+                    viewModel.saveNfcEnabled(it)
+                },
+                onPromptChange = {
+                    nfcPrompt = it
+                    viewModel.saveNfcPrompt(it)
+                },
+                onAutoSendChange = {
+                    nfcAutoSend = it
+                    viewModel.saveNfcAutoSend(it)
+                },
+                onWriteToTag = {
+                    viewModel.saveNfcPrompt(nfcPrompt)
+                    viewModel.saveNfcAutoSend(nfcAutoSend)
+                    context.startActivity(Intent(context, NfcWriterActivity::class.java))
                 }
             )
 

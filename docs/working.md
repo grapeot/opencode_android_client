@@ -1,5 +1,60 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-06-30 — NFC Quick Prompt (Experimental)
+
+### 目标
+
+在 Settings → Experimental 增加 NFC Quick Prompt 功能。用户输入一段 prompt，写入 NTAG215 NFC tag；亮屏靠近 tag 时系统自动拉起 App，新建 session，填入 prompt，按写入时的设置决定直接发送或等待确认。
+
+### 分支
+
+`feat/nfc-quick-prompt`（基于 `master`）
+
+### 设计文档
+
+- `docs/NFC_Quick_Prompt_PRD.md` — 产品需求
+- `docs/NFC_Quick_Prompt_RFC.md` — 技术方案
+- `docs/nfc_feature_plan.md` — 初版规划（已被 PRD/RFC 取代）
+
+### 实现
+
+1. **AndroidManifest.xml**：新增 `NFC` permission + `<uses-feature nfc required=false>`；`MainActivity` 加 `launchMode="singleTop"` 和 `NDEF_DISCOVERED` intent-filter（scheme=`opencode`、host=`prompt`）；注册 `NfcWriterActivity`（透明、noHistory）。
+2. **SettingsManager.kt**：新增 3 个属性 `nfcEnabled`/`nfcPrompt`/`nfcAutoSend`（EncryptedSharedPreferences），新增常量 `NFC_PROMPT_MAX_BYTES=480` 和 `NFC_TAG_MAX_BYTES=504`。
+3. **AppState**：新增 `pendingNfcAction: NfcPendingAction?` 字段和 `NfcPendingAction(prompt, autoSend)` data class。
+4. **MainViewModel.kt**：
+   - `handleNfcPrompt(prompt, autoSend)`：检查 nfcEnabled → 设置 pendingNfcAction → createSession()
+   - `consumePendingNfcAction()`：setInputText(prompt) + 条件 sendMessage()，清空 pending
+   - `loadMessages` 的 `onMessagesLoaded` 回调触发 consumePendingNfcAction
+   - NFC settings 读写辅助方法
+5. **MainViewModelSessionActions.kt**：`launchLoadMessages` 新增可选 `onMessagesLoaded` 回调，在成功路径末尾调用。
+6. **MainActivity.kt**：override `onNewIntent`，解析 `NDEF_DISCOVERED` URI（`opencode://prompt?a=&p=`），调用 `viewModel.handleNfcPrompt`。
+7. **NfcWriterActivity.kt**（新增）：透明 Activity，读 SettingsManager 生成 URI，foreground dispatch 写入 NDEF。字节校验 > 504 拒绝。
+8. **SettingsSections.kt**：新增 `NfcExperimentalSection` Compose section（启用开关、多行 prompt 输入、字节计数、autoSend 开关、Write to tag 按钮）。
+9. **SettingsScreen.kt**：在 SpeechRecognitionSection 之后、AboutSection 之前挂载 `NfcExperimentalSection`。
+10. **strings.xml / values-zh**：NFC 相关文案（中英文）。
+11. **themes.xml**：新增 `Theme.Transparent` 主题供 NfcWriterActivity 使用。
+
+### 测试
+
+`NfcQuickPromptTest.kt`（6 个测试）：
+- `handleNfcPrompt ignored when NFC disabled` — nfcEnabled=false 时静默忽略
+- `handleNfcPrompt sets pending action when enabled` — 启用后设置 pending action 并创建 session
+- `consumePendingNfcAction fills input and sends when autoSend` — autoSend=true 时 sendMessage 被调用
+- `consumePendingNfcAction fills input only when autoSend false` — autoSend=false 时只填入不发送
+- `consumePendingNfcAction no-op when no pending action` — 无 pending 时不做任何操作
+- `NfcPendingAction holds prompt and autoSend` — data class 字段验证
+
+### 验证
+
+- `./gradlew testDebugUnitTest` — 全部通过（含新增 6 个 NFC 测试 + 既有全部测试）
+- `./gradlew assembleDebug` — BUILD SUCCESSFUL
+
+### 当前状态
+
+- 代码实现完成，测试通过，等待真机测试。
+- 未做 git commit / push / PR（等用户确认）。
+- 真机测试步骤见 PR 描述。
+
 ## 2026-06-14 — Phase 7：Markdown Web Preview + Tablet Sessions 折叠
 
 ### Compact 后恢复步骤

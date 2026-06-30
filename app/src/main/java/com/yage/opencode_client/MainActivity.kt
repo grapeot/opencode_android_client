@@ -1,5 +1,8 @@
 package com.yage.opencode_client
 
+import android.content.Intent
+import android.net.Uri
+import android.nfc.NfcAdapter
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -90,11 +93,14 @@ private const val EXTRA_TEST_PASSWORD = "test_password"
 @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var mainViewModel: MainViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val viewModel: MainViewModel = hiltViewModel()
+            mainViewModel = hiltViewModel()
             val lifecycleOwner = LocalLifecycleOwner.current
             LaunchedEffect(lifecycleOwner) {
                 // Debug-only credential injection: if the launch Intent carries
@@ -105,7 +111,7 @@ class MainActivity : AppCompatActivity() {
                 if (BuildConfig.DEBUG) {
                     val testUrl = intent?.getStringExtra(EXTRA_TEST_SERVER_URL)
                     if (!testUrl.isNullOrEmpty()) {
-                        viewModel.configureServer(
+                        mainViewModel.configureServer(
                             url = testUrl,
                             username = intent?.getStringExtra(EXTRA_TEST_USERNAME),
                             password = intent?.getStringExtra(EXTRA_TEST_PASSWORD)
@@ -113,10 +119,11 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                    viewModel.testConnection()
+                    mainViewModel.testConnection()
                 }
             }
-            val state by viewModel.state.collectAsStateWithLifecycle()
+            handleNfcIntent(intent)
+            val state by mainViewModel.state.collectAsStateWithLifecycle()
             LaunchedEffect(state.languageMode) {
                 AppLocaleController.apply(state.languageMode)
             }
@@ -130,11 +137,28 @@ class MainActivity : AppCompatActivity() {
 
             OpenCodeTheme(darkTheme = darkTheme) {
                 if (isTablet) {
-                    TabletLayout(viewModel = viewModel)
+                    TabletLayout(viewModel = mainViewModel)
                 } else {
-                    PhoneLayout(viewModel = viewModel)
+                    PhoneLayout(viewModel = mainViewModel)
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNfcIntent(intent)
+    }
+
+    private fun handleNfcIntent(intent: Intent?) {
+        if (intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return
+        val data: Uri = intent.data ?: return
+        if (data.scheme != "opencode" || data.host != "prompt") return
+        val prompt = data.getQueryParameter("p") ?: return
+        val autoSend = data.getQueryParameter("a") == "1"
+        if (::mainViewModel.isInitialized) {
+            mainViewModel.handleNfcPrompt(prompt, autoSend)
         }
     }
 }

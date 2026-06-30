@@ -113,6 +113,18 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getLong(KEY_AI_BUILDER_LAST_OK_TESTED, 0L)
         set(value) = encryptedPrefs.edit().putLong(KEY_AI_BUILDER_LAST_OK_TESTED, value).apply()
 
+    var nfcEnabled: Boolean
+        get() = encryptedPrefs.getBoolean(KEY_NFC_ENABLED, false)
+        set(value) = encryptedPrefs.edit().putBoolean(KEY_NFC_ENABLED, value).apply()
+
+    var nfcPrompt: String
+        get() = encryptedPrefs.getString(KEY_NFC_PROMPT, "") ?: ""
+        set(value) = encryptedPrefs.edit().putString(KEY_NFC_PROMPT, value).apply()
+
+    var nfcAutoSend: Boolean
+        get() = encryptedPrefs.getBoolean(KEY_NFC_AUTO_SEND, false)
+        set(value) = encryptedPrefs.edit().putBoolean(KEY_NFC_AUTO_SEND, value).apply()
+
     fun getDraftText(sessionId: String): String {
         val json = encryptedPrefs.getString(KEY_SESSION_DRAFTS, null) ?: return ""
         return try {
@@ -183,6 +195,8 @@ class SettingsManager @Inject constructor(
         const val DEFAULT_AI_BUILDER_CUSTOM_PROMPT = "All file and directory names should use snake_case (lowercase with underscores)."
         const val DEFAULT_AI_BUILDER_TERMINOLOGY = "adhoc_jobs, life_consulting, survey_sessions, thought_review"
         const val LEGACY_BASIC_AUTH_PASSWORD_ID = "legacy_basic_auth_password"
+        const val NFC_PROMPT_MAX_BYTES = 480
+        const val NFC_TAG_MAX_BYTES = 504
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_USERNAME = "username"
         private const val KEY_PASSWORD = "password"
@@ -205,6 +219,9 @@ class SettingsManager @Inject constructor(
         private const val KEY_SESSION_DRAFTS = "session_drafts"
         private const val KEY_SESSION_MODELS = "session_models"
         private const val KEY_SESSION_AGENTS = "session_agents"
+        private const val KEY_NFC_ENABLED = "nfc_enabled"
+        private const val KEY_NFC_PROMPT = "nfc_prompt"
+        private const val KEY_NFC_AUTO_SEND = "nfc_auto_send"
 
         private fun basicAuthPasswordKey(passwordId: String): String = "basic_auth_password_$passwordId"
     }

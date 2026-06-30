@@ -82,8 +82,10 @@ data class AppState(
     val imageAttachments: List<ComposerImageAttachment> = emptyList(),
     val hostProfiles: List<HostProfile> = emptyList(),
     val currentHostProfileId: String? = null,
-    val connectionPhase: String? = null
+    val connectionPhase: String? = null,
+    val pendingNfcAction: NfcPendingAction? = null
 ) {
+    data class NfcPendingAction(val prompt: String, val autoSend: Boolean)
     data class ModelOption(val displayName: String, val providerId: String, val modelId: String) {
         val shortName: String
             get() = when {
@@ -793,7 +795,11 @@ class MainViewModel @Inject constructor(
     }
 
     fun loadMessages(sessionId: String, resetLimit: Boolean = true) {
-        launchLoadMessages(viewModelScope, repository, _state, sessionId, resetLimit, settingsManager)
+        launchLoadMessages(viewModelScope, repository, _state, sessionId, resetLimit, settingsManager) {
+            if (_state.value.pendingNfcAction != null) {
+                consumePendingNfcAction()
+            }
+        }
     }
 
     /** Load messages with delay when triggered by SSE/send (server may need time to persist). */
@@ -926,6 +932,28 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(inputText = text) }
         _state.value.currentSessionId?.let { settingsManager.setDraftText(it, text) }
     }
+
+    fun handleNfcPrompt(prompt: String, autoSend: Boolean) {
+        if (!settingsManager.nfcEnabled) return
+        _state.update { it.copy(pendingNfcAction = AppState.NfcPendingAction(prompt, autoSend)) }
+        createSession()
+    }
+
+    fun consumePendingNfcAction() {
+        val action = _state.value.pendingNfcAction ?: return
+        _state.update { it.copy(pendingNfcAction = null) }
+        setInputText(action.prompt)
+        if (action.autoSend) {
+            sendMessage()
+        }
+    }
+
+    fun getNfcEnabled(): Boolean = settingsManager.nfcEnabled
+    fun saveNfcEnabled(value: Boolean) { settingsManager.nfcEnabled = value }
+    fun getNfcPrompt(): String = settingsManager.nfcPrompt
+    fun saveNfcPrompt(value: String) { settingsManager.nfcPrompt = value }
+    fun getNfcAutoSend(): Boolean = settingsManager.nfcAutoSend
+    fun saveNfcAutoSend(value: Boolean) { settingsManager.nfcAutoSend = value }
 
     fun addImageAttachments(attachments: List<ComposerImageAttachment>) {
         if (attachments.isEmpty()) return
