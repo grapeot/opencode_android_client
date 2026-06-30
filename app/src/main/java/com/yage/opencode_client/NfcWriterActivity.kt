@@ -1,5 +1,7 @@
 package com.yage.opencode_client
 
+import android.app.PendingIntent
+import android.content.Intent
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
@@ -30,30 +32,6 @@ class NfcWriterActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "NfcWriterActivity"
-    }
-
-    private val readerCallback = NfcAdapter.ReaderCallback { tag ->
-        Log.d(TAG, "ReaderCallback: tag detected, tech list=${tag.techList.toList()}")
-        if (writeInProgress) {
-            Log.d(TAG, "Write already in progress, ignoring")
-            return@ReaderCallback
-        }
-        val uri = pendingUri
-        if (uri == null) {
-            Log.w(TAG, "No pending URI, ignoring tag")
-            return@ReaderCallback
-        }
-        writeInProgress = true
-        CoroutineScope(Dispatchers.Main).launch {
-            val success = writeNdef(tag, uri)
-            Log.d(TAG, "writeNdef result: $success")
-            Toast.makeText(
-                this@NfcWriterActivity,
-                if (success) getString(R.string.nfc_write_success) else getString(R.string.nfc_write_failed),
-                Toast.LENGTH_SHORT
-            ).show()
-            finish()
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,8 +69,36 @@ class NfcWriterActivity : AppCompatActivity() {
         }
 
         pendingUri = uri
-        enableReaderMode()
         Toast.makeText(this, getString(R.string.nfc_hold_tag), Toast.LENGTH_LONG).show()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        enableForegroundDispatch()
+        Log.d(TAG, "ForegroundDispatch enabled")
+    }
+
+    override fun onPause() {
+        super.onPause()
+        nfcAdapter?.disableForegroundDispatch(this)
+        Log.d(TAG, "ForegroundDispatch disabled")
+    }
+
+    private fun enableForegroundDispatch() {
+        // Key fix: construct a NEW Intent targeting this activity with SINGLE_TOP,
+        // so the system routes the tag intent back to onNewIntent instead of
+        // creating a new instance or dropping it.
+        val tagIntent = Intent(this, NfcWriterActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            tagIntent,
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        // null filters + null techLists = catch ALL tag types in foreground,
+        // which suppresses the system's default "Empty Tag" handler.
+        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, null, null)
     }
 
     private fun buildUri(prompt: String, autoSend: Boolean): String {
@@ -100,16 +106,46 @@ class NfcWriterActivity : AppCompatActivity() {
         return "opencode://prompt?a=${if (autoSend) "1" else "0"}&p=$encodedPrompt"
     }
 
-    private fun enableReaderMode() {
-        // FLAG_READER_SKIP_NDEF_CHECK: don't let the system try to read NDEF first
-        // (prevents the "Empty tag" popup on blank tags)
-        val flags = NfcAdapter.FLAG_READER_NFC_A or
-                    NfcAdapter.FLAG_READER_NFC_B or
-                    NfcAdapter.FLAG_READER_NFC_F or
-                    NfcAdapter.FLAG_READER_NFC_V or
-                    NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
-        nfcAdapter?.enableReaderMode(this, readerCallback, flags, null)
-        Log.d(TAG, "ReaderMode enabled (SKIP_NDEF_CHECK)")
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d(TAG, "onNewIntent received, action=${intent.action}")
+
+        if (writeInProgress) {
+            Log.d(TAG, "Write already in progress, ignoring")
+            return
+        }
+
+        val tag: Tag? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
+        }
+
+        val uri = pendingUri
+        if (uri == null) {
+            Log.w(TAG, "No pending URI, ignoring")
+            return
+        }
+        if (tag == null) {
+            Log.e(TAG, "No Tag in intent extras")
+            Toast.makeText(this, getString(R.string.nfc_write_failed), Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+
+        Log.d(TAG, "Tag detected, tech list=${tag.techList.toList()}")
+        writeInProgress = true
+        CoroutineScope(Dispatchers.Main).launch {
+            val success = writeNdef(tag, uri)
+            Log.d(TAG, "writeNdef result: $success")
+            Toast.makeText(
+                this@NfcWriterActivity,
+                if (success) getString(R.string.nfc_write_success) else getString(R.string.nfc_write_failed),
+                Toast.LENGTH_SHORT
+            ).show()
+            finish()
+        }
     }
 
     private suspend fun writeNdef(tag: Tag, uri: String): Boolean = withContext(Dispatchers.IO) {
@@ -117,7 +153,6 @@ class NfcWriterActivity : AppCompatActivity() {
         val ndef = Ndef.get(tag)
         if (ndef == null) {
             Log.e(TAG, "Ndef.get(tag) returned null — tag is not NDEF-formatted")
-            // Could try NdefFormatable for blank tags, but NTAG215 should support Ndef
             return@withContext false
         }
         Log.d(TAG, "Ndef tag: maxSize=${ndef.maxSize}, isWritable=${ndef.isWritable}, type=${ndef.type}")
@@ -129,7 +164,6 @@ class NfcWriterActivity : AppCompatActivity() {
                 return@withContext false
             }
 
-            // If tag already has NDEF, check if it's writable
             if (!ndef.isWritable) {
                 Log.e(TAG, "Tag is read-only")
                 return@withContext false
@@ -153,11 +187,5 @@ class NfcWriterActivity : AppCompatActivity() {
         } finally {
             try { ndef.close(); Log.d(TAG, "Ndef closed") } catch (_: Exception) {}
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        nfcAdapter?.disableReaderMode(this)
-        Log.d(TAG, "ReaderMode disabled")
     }
 }
