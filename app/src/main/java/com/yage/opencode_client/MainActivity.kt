@@ -122,7 +122,6 @@ class MainActivity : AppCompatActivity() {
                     mainViewModel.testConnection()
                 }
             }
-            handleNfcIntent(intent)
             val state by mainViewModel.state.collectAsStateWithLifecycle()
             LaunchedEffect(state.languageMode) {
                 AppLocaleController.apply(state.languageMode)
@@ -143,6 +142,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        // Handle NFC intent if app was launched by tapping a tag (cold start via NFC).
+        // In this case onNewIntent is NOT called; the intent comes via getIntent().
+        handleNfcIntent(intent)
     }
 
     private var lastNfcTriggerTimeMs: Long = 0
@@ -153,23 +155,16 @@ class MainActivity : AppCompatActivity() {
         handleNfcIntent(intent)
     }
 
-    override fun onResume() {
-        super.onResume()
-        // Reset NFC debounce when user returns to the app — allows re-tapping
-        // the tag after the app was backgrounded, while still preventing
-        // repeated triggers while the tag stays on the antenna.
-        lastNfcTriggerTimeMs = 0
-    }
-
     private fun handleNfcIntent(intent: Intent?) {
         if (intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return
         val data: Uri = intent.data ?: return
         if (data.scheme != "opencode" || data.host != "prompt") return
 
         // Debounce: tag near antenna fires intents repeatedly (every few seconds).
-        // Lock for 5 minutes after one trigger — long enough that the user has
-        // to physically walk away and come back. Reset on activity resume
-        // (app comes to foreground) so re-tapping works after backgrounding.
+        // Lock for 5 minutes after one trigger. handleNfcIntent is only called
+        // from onNewIntent (tag dispatch) and once in onCreate (cold start via
+        // NFC), NOT from the Composable body, so UI recomposition does NOT
+        // re-trigger it.
         val now = System.currentTimeMillis()
         if (now - lastNfcTriggerTimeMs < 300_000L) {
             android.util.Log.d("MainActivity", "NFC debounce: ignored (${now - lastNfcTriggerTimeMs}ms since last)")
@@ -352,9 +347,9 @@ private fun TabletLayout(viewModel: MainViewModel) {
                                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = stringResource(R.string.sessions_show)
                                 )
-                            }
-                        }
-                    }
+            }
+        }
+    }
                 }
             }
         }
