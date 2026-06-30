@@ -101,6 +101,11 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContent {
             mainViewModel = hiltViewModel()
+            // Process any NFC prompt that arrived before ViewModel was ready
+            pendingNfcPrompt?.let { (prompt, autoSend) ->
+                pendingNfcPrompt = null
+                mainViewModel.handleNfcPrompt(prompt, autoSend)
+            }
             val lifecycleOwner = LocalLifecycleOwner.current
             LaunchedEffect(lifecycleOwner) {
                 // Debug-only credential injection: if the launch Intent carries
@@ -148,6 +153,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var lastNfcTriggerTimeMs: Long = 0
+    private var pendingNfcPrompt: Pair<String, Boolean>? = null
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -156,15 +162,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleNfcIntent(intent: Intent?) {
+        android.util.Log.d("MainActivity", "handleNfcIntent: action=${intent?.action}")
         if (intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return
         val data: Uri = intent.data ?: return
         if (data.scheme != "opencode" || data.host != "prompt") return
 
-        // Debounce: tag near antenna fires intents repeatedly (every few seconds).
-        // Lock for 5 minutes after one trigger. handleNfcIntent is only called
-        // from onNewIntent (tag dispatch) and once in onCreate (cold start via
-        // NFC), NOT from the Composable body, so UI recomposition does NOT
-        // re-trigger it.
         val now = System.currentTimeMillis()
         if (now - lastNfcTriggerTimeMs < 30_000L) {
             android.util.Log.d("MainActivity", "NFC debounce: ignored (${now - lastNfcTriggerTimeMs}ms since last)")
@@ -174,8 +176,13 @@ class MainActivity : AppCompatActivity() {
 
         val prompt = data.getQueryParameter("p") ?: return
         val autoSend = data.getQueryParameter("a") == "1"
+        android.util.Log.d("MainActivity", "NFC prompt: ${prompt.take(50)}..., autoSend=$autoSend, vmInit=${::mainViewModel.isInitialized}")
         if (::mainViewModel.isInitialized) {
             mainViewModel.handleNfcPrompt(prompt, autoSend)
+        } else {
+            // ViewModel not ready yet (onNewIntent arrived before setContent).
+            // Stash it; setContent's LaunchedEffect will pick it up.
+            pendingNfcPrompt = prompt to autoSend
         }
     }
 }
