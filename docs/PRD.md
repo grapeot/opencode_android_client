@@ -231,7 +231,9 @@ iOS 在每条 assistant 消息旁显示回复该消息的模型名称（如 `ant
 
 #### Phase 7：Markdown Web Preview 与平板 Sessions 折叠（对齐 iOS PR #94/#95）
 
-本阶段补齐两个 iOS 已落地能力。第一，Files 中的 Markdown 预览从单一路径升级为 Native / Web / Source 三态。Web Preview 负责承载 AI internal writing 里已经开始使用的 HTML/CSS 卡片、inline SVG、深浅色语义变量和折叠审计层；Native Preview 保留为稳定回退；Source 用于调试和大文件安全查看。详细产品边界见 [Android_Markdown_Web_Preview_PRD.md](Android_Markdown_Web_Preview_PRD.md)。
+本阶段补齐两个 iOS 已落地能力。第一，Files 中的 Markdown 预览从单一路径升级为 Native / Web / Source 三态。Web Preview 负责承载 AI internal writing 里已经开始使用的 HTML/CSS 卡片、inline SVG、深浅色语义变量和折叠审计层；Native Preview 保留为稳定回退；Source 用于调试和大文件安全查看。
+
+产品边界：`.md` / `.markdown` 文件提供 Web Preview（默认）、Native Preview、Markdown Source 三种模式。Web Preview 支持 HTML-in-Markdown 的安全子集（局部 `<style>`、`div/span` 卡片、inline SVG、`details/summary`、GFM 表格）。workspace 相对图片复用 `MarkdownImageResolver.resolveImages(...)` 转 data URI。大文件先显示确认 gate。WebView 只加载 app assets 里的 renderer shell，不从网络加载 JS，不直接读取 workspace 文件系统。`<script>`/`iframe`/`form`/`on*`/`javascript:` 被禁止。深浅色主题下正文、卡片、代码块、chip 保持可读。
 
 第二，平板三栏布局的左侧 Sessions pane 支持折叠。展开时保持当前 25% / 37.5% / 37.5% 三栏；折叠时左栏不渲染，Files 与 Chat 平分宽度；Files 顶栏左侧显示展开按钮。这个能力只作用于 tablet / expanded width，不改变手机底部 Tab 和 session sheet 逻辑。
 
@@ -248,6 +250,22 @@ Android 端需要补齐 iOS 已有的连接能力，而不是继续把 Tailscale
 5. SSH host key 使用 TOFU：首次连接保存 gateway `host:port` 的 fingerprint，之后 fingerprint 改变时阻断连接并给出明确恢复入口。
 6. SSH private key 是设备级能力，不是 profile 级 secret。第一版 Android 生成或导入 app 私有 key，并展示 OpenSSH public key 供服务器授权；多个 SSH profiles 复用同一把 key。
 7. 生命周期只承诺前台和回前台恢复。后台长期 tunnel、question/permission 通知和 Foreground Service 属于后续通知增强，不进入 Phase 8 的成功标准。
+
+#### NFC Quick Prompt（Experimental）
+
+用户在 Settings → Experimental → NFC Quick Prompt 里输入一段多行 prompt，写入 NTAG215 NFC tag。之后亮屏靠近 tag，系统自动拉起 App，新建 session，填入 prompt，按写入时的设置决定直接发送或等待确认。典型场景：把一个常用 prompt（如"帮我审查最新的 diff 并给出改进建议"）写入 NFC tag 贴在桌面上，每次想触发时手机亮屏靠近即可，免去解锁、找 App、新建 session、打字的全部步骤。
+
+产品边界：
+- 启用开关（默认关）：关闭时 App 不响应 NFC tag 触发
+- 多行 prompt 输入框，实时显示 UTF-8 字节用量 / 480 上限
+- Auto-send 开关：开启=直接发送，关闭=填入输入框等用户确认
+- Write to tag 按钮：启动 NfcWriterActivity 透明 Activity 写入 NDEF
+- 30 秒 debounce：一次触发后 30 秒内忽略后续 intent（tag 贴着天线时系统反复 dispatch）
+- NTAG215 用户可用 504 字节，扣 NDEF overhead 后 prompt 上限 480 UTF-8 字节
+- 熄屏不工作（Android tag dispatch 要求屏幕亮）
+- tag 内容明文，无加密
+- 自定义 scheme `opencode://` 仅 Android 可用，iOS 需另外走 Universal Links
+- 非目标：熄屏触发、多 tag 身份管理、iOS 适配、tag 内容加密、从服务器拉 prompt 的间接模式
 
 ---
 

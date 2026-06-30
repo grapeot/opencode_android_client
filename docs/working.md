@@ -12,9 +12,7 @@
 
 ### 设计文档
 
-- `docs/NFC_Quick_Prompt_PRD.md` — 产品需求
-- `docs/NFC_Quick_Prompt_RFC.md` — 技术方案
-- `docs/nfc_feature_plan.md` — 初版规划（已被 PRD/RFC 取代）
+NFC Quick Prompt 的 PRD 和 RFC 内容已合并进主 `docs/PRD.md` 和 `docs/RFC.md`（§5.12）。独立的 `NFC_Quick_Prompt_PRD.md`、`NFC_Quick_Prompt_RFC.md` 和 `nfc_feature_plan.md` 已删除。
 
 ### 实现
 

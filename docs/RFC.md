@@ -911,14 +911,20 @@ message.info.resolvedModel?.let { model ->
 
 ### 5.10 Phase 7 Markdown Web Preview（对齐 iOS PR #94）
 
-详细方案见 [Android_Markdown_Web_Preview_RFC.md](Android_Markdown_Web_Preview_RFC.md)。主 RFC 只记录集成边界：
+实现路径：Files 中 Markdown 默认进入 Web Preview；Kotlin 侧复用 `MarkdownImageResolver` 把相对图片转 data URI；WebView 加载 `app/src/main/assets/web_preview/preview.html`；本地 `markdown-it` 将 Markdown 转 HTML；`DOMPurify` 过滤危险 HTML；Compose toolbar 提供 Web / Native / Source 三态回退。
+
+集成边界：
 
 1. `FilePreviewPane` 对 Markdown 文件提供 `Web Preview`、`Native Preview`、`Markdown Source` 三态。
 2. 默认模式为 `Web Preview`；Native Compose Markdown renderer 保留为回退路径。
-3. WebView 只加载 app assets 里的 renderer shell，不从网络加载 JS，不直接读取 workspace 文件。
+3. WebView 只加载 app assets 里的 renderer shell，不从网络加载 JS，不直接读取 workspace 文件。`WebSettings.allowFileAccess = true` 仅用于 app asset shell；workspace 文件仍走 data URI。
 4. 相对图片复用 `MarkdownImageResolver.resolveImages(...)` 转 data URI，保证 Web / Native / Chat 的路径语义一致。
 5. WebView navigation 默认拦截；外链交给系统，workspace 相对链接回 Files。
-6. 大文件先显示确认 gate，避免直接注入超大 Markdown。
+6. 大文件先显示确认 gate（总长度 `60_000`、单行 `5_000`），避免直接注入超大 Markdown。
+7. DOMPurify allowlist 允许基础 Markdown 标签、`details/summary`、`div/span`、`img`、table、inline SVG、局部 `style`；移除 `script`/`iframe`/`form`/`on*`/`javascript:`。
+8. Markdown payload 用 JSON serializer 生成，不手写字符串拼接。
+9. 深浅色主题通过 CSS 变量传递（`--bg`、`--fg`、`--fg-muted`、`--border`、`--card-bg`、`--ok-*`、`--bad-*`、`--warn-*`、`--block-*`）。
+10. App 启动后预热 WebView（加载 `about:blank`）以消除首次切到 Markdown 时的 Chromium 初始化黑闪。Web Preview 首帧用 Native Markdown overlay 覆盖直到 JS bridge 发出 `rendered` 事件。
 
 ### 5.11 Phase 7 Tablet Sessions Pane 折叠（对齐 iOS PR #95）
 
@@ -937,6 +943,79 @@ var sessionsPaneCollapsed by rememberSaveable { mutableStateOf(false) }
 3. 不复用 `expandedSessionIds`，避免 pane collapse 与 session tree row expansion 混淆。
 4. 第一版不持久化到 settings；`rememberSaveable` 足够覆盖旋转和配置变化。
 5. 需要给 hide/show 按钮稳定 content description：`Hide sessions` / `Show sessions`，供 accessibility 与 UI test 使用。
+
+### 5.12 NFC Quick Prompt（Experimental）
+
+#### Manifest
+
+```xml
+<uses-permission android:name="android.permission.NFC" />
+<uses-feature android:name="android.hardware.nfc" android:required="false" />
+```
+
+MainActivity 新增 `android:launchMode="singleTop"` 和 NDEF intent-filter：
+
+```xml
+<intent-filter>
+    <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <data android:scheme="opencode" android:host="prompt" />
+</intent-filter>
+```
+
+NfcWriterActivity 注册为单独 Activity（透明 `Theme.Transparent`，`noHistory`）。
+
+#### NDEF tag 格式
+
+URI scheme：`opencode://prompt`，query params：`a`（autoSend `0`/`1`）、`p`（prompt URL-encoded UTF-8）。写入使用 `NdefRecord.createUri(uri)` → `NdefMessage` → `Ndef.writeNdefMessage`。
+
+#### 字节预算
+
+NTAG215 用户可用 504 字节。NDEF TLV wrapper ≈ 3 字节，NDEF Record header ≈ 5 字节。保守取 **480 字节** prompt 上限，生成 URI 后校验总字节数 ≤ 504。
+
+#### Settings 持久化
+
+`SettingsManager` 新增 `nfcEnabled`/`nfcPrompt`/`nfcAutoSend`（EncryptedSharedPreferences），常量 `NFC_PROMPT_MAX_BYTES=480`、`NFC_TAG_MAX_BYTES=504`。
+
+#### Intent 接收
+
+`MainActivity` 在两个路径处理 NFC intent：
+
+1. **`onCreate`**（冷启动）：app 被 tag 唤起时 intent 通过 `getIntent()` 到达，`onCreate` 末尾调用 `handleNfcIntent(intent)`。
+2. **`onNewIntent`**（app 已在运行）：`singleTop` 下 tag dispatch 走 `onNewIntent`。
+
+**关键**：`handleNfcIntent` 只在这两处调用，**不放在 Composable body 里**——之前误放在 `setContent` lambda 中导致每次 UI 重组都重复触发，产生数百个垃圾 session。
+
+**ViewModel 初始化竞态**：`onNewIntent` 可能在 `setContent` 给 `mainViewModel` 赋值之前到达。暂存 `pendingNfcPrompt: Pair<String, Boolean>?`，在 `setContent` 第一行消费。
+
+**Debounce**：30 秒 cooldown。`lastNfcTriggerTimeMs` 在 `MainActivity` 实例上，不重置（不依赖 `onResume`）。
+
+#### ViewModel 编排
+
+`MainViewModel.handleNfcPrompt(prompt, autoSend)`：
+1. 若 `!settingsManager.nfcEnabled` → 静默 return
+2. 设置 `pendingNfcAction = NfcPendingAction(prompt, autoSend)` → `createSession()`
+3. `selectSession` → `loadMessages` 的 `onMessagesLoaded` 回调 → `consumePendingNfcAction()`：`setInputText(prompt)` + 条件 `sendMessage()`
+
+`launchLoadMessages` 新增可选 `onMessagesLoaded` 回调，在成功路径末尾调用。
+
+#### NfcWriterActivity
+
+- `onCreate`：取 SettingsManager 的 nfcPrompt/nfcAutoSend，生成 URI，校验字节 ≤ 504
+- `onResume`：`enableForegroundDispatch`，使用 `Intent(this, NfcWriterActivity::class.java).addFlags(FLAG_ACTIVITY_SINGLE_TOP)` 构造 PendingIntent，使 tag 到达时走 `onNewIntent`
+- `onNewIntent`：`Ndef.get(tag).writeNdefMessage(msg)` → toast → finish
+- `onPause`：`disableForegroundDispatch`
+
+设计教训：
+- `enableReaderMode` + `FLAG_READER_SKIP_NDEF_CHECK` 在 MIUI/HyperOS 上不抑制系统 "Empty Tag" 弹窗，改用 `enableForegroundDispatch`
+- PendingIntent 必须用新构造的 Intent，不能传 Activity 自身的 `intent`（否则 `onNewIntent` 不触发）
+
+#### 风险
+
+- **误触发**：nfcEnabled 开关 + 30s debounce 缓解
+- **安全**：prompt 明文写在 tag 上，任何人可读
+- **ROM 兼容**：`enableReaderMode` 在 MIUI/HyperOS 不抑制弹窗
+- **Composable 重组**：`handleNfcIntent` 绝不能放在 `setContent` lambda 中
 
 ---
 
