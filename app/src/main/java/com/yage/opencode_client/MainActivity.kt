@@ -145,6 +145,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private var lastNfcTriggerTimeMs: Long = 0
+    companion object {
+        private const val NFC_DEBOUNCE_MS = 30_000L // 30s cooldown after one trigger
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -155,6 +160,16 @@ class MainActivity : AppCompatActivity() {
         if (intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return
         val data: Uri = intent.data ?: return
         if (data.scheme != "opencode" || data.host != "prompt") return
+
+        // Debounce: tag near antenna fires multiple intents in rapid succession.
+        // Ignore repeats within 30s of the last successful trigger.
+        val now = System.currentTimeMillis()
+        if (now - lastNfcTriggerTimeMs < NFC_DEBOUNCE_MS) {
+            android.util.Log.d("MainActivity", "NFC debounce: ignored (${now - lastNfcTriggerTimeMs}ms since last)")
+            return
+        }
+        lastNfcTriggerTimeMs = now
+
         val prompt = data.getQueryParameter("p") ?: return
         val autoSend = data.getQueryParameter("a") == "1"
         if (::mainViewModel.isInitialized) {
