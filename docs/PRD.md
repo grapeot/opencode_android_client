@@ -331,8 +331,7 @@ Android 端需要补齐 iOS 已有的连接能力，而不是继续把 Tailscale
 | 6 | 语音输入 realtime recovery：立即 PCM capture、本地 cache、session attach/replay、断线恢复 | ✅ 完成 (2026-05-25) |
 | 7 | Markdown Web Preview、Native/Web/Source 三态、平板 Sessions pane 折叠 | 🔲 规划中 (2026-06-14) |
 | 8 | Host Profiles、SSH Tunnel、iOS import/export parity、分阶段连接诊断 | 🔲 规划中 (2026-06-21) |
-| NFC | NFC Quick Prompt（Experimental）：写入 prompt 到 NTAG215、亮屏靠近自动拉起 App 新建 session 并发送 | 🔲 进行中 |
-| Future | Session 变更文件列表、后台通知/Foreground Service | 🔲 未来可选 |
+| NFC | NFC Quick Prompt（Experimental）：写入 prompt 到 NTAG215、亮屏靠近自动拉起 App 新建 session 并发送 | ✅ 完成 (2026-06-30) |
 | Future | Session 变更文件列表、后台通知/Foreground Service | 🔲 未来可选 |
 
 ---

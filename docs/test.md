@@ -20,7 +20,7 @@
 
 纯逻辑测试，不需要 Android runtime。位置 `app/src/test/`，框架 JUnit4 + Mockk + Turbine + OkHttp MockWebServer。
 
-这一层已经成熟（18 个文件，约 214 个 case）。tool call 的读写分类逻辑就在这层测——`ToolCardClassifierTest` 覆盖 `ToolCardClassifier` 把 read/write/edit/patch 分流成文件操作、其余收进合并行的逻辑。ViewModel、工具函数、消息选择、session 树等纯逻辑也都在这层。
+这一层已经成熟（19 个文件，约 220 个 case）。tool call 的读写分类逻辑就在这层测——`ToolCardClassifierTest` 覆盖 `ToolCardClassifier` 把 read/write/edit/patch 分流成文件操作、其余收进合并行的逻辑。ViewModel、工具函数、消息选择、session 树等纯逻辑也都在这层。NFC Quick Prompt 的触发逻辑（enable 检查、pending action 设置、auto-send vs fill-only）在 `NfcQuickPromptTest` 中覆盖。
 
 跑：
 

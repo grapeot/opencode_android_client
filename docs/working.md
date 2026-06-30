@@ -51,9 +51,17 @@
 
 ### 当前状态
 
-- 代码实现完成，测试通过，等待真机测试。
-- 未做 git commit / push / PR（等用户确认）。
-- 真机测试步骤见 PR 描述。
+- 代码实现完成，测试通过，真机验证通过。
+- PR #77 已开，准备 merge。
+
+### 真机调试修复
+
+1. **NfcWriterActivity 写入卡住**：旧代码用 `enableForegroundDispatch` + 错误的 PendingIntent（传了 Activity 自身的 intent 而非新构造的 `Intent(this, NfcWriterActivity::class.java).addFlags(FLAG_ACTIVITY_SINGLE_TOP)`），导致 `onNewIntent` 不触发。修复 PendingIntent 构造，移到 `onResume` 启用。
+2. **"Empty Tag" 系统弹窗**：曾尝试 `enableReaderMode` + `FLAG_READER_SKIP_NDEF_CHECK`，但在 MIUI/HyperOS 上不生效。回到 `enableForegroundDispatch`（null filters 拦住所有 tag 类型）。
+3. **Session storm（320+ session）**：root cause 是 `handleNfcIntent(intent)` 误放在 `setContent` 的 Composable lambda 中，每次 UI 重组都重新触发。修复：移到只在 `onCreate` 和 `onNewIntent` 调用。
+4. **Debounce**：加 30 秒 cooldown 防止 tag 贴着天线时系统反复 dispatch。
+5. **ViewModel 初始化竞态**：`onNewIntent` 可能在 `setContent` 赋值 `mainViewModel` 之前到达。暂存 `pendingNfcPrompt`，在 `setContent` 第一行消费。
+6. **NFC 功能不响应**：修复竞态问题后 tag 触发正常拉起 App 并执行。
 
 ## 2026-06-14 — Phase 7：Markdown Web Preview + Tablet Sessions 折叠
 

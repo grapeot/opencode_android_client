@@ -61,11 +61,24 @@ var nfcAutoSend: Boolean        // KEY_NFC_AUTO_SEND, default false
 
 ## 6. Intent 接收
 
-`MainActivity.onNewIntent(intent)`：
+`MainActivity` 在两个路径处理 NFC intent：
+
+1. **`onCreate`**（冷启动）：app 被 tag 唤起时，intent 通过 `getIntent()` 到达。`onCreate` 末尾调用 `handleNfcIntent(intent)`。
+2. **`onNewIntent`**（app 已在运行）：`singleTop` launchMode 下，tag dispatch 走 `onNewIntent`，调用 `handleNfcIntent(intent)`。
+
+**关键**：`handleNfcIntent` 只在这两处调用，**不放在 Composable body 里**——之前误放在 `setContent` 的 lambda 中导致每次 UI 重组都重复触发，产生数百个垃圾 session。
+
+**ViewModel 初始化竞态**：`onNewIntent` 可能在 `setContent` 给 `mainViewModel` 赋值之前到达。此时暂存 `pendingNfcPrompt: Pair<String, Boolean>?`，在 `setContent` 的第一行检查并消费。
+
+**Debounce**：30 秒 cooldown。tag 贴着天线时系统每隔几秒重复 dispatch `NDEF_DISCOVERED`，debounce 防止创建多个 session。`lastNfcTriggerTimeMs` 在 `MainActivity` 实例上，不重置（不依赖 `onResume`）。
+
+`handleNfcIntent` 逻辑：
 1. 检查 `intent.action == NDEF_DISCOVERED`
 2. 取 `intent.data`，验证 scheme == "opencode" && host == "prompt"
-3. 解析 query params `a` 和 `p`
-4. 调 `viewModel.handleNfcPrompt(prompt, autoSend)`
+3. 检查 debounce（30s）
+4. 解析 query params `a` 和 `p`
+5. 若 ViewModel 已初始化 → 调 `viewModel.handleNfcPrompt(prompt, autoSend)`
+6. 若未初始化 → 暂存到 `pendingNfcPrompt`，等 `setContent` 消费
 
 ## 7. ViewModel 编排
 
@@ -87,10 +100,15 @@ data class NfcPendingAction(val prompt: String, val autoSend: Boolean)
 
 透明 Activity（`Theme.Transparent`，noHistory）：
 
-- `onCreate`：取 SettingsManager 的 nfcPrompt/nfcAutoSend，生成 URI
-- 校验字节 ≤ 504，超过则 toast 错误并 finish
-- `NfcAdapter.getDefaultAdapter`，`enableWriteMode`（foreground dispatch）
+- `onCreate`：取 SettingsManager 的 nfcPrompt/nfcAutoSend，生成 URI，校验字节 ≤ 504
+- `onResume`：`enableForegroundDispatch`，使用正确构造的 PendingIntent（`Intent(this, NfcWriterActivity::class.java).addFlags(FLAG_ACTIVITY_SINGLE_TOP)`），使 tag 到达时走 `onNewIntent`
 - `onNewIntent` 收到 tag → `Ndef.get(tag).writeNdefMessage(msg)` → toast 成功/失败 → finish
+- `onPause`：`disableForegroundDispatch`
+- 全程 `Log.d(TAG, ...)` 用于 logcat 调试（tag: `NfcWriterActivity`）
+
+**设计教训**：
+- `enableReaderMode` 在部分 ROM（MIUI/HyperOS）上无法抑制系统 "Empty Tag" 弹窗，改用 `enableForegroundDispatch`
+- PendingIntent 必须用新构造的 Intent，不能传 Activity 自身的 `intent`（否则 `onNewIntent` 不触发）
 
 ## 9. 文件改动清单
 
@@ -109,7 +127,8 @@ data class NfcPendingAction(val prompt: String, val autoSend: Boolean)
 
 ## 10. 风险
 
-- **误触发**：桌面上的 tag 反复触发。用 nfcEnabled 开关缓解。
+- **误触发**：桌面上的 tag 反复触发。用 nfcEnabled 开关 + 30s debounce 缓解。
 - **安全**：prompt 明文写在 tag 上，任何人拿到 tag 可读。不要写入敏感内容。
-- **ROM 兼容**：锁屏亮屏下 NDEF_DISCOVERED 行为不一致，本期只承诺已解锁。
+- **ROM 兼容**：锁屏亮屏下 NDEF_DISCOVERED 行为不一致，本期只承诺已解锁。`enableReaderMode` 在 MIUI/HyperOS 上不抑制系统弹窗，改用 `enableForegroundDispatch`。
 - **字节不足**：480 字节对短 prompt 够用，长 system prompt 放不下。后续可走"tag 存 ID + 服务器拉内容"间接模式。
+- **Composable 重组**：`handleNfcIntent` 绝不能放在 `setContent` 的 Composable lambda 中——每次重组都会重复触发。只在 `onCreate` 和 `onNewIntent` 调用。

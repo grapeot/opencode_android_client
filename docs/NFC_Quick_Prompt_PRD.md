@@ -28,10 +28,12 @@
 
 ### 触发流程
 
-- 系统扫到匹配 tag → 拉起 MainActivity → onNewIntent
+- 系统扫到匹配 tag → 拉起 MainActivity → onNewIntent（或冷启动时 onCreate）
 - 解析 URI，提取 prompt、autoSend
 - 校验 settingsManager.nfcEnabled，未启用则忽略
+- 30 秒 debounce：一次触发后 30 秒内忽略后续 intent（tag 贴着天线时系统会反复 dispatch）
 - createSession → selectSession → setInputText(prompt) → 若 autoSend 则 sendMessage()
+- 如果 onNewIntent 在 ViewModel 初始化前到达，暂存 pending prompt，等 ViewModel ready 后执行
 
 ## 约束
 
@@ -39,6 +41,7 @@
 - 熄屏不工作（Android tag dispatch 要求屏幕亮）
 - tag 内容明文，无加密
 - 自定义 scheme `opencode://` 仅 Android 可用，iOS 需另外走 Universal Links
+- 30 秒 debounce 期间不响应重复触发
 
 ## 非目标
 
