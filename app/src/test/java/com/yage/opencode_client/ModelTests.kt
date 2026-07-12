@@ -328,6 +328,12 @@ class ModelTests {
     }
 
     @Test
+    fun `ModelOption shortName distinguishes GPT Sol modes`() {
+        assertEquals("GPT-P", modelOption("GPT-5.6 Sol Pro").shortName)
+        assertEquals("GPT-F", modelOption("GPT-5.6 Sol Fast").shortName)
+    }
+
+    @Test
     fun `ModelOption shortName returns Grok for Grok models`() {
         assertEquals("Grok", modelOption("Grok 3").shortName)
     }
