@@ -1,17 +1,22 @@
 package com.yage.opencode_client.ui.chat
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -31,6 +38,8 @@ import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.files.FilesScreen
+import com.yage.opencode_client.ui.files.WorkspaceMarkdownLinkResolver
 import com.yage.opencode_client.ui.sanitizeBearerToken
 import kotlinx.coroutines.launch
 
@@ -39,6 +48,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     viewModel: MainViewModel,
     onNavigateToFiles: (String) -> Unit = {},
+    useInlineFilePreview: Boolean = false,
     onNavigateToSettings: () -> Unit = {},
     showSettingsButton: Boolean = true,
     showNewSessionInTopBar: Boolean = true,
@@ -63,6 +73,33 @@ fun ChatScreen(
     ) { uris ->
         scope.launch {
             viewModel.addImageAttachments(loadImageAttachments(context, uris))
+        }
+    }
+    var previewRequest by remember { mutableStateOf<WorkspacePreviewRequest?>(null) }
+    var linkError by remember { mutableStateOf<String?>(null) }
+
+    fun handleAssistantMarkdownLink(href: String) {
+        val workspaceDirectory = state.currentSession?.directory
+        when (val resolution = WorkspaceMarkdownLinkResolver.resolve(href, workspaceDirectory)) {
+            is WorkspaceMarkdownLinkResolver.Resolution.External -> {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(resolution.url))
+                runCatching { context.startActivity(intent) }
+                    .onFailure { linkError = it.message ?: "Could not open link" }
+            }
+            is WorkspaceMarkdownLinkResolver.Resolution.Preview -> {
+                if (useInlineFilePreview) {
+                    onNavigateToFiles(resolution.path)
+                } else {
+                    previewRequest = WorkspacePreviewRequest(
+                        path = resolution.path,
+                        hostProfileId = state.currentHostProfileId,
+                        sessionId = state.currentSessionId,
+                        workspaceDirectory = workspaceDirectory.orEmpty()
+                    )
+                }
+            }
+            WorkspaceMarkdownLinkResolver.Resolution.Ignored -> Unit
+            is WorkspaceMarkdownLinkResolver.Resolution.Rejected -> linkError = resolution.message
         }
     }
 
@@ -170,6 +207,7 @@ fun ChatScreen(
                     completedTurnActivities = completedTurnActivities,
                     onLoadMore = { viewModel.loadMoreMessages() },
                     onFileClick = onNavigateToFiles,
+                    onMarkdownLinkClick = ::handleAssistantMarkdownLink,
                     onForkFromMessage = { messageId ->
                         state.currentSessionId?.let { sessionId ->
                             viewModel.forkSession(sessionId, messageId)
@@ -189,6 +227,44 @@ fun ChatScreen(
                     }
                 ) {
                     Text(error)
+                }
+            }
+
+            linkError?.let { error ->
+                Snackbar(
+                    modifier = Modifier.padding(16.dp),
+                    action = {
+                        TextButton(onClick = { linkError = null }) {
+                            Text(stringResource(R.string.common_dismiss))
+                        }
+                    }
+                ) {
+                    Text(error)
+                }
+            }
+        }
+
+        previewRequest?.let { request ->
+            if (request.hostProfileId != state.currentHostProfileId ||
+                request.sessionId != state.currentSessionId ||
+                request.workspaceDirectory != state.currentSession?.directory
+            ) {
+                LaunchedEffect(request, state.currentHostProfileId, state.currentSessionId, state.currentSession?.directory) {
+                    previewRequest = null
+                    linkError = "Workspace changed; reopen the link from the current session."
+                }
+            } else {
+                Dialog(
+                    onDismissRequest = { previewRequest = null },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        FilesScreen(
+                            pathToShow = request.path,
+                            sessionDirectory = request.workspaceDirectory,
+                            onCloseFile = { previewRequest = null }
+                        )
+                    }
                 }
             }
         }
@@ -266,6 +342,13 @@ fun ChatScreen(
             }
     }
 }
+
+private data class WorkspacePreviewRequest(
+    val path: String,
+    val hostProfileId: String?,
+    val sessionId: String?,
+    val workspaceDirectory: String
+)
 
 private data class CurrentSessionActivity(
     val text: String,

@@ -1,5 +1,7 @@
 package com.yage.opencode_client.ui.files
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -35,6 +38,7 @@ fun FilesScreen(
     onFileClick: (String) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     LaunchedEffect(pathToShow, sessionDirectory) {
         viewModel.syncPathToShow(pathToShow, sessionDirectory)
@@ -81,6 +85,18 @@ fun FilesScreen(
                     sessionDirectory = sessionDirectory,
                     isRefreshing = state.isPreviewRefreshing,
                     onRefresh = { viewModel.refreshPreview(sessionDirectory) },
+                    onMarkdownLinkClick = { href, sourcePath ->
+                        when (val resolution = WorkspaceMarkdownLinkResolver.resolve(href, sessionDirectory, sourcePath)) {
+                            is WorkspaceMarkdownLinkResolver.Resolution.External -> {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(resolution.url))
+                                runCatching { context.startActivity(intent) }
+                                    .onFailure { viewModel.showError(it.message ?: "Could not open link") }
+                            }
+                            is WorkspaceMarkdownLinkResolver.Resolution.Preview -> viewModel.openPreviewPath(resolution.path, sessionDirectory)
+                            WorkspaceMarkdownLinkResolver.Resolution.Ignored -> Unit
+                            is WorkspaceMarkdownLinkResolver.Resolution.Rejected -> viewModel.showError(resolution.message)
+                        }
+                    },
                     onClose = {
                         viewModel.closePreview()
                         onCloseFile()

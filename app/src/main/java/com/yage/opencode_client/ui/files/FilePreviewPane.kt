@@ -50,11 +50,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.yage.opencode_client.R
-import com.mikepenz.markdown.m3.Markdown
 import com.yage.opencode_client.data.model.FileContent
 import com.yage.opencode_client.data.repository.OpenCodeRepository
-import com.yage.opencode_client.ui.theme.markdownTypographyCompact
-import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import java.io.File
@@ -76,6 +73,7 @@ internal fun FilePreviewPane(
     sessionDirectory: String? = null,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
+    onMarkdownLinkClick: (href: String, sourcePath: String) -> Unit = { _, _ -> },
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -148,6 +146,7 @@ internal fun FilePreviewPane(
                     filePath = path,
                     repository = repository,
                     sessionDirectory = sessionDirectory,
+                    onMarkdownLinkClick = { href -> onMarkdownLinkClick(href, path) },
                     onOpenNative = { markdownPreviewMode = MarkdownPreviewMode.Native },
                     onOpenSource = { markdownPreviewMode = MarkdownPreviewMode.Source }
                 )
@@ -155,7 +154,8 @@ internal fun FilePreviewPane(
                     content = content,
                     filePath = path,
                     repository = repository,
-                    sessionDirectory = sessionDirectory
+                    sessionDirectory = sessionDirectory,
+                    onMarkdownLinkClick = { href -> onMarkdownLinkClick(href, path) }
                 )
                 MarkdownPreviewMode.Source -> PreviewPlainText(content = content)
             }
@@ -170,7 +170,8 @@ private fun PreviewMarkdown(
     content: String,
     filePath: String,
     repository: OpenCodeRepository,
-    sessionDirectory: String?
+    sessionDirectory: String?,
+    onMarkdownLinkClick: (String) -> Unit = {}
 ) {
     var resolvedContent by remember(content, filePath) { mutableStateOf<String?>(null) }
     val normalizedContent = remember(content) { MarkdownImageResolver.normalizeStandaloneImageBlocks(content) }
@@ -198,11 +199,10 @@ private fun PreviewMarkdown(
         contentPadding = PaddingValues(16.dp)
     ) {
         item {
-            Markdown(
+            WorkspaceLinkMarkdown(
                 content = resolvedContent ?: normalizedContent,
-                typography = markdownTypographyCompact(),
                 modifier = Modifier.fillMaxWidth(),
-                imageTransformer = DataUriImageTransformer
+                onLinkClick = onMarkdownLinkClick
             )
         }
     }

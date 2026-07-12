@@ -82,6 +82,7 @@ import com.yage.opencode_client.ui.theme.markdownTypographyCompact
 import com.yage.opencode_client.ui.util.DataUriImageTransformer
 import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
+import com.yage.opencode_client.ui.files.WorkspaceLinkMarkdown
 import kotlinx.coroutines.flow.collect
 
 @Composable
@@ -96,6 +97,7 @@ internal fun ChatMessageList(
     completedTurnActivities: List<TurnActivity>,
     onLoadMore: () -> Unit,
     onFileClick: (String) -> Unit,
+    onMarkdownLinkClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit,
     onEditFromMessage: (String) -> Unit
 ) {
@@ -204,6 +206,7 @@ internal fun ChatMessageList(
                     repository = repository,
                     workspaceDirectory = workspaceDirectory,
                     onFileClick = onFileClick,
+                    onMarkdownLinkClick = onMarkdownLinkClick,
                     onForkFromMessage = onForkFromMessage,
                     onEditFromMessage = onEditFromMessage
                 )
@@ -244,6 +247,7 @@ private fun MessageRow(
     repository: OpenCodeRepository,
     workspaceDirectory: String?,
     onFileClick: (String) -> Unit,
+    onMarkdownLinkClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit,
     onEditFromMessage: (String) -> Unit
 ) {
@@ -313,6 +317,7 @@ private fun MessageRow(
                     repository = repository,
                     workspaceDirectory = workspaceDirectory,
                     onFileClick = onFileClick,
+                    onMarkdownLinkClick = onMarkdownLinkClick,
                     modifier = Modifier.fillMaxWidth()
                 )
                 i += 1
@@ -390,6 +395,7 @@ private fun PartView(
     repository: OpenCodeRepository,
     workspaceDirectory: String?,
     onFileClick: (String) -> Unit,
+    onMarkdownLinkClick: (String) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     when {
@@ -398,7 +404,8 @@ private fun PartView(
             isUser = isUser,
             modifier = modifier,
             repository = repository,
-            workspaceDirectory = workspaceDirectory
+            workspaceDirectory = workspaceDirectory,
+            onMarkdownLinkClick = onMarkdownLinkClick
         )
         part.isReasoning -> ReasoningCard(streamingTextOverride ?: part.text ?: "", part.toolReason, false, modifier)
         part.isImageAttachment -> ImageFilePart(part, modifier)
@@ -692,7 +699,8 @@ private fun TextPart(
     isUser: Boolean,
     modifier: Modifier = Modifier.fillMaxWidth(),
     repository: OpenCodeRepository? = null,
-    workspaceDirectory: String? = null
+    workspaceDirectory: String? = null,
+    onMarkdownLinkClick: (String) -> Unit = {}
 ) {
     val innerModifier = modifier.padding(12.dp)
     if (isUser) {
@@ -724,6 +732,7 @@ private fun TextPart(
                 text = text,
                 repository = repository,
                 workspaceDirectory = workspaceDirectory,
+                onMarkdownLinkClick = onMarkdownLinkClick,
                 modifier = innerModifier
             )
         } else {
@@ -742,6 +751,7 @@ private fun ResolvedMarkdownText(
     text: String,
     repository: OpenCodeRepository,
     workspaceDirectory: String?,
+    onMarkdownLinkClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var resolvedText by remember(text, workspaceDirectory) { mutableStateOf<String?>(null) }
@@ -763,11 +773,10 @@ private fun ResolvedMarkdownText(
 
     SelectionContainer {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-            Markdown(
+            WorkspaceLinkMarkdown(
                 content = resolvedText ?: normalizedText,
-                typography = markdownTypographyCompact(),
                 modifier = modifier,
-                imageTransformer = DataUriImageTransformer
+                onLinkClick = onMarkdownLinkClick
             )
         }
     }
