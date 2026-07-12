@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     viewModel: MainViewModel,
     onNavigateToFiles: (String) -> Unit = {},
+    useInlineFilePreview: Boolean = false,
     onNavigateToSettings: () -> Unit = {},
     showSettingsButton: Boolean = true,
     showNewSessionInTopBar: Boolean = true,
@@ -86,12 +87,16 @@ fun ChatScreen(
                     .onFailure { linkError = it.message ?: "Could not open link" }
             }
             is WorkspaceMarkdownLinkResolver.Resolution.Preview -> {
-                previewRequest = WorkspacePreviewRequest(
-                    path = resolution.path,
-                    hostProfileId = state.currentHostProfileId,
-                    sessionId = state.currentSessionId,
-                    workspaceDirectory = workspaceDirectory.orEmpty()
-                )
+                if (useInlineFilePreview) {
+                    onNavigateToFiles(resolution.path)
+                } else {
+                    previewRequest = WorkspacePreviewRequest(
+                        path = resolution.path,
+                        hostProfileId = state.currentHostProfileId,
+                        sessionId = state.currentSessionId,
+                        workspaceDirectory = workspaceDirectory.orEmpty()
+                    )
+                }
             }
             WorkspaceMarkdownLinkResolver.Resolution.Ignored -> Unit
             is WorkspaceMarkdownLinkResolver.Resolution.Rejected -> linkError = resolution.message

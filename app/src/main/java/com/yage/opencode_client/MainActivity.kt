@@ -378,6 +378,7 @@ private fun TabletLayout(viewModel: MainViewModel) {
                     onNavigateToFiles = { path ->
                         viewModel.showFileInFiles(path)
                     },
+                    useInlineFilePreview = true,
                     onNavigateToSettings = onOpenSettings,
                     showSettingsButton = false,
                     showNewSessionInTopBar = false,
