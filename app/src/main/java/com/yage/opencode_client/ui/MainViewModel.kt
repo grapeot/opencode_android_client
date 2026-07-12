@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yage.opencode_client.data.model.*
+import com.yage.opencode_client.data.api.AIUsageClient
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ssh.SSHKeyManager
@@ -37,6 +38,8 @@ data class AIBuilderSettings(
     val customPrompt: String,
     val terminology: String
 )
+
+data class AIUsageSettings(val dashboardUrl: String)
 
 data class AppState(
     val isConnected: Boolean = false,
@@ -83,7 +86,12 @@ data class AppState(
     val hostProfiles: List<HostProfile> = emptyList(),
     val currentHostProfileId: String? = null,
     val connectionPhase: String? = null,
-    val pendingNfcAction: NfcPendingAction? = null
+    val pendingNfcAction: NfcPendingAction? = null,
+    val aiUsageDashboardUrl: String = "",
+    val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
+    val isLoadingAIUsage: Boolean = false,
+    val isRefreshingAIUsage: Boolean = false,
+    val aiUsageError: String? = null
 ) {
     data class NfcPendingAction(val prompt: String, val autoSend: Boolean)
     data class ModelOption(val displayName: String, val providerId: String, val modelId: String) {
@@ -276,6 +284,19 @@ data class AppState(
     val availableModels: List<ModelOption>
         get() = ModelPresets.list
 
+    val selectedAIUsageQuota: AIUsageQuota?
+        get() {
+            val provider = when (availableModels.getOrNull(selectedModelIndex)?.providerId) {
+                "openai" -> "codex"
+                "zai-coding-plan" -> "glm"
+                "ollama-cloud" -> "ollama"
+                else -> return null
+            }
+            return aiUsageQuotaSnapshot?.quotas?.firstOrNull {
+                it.provider.equals(provider, ignoreCase = true) && it.label.equals("5h", ignoreCase = true)
+            }
+        }
+
     private val providerModelsIndex: Map<String, ProviderModel>
         get() = providers?.providers?.flatMap { provider ->
             provider.models.flatMap { (modelKey, model) ->
@@ -350,7 +371,8 @@ class MainViewModel @Inject constructor(
     private val microphone: VoiceFlowMicrophone,
     private val hostProfileStore: HostProfileStore,
     private val tunnelManager: TunnelManager,
-    private val sshKeyManager: SSHKeyManager
+    private val sshKeyManager: SSHKeyManager,
+    private val aiUsageClient: AIUsageClient = AIUsageClient()
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppState())
@@ -372,6 +394,7 @@ class MainViewModel @Inject constructor(
 
     private fun loadSettings() {
         applySavedSettings(repository, settingsManager, hostProfileStore, _state)
+        _state.update { it.copy(aiUsageDashboardUrl = settingsManager.aiUsageDashboardUrl) }
     }
 
     fun configureServer(url: String, username: String? = null, password: String? = null) {
@@ -502,6 +525,64 @@ class MainViewModel @Inject constructor(
 
     fun testAIBuilderConnection() {
         launchAIBuilderConnectionTest(viewModelScope, settingsManager, voiceFlowClient, _state)
+    }
+
+    fun getAIUsageSettings(): AIUsageSettings = AIUsageSettings(settingsManager.aiUsageDashboardUrl)
+
+    fun saveAIUsageSettings(settings: AIUsageSettings) {
+        settingsManager.aiUsageDashboardUrl = settings.dashboardUrl.trim()
+        _state.update {
+            it.copy(
+                aiUsageDashboardUrl = settings.dashboardUrl.trim(),
+                aiUsageQuotaSnapshot = null,
+                aiUsageError = null
+            )
+        }
+    }
+
+    fun loadAIUsage() {
+        val url = settingsManager.aiUsageDashboardUrl
+        if (url.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingAIUsage = true, aiUsageError = null) }
+            aiUsageClient.fetchQuotas(url)
+                .onSuccess { snapshot ->
+                    _state.update { it.copy(aiUsageQuotaSnapshot = snapshot, isLoadingAIUsage = false) }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(isLoadingAIUsage = false, aiUsageError = error.message) }
+                }
+        }
+    }
+
+    fun refreshAIUsage() {
+        val url = settingsManager.aiUsageDashboardUrl
+        if (url.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingAIUsage = true, isRefreshingAIUsage = true, aiUsageError = null) }
+            aiUsageClient.refreshDashboard(url)
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(isLoadingAIUsage = false, isRefreshingAIUsage = false, aiUsageError = error.message)
+                    }
+                    return@launch
+                }
+            aiUsageClient.fetchQuotas(url)
+                .onSuccess { snapshot ->
+                    _state.update {
+                        it.copy(
+                            aiUsageQuotaSnapshot = snapshot,
+                            isLoadingAIUsage = false,
+                            isRefreshingAIUsage = false
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(isLoadingAIUsage = false, isRefreshingAIUsage = false, aiUsageError = error.message)
+                    }
+                }
+        }
     }
 
     fun toggleRecording() {

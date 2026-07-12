@@ -113,6 +113,10 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getLong(KEY_AI_BUILDER_LAST_OK_TESTED, 0L)
         set(value) = encryptedPrefs.edit().putLong(KEY_AI_BUILDER_LAST_OK_TESTED, value).apply()
 
+    var aiUsageDashboardUrl: String
+        get() = encryptedPrefs.getString(KEY_AI_USAGE_DASHBOARD_URL, "") ?: ""
+        set(value) = encryptedPrefs.edit().putString(KEY_AI_USAGE_DASHBOARD_URL, value).apply()
+
     var nfcEnabled: Boolean
         get() = encryptedPrefs.getBoolean(KEY_NFC_ENABLED, false)
         set(value) = encryptedPrefs.edit().putBoolean(KEY_NFC_ENABLED, value).apply()
@@ -216,6 +220,7 @@ class SettingsManager @Inject constructor(
         private const val KEY_AI_BUILDER_TERMINOLOGY = "ai_builder_terminology"
         private const val KEY_AI_BUILDER_LAST_OK_SIG = "ai_builder_last_ok_sig"
         private const val KEY_AI_BUILDER_LAST_OK_TESTED = "ai_builder_last_ok_tested"
+        private const val KEY_AI_USAGE_DASHBOARD_URL = "ai_usage_dashboard_url"
         private const val KEY_SESSION_DRAFTS = "session_drafts"
         private const val KEY_SESSION_MODELS = "session_models"
         private const val KEY_SESSION_AGENTS = "session_agents"

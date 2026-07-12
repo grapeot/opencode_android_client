@@ -315,6 +315,55 @@ internal fun AppearanceSection(
 }
 
 @Composable
+internal fun AIUsageDashboardSection(
+    state: AppState,
+    dashboardUrl: String,
+    saveMessage: String? = null,
+    onUrlChange: (String) -> Unit,
+    onTestConnection: () -> Unit,
+    onSave: () -> Unit
+) {
+    SectionHeader(title = stringResource(R.string.settings_ai_usage_dashboard))
+    Text(
+        stringResource(R.string.settings_ai_usage_description),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    OutlinedTextField(
+        value = dashboardUrl,
+        onValueChange = onUrlChange,
+        label = { Text(stringResource(R.string.settings_ai_usage_url)) },
+        modifier = Modifier.fillMaxWidth().testTag("settings.ai_usage.url"),
+        singleLine = true,
+        leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) }
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = onTestConnection,
+            enabled = dashboardUrl.isNotBlank() && !state.isLoadingAIUsage
+        ) {
+            if (state.isLoadingAIUsage) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(stringResource(R.string.settings_test_connection))
+        }
+        OutlinedButton(onClick = onSave) {
+            Text(stringResource(R.string.settings_save))
+        }
+    }
+    when {
+        saveMessage != null -> ResultCard(TestResult(success = true, message = saveMessage))
+        state.aiUsageError != null -> ResultCard(TestResult(success = false, message = state.aiUsageError))
+        state.aiUsageQuotaSnapshot != null -> ResultCard(
+            TestResult(success = true, message = stringResource(R.string.settings_connected_successfully))
+        )
+    }
+}
+
+@Composable
 internal fun SpeechRecognitionSection(
     state: AppState,
     aiBuilderBaseURL: String,
