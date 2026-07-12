@@ -1,8 +1,6 @@
 package com.yage.opencode_client.ui.files
 
 import android.annotation.SuppressLint
-import android.content.Intent
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -58,6 +56,7 @@ internal fun MarkdownWebPreviewPane(
     filePath: String,
     repository: OpenCodeRepository,
     sessionDirectory: String?,
+    onMarkdownLinkClick: (String) -> Unit = {},
     onOpenNative: () -> Unit,
     onOpenSource: () -> Unit
 ) {
@@ -79,6 +78,7 @@ internal fun MarkdownWebPreviewPane(
             filePath = filePath,
             repository = repository,
             sessionDirectory = sessionDirectory,
+            onMarkdownLinkClick = onMarkdownLinkClick,
             onOpenNative = onOpenNative,
             onOpenSource = onOpenSource
         )
@@ -91,6 +91,7 @@ private fun ResolvedMarkdownWebPreview(
     filePath: String,
     repository: OpenCodeRepository,
     sessionDirectory: String?,
+    onMarkdownLinkClick: (String) -> Unit,
     onOpenNative: () -> Unit,
     onOpenSource: () -> Unit
 ) {
@@ -125,6 +126,7 @@ private fun ResolvedMarkdownWebPreview(
         MarkdownWebView(
             markdown = resolvedContent,
             onRenderError = { error = it },
+            onMarkdownLinkClick = onMarkdownLinkClick,
             onOpenNative = onOpenNative,
             onOpenSource = onOpenSource
         )
@@ -136,6 +138,7 @@ private fun ResolvedMarkdownWebPreview(
 private fun MarkdownWebView(
     markdown: String,
     onRenderError: (String) -> Unit,
+    onMarkdownLinkClick: (String) -> Unit,
     onOpenNative: () -> Unit,
     onOpenSource: () -> Unit
 ) {
@@ -173,10 +176,7 @@ private fun MarkdownWebView(
                                 webContentReady = true
                             },
                             onError = onRenderError,
-                            onExternalLink = { url ->
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                runCatching { context.startActivity(intent) }
-                            }
+                            onLink = onMarkdownLinkClick
                         ),
                         "AndroidPreviewBridge"
                     )
@@ -228,7 +228,7 @@ private fun MarkdownWebView(
 private class AndroidPreviewBridge(
     private val onRendered: () -> Unit,
     private val onError: (String) -> Unit,
-    private val onExternalLink: (String) -> Unit
+    private val onLink: (String) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -240,9 +240,7 @@ private class AndroidPreviewBridge(
             "error" -> mainHandler.post { onError(payload.optString("message", "Web Preview render error")) }
             "link" -> {
                 val href = payload.optString("href")
-                if (href.startsWith("http://") || href.startsWith("https://")) {
-                    mainHandler.post { onExternalLink(href) }
-                }
+                mainHandler.post { onLink(href) }
             }
         }
     }

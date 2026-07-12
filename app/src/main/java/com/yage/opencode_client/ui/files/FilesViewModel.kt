@@ -71,6 +71,14 @@ class FilesViewModel @Inject constructor(
         _state.update { it.copy(error = null) }
     }
 
+    fun showError(message: String) {
+        _state.update { it.copy(error = message) }
+    }
+
+    fun openPreviewPath(pathToShow: String, sessionDirectory: String?) {
+        loadPreview(pathToShow, sessionDirectory, isRefresh = false)
+    }
+
     fun syncPathToShow(pathToShow: String?, sessionDirectory: String?) {
         if (pathToShow == null) {
             closePreview()
