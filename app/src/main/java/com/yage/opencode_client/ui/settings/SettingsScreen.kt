@@ -52,6 +52,7 @@ import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
 import com.yage.opencode_client.data.model.SshTunnelConfig
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.AIUsageSettings
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +63,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedAIBuilder = remember(viewModel) { viewModel.getAIBuilderSettings() }
+    val savedAIUsage = remember(viewModel) { viewModel.getAIUsageSettings() }
     val context = LocalContext.current
 
     var showHostProfiles by remember { mutableStateOf(false) }
@@ -75,6 +77,8 @@ fun SettingsScreen(
     // Independent "Settings saved" notice for the Speech section, so it shows in
     // its own section rather than reusing the server section's testResult.
     var aiBuilderSaveMessage by remember { mutableStateOf<String?>(null) }
+    var aiUsageDashboardUrl by remember { mutableStateOf(savedAIUsage.dashboardUrl) }
+    var aiUsageSaveMessage by remember { mutableStateOf<String?>(null) }
     var nfcEnabled by remember { mutableStateOf(viewModel.getNfcEnabled()) }
     var nfcPrompt by remember { mutableStateOf(viewModel.getNfcPrompt()) }
     var nfcAutoSend by remember { mutableStateOf(viewModel.getNfcAutoSend()) }
@@ -106,6 +110,12 @@ fun SettingsScreen(
         if (aiBuilderSaveMessage != null) {
             delay(2000)
             aiBuilderSaveMessage = null
+        }
+    }
+    LaunchedEffect(aiUsageSaveMessage) {
+        if (aiUsageSaveMessage != null) {
+            delay(2000)
+            aiUsageSaveMessage = null
         }
     }
 
@@ -157,6 +167,26 @@ fun SettingsScreen(
                 languageMode = state.languageMode,
                 onThemeSelected = viewModel::setThemeMode,
                 onLanguageSelected = viewModel::setLanguageMode
+            )
+
+            SettingsSectionDivider()
+
+            AIUsageDashboardSection(
+                state = state,
+                dashboardUrl = aiUsageDashboardUrl,
+                saveMessage = aiUsageSaveMessage,
+                onUrlChange = {
+                    aiUsageDashboardUrl = it
+                    aiUsageSaveMessage = null
+                },
+                onTestConnection = {
+                    viewModel.saveAIUsageSettings(AIUsageSettings(aiUsageDashboardUrl))
+                    viewModel.loadAIUsage()
+                },
+                onSave = {
+                    viewModel.saveAIUsageSettings(AIUsageSettings(aiUsageDashboardUrl))
+                    aiUsageSaveMessage = "Settings saved"
+                }
             )
 
             SettingsSectionDivider()

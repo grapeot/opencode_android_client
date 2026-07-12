@@ -7,6 +7,7 @@ OpenCode 的原生 Android 客户端，用于远程连接 OpenCode 服务端、�
 - **Chat**：发送消息、切换模型和 Agent、查看 AI 回复与工具调用（Markdown 渲染、Patch diff、Todo 列表）
 - **Files**：文件树浏览、git 状态标记、代码与 Markdown 预览
 - **Settings**：服务器连接配置、Basic Auth 认证、主题切换（Light / Dark / System）
+- **Usage limits**：可选 AI Usage Dashboard 配置和 provider quota 查看
 - **语音输入**：通过 AI Builder WebSocket API 实时语音转写
 - **平板适配**：手机底部 Tab 导航，平板三栏布局（文件 / 预览 / Chat）
 
@@ -22,6 +23,13 @@ OpenCode 的原生 Android 客户端，用于远程连接 OpenCode 服务端、�
 2. 打开 Android App，进入 Settings，填写服务器地址（如 `http://192.168.x.x:4096`）
 3. 点击 Test Connection 验证连接
 4. 在 Chat 中创建或选择 Session，开始对话
+
+### 可选用量面板
+
+在 Settings 中填写 AI Usage Dashboard 地址后，模型选择器旁会显示当前模型的主要 quota。
+打开 Usage & Limits 时只读取 Dashboard 缓存；点击 Refresh 会等待完整 provider 更新，
+然后重新读取 quota。详情同时显示 API 快照的生成时间与手机本地获取时间。App 不会轮询或
+自动触发 provider refresh；地址留空时不显示任何 quota UI。
 
 ## 远程访问
 

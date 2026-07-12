@@ -46,12 +46,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yage.opencode_client.R
+import com.yage.opencode_client.data.model.AIUsageQuota
+import com.yage.opencode_client.data.model.AIUsageQuotaSnapshot
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.model.TodoItem
@@ -72,6 +75,13 @@ internal data class ChatTopBarState(
     val selectedModelIndex: Int,
     val contextUsage: AppState.ContextUsage?,
     val sessionTodos: List<TodoItem> = emptyList(),
+    val aiUsageEnabled: Boolean = false,
+    val selectedAIUsageQuota: AIUsageQuota? = null,
+    val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
+    val isLoadingAIUsage: Boolean = false,
+    val isRefreshingAIUsage: Boolean = false,
+    val aiUsageError: String? = null,
+    val aiUsageDashboardUrl: String = "",
     val showSettingsButton: Boolean = true,
     val showNewSessionInTopBar: Boolean = true,
     val showSessionListInTopBar: Boolean = true
@@ -87,6 +97,8 @@ internal data class ChatTopBarActions(
     val onRefreshSessions: () -> Unit = {},
     val onToggleSessionExpanded: (String) -> Unit = {},
     val onSelectModel: (Int) -> Unit,
+    val onOpenAIUsage: () -> Unit = {},
+    val onRefreshAIUsage: () -> Unit = {},
     val onNavigateToSettings: () -> Unit = {},
     val onRenameSession: (String) -> Unit = {}
 )
@@ -104,9 +116,13 @@ internal fun ChatTopBar(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showTodoDialog by remember { mutableStateOf(false) }
     var showContextDialog by remember { mutableStateOf(false) }
+    var showAIUsageSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(showSessionSheet) {
         if (showSessionSheet) actions.onRefreshSessions()
+    }
+    LaunchedEffect(showAIUsageSheet) {
+        if (showAIUsageSheet) actions.onOpenAIUsage()
     }
 
     Surface(
@@ -252,6 +268,32 @@ internal fun ChatTopBar(
                         }
                     }
 
+                    if (state.aiUsageEnabled) {
+                        val quota = state.selectedAIUsageQuota
+                        val badgeText = if (quota == null) "-- @ 5h" else "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                        Surface(
+                            onClick = { showAIUsageSheet = true },
+                            shape = RoundedCornerShape(50),
+                            color = Color.Transparent,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+                            modifier = Modifier.testTag("ai_usage.badge")
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = when {
+                                    quota == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    quota.clampedRemainingPercentage <= 10 -> MaterialTheme.colorScheme.error
+                                    quota.clampedRemainingPercentage <= 20 -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                maxLines = 1
+                            )
+                        }
+                    }
+
                     val todoList = state.sessionTodos
                     val todoBadge = if (todoList.isNotEmpty()) {
                         "${todoList.count { it.isCompleted }}/${todoList.size}"
@@ -345,6 +387,19 @@ internal fun ChatTopBar(
                     onOpenSettings = null
                 )
             }
+        }
+    }
+
+    if (showAIUsageSheet) {
+        ModalBottomSheet(onDismissRequest = { showAIUsageSheet = false }) {
+            AIUsageSheet(
+                snapshot = state.aiUsageQuotaSnapshot,
+                isLoading = state.isLoadingAIUsage,
+                isRefreshing = state.isRefreshingAIUsage,
+                error = state.aiUsageError,
+                dashboardUrl = state.aiUsageDashboardUrl,
+                onRefresh = actions.onRefreshAIUsage
+            )
         }
     }
 

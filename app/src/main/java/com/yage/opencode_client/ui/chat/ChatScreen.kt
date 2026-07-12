@@ -166,6 +166,13 @@ fun ChatScreen(
                 selectedModelIndex = state.selectedModelIndex,
                 contextUsage = cachedContextUsage,
                 sessionTodos = state.sessionTodos[state.currentSessionId ?: ""] ?: emptyList(),
+                aiUsageEnabled = state.aiUsageDashboardUrl.isNotBlank() && state.availableModels.getOrNull(state.selectedModelIndex)?.providerId in setOf("openai", "zai-coding-plan", "ollama-cloud"),
+                selectedAIUsageQuota = state.selectedAIUsageQuota,
+                aiUsageQuotaSnapshot = state.aiUsageQuotaSnapshot,
+                isLoadingAIUsage = state.isLoadingAIUsage,
+                isRefreshingAIUsage = state.isRefreshingAIUsage,
+                aiUsageError = state.aiUsageError,
+                aiUsageDashboardUrl = state.aiUsageDashboardUrl,
                 showSettingsButton = showSettingsButton,
                 showNewSessionInTopBar = showNewSessionInTopBar,
                 showSessionListInTopBar = showSessionListInTopBar
@@ -180,6 +187,8 @@ fun ChatScreen(
                 onRefreshSessions = viewModel::loadSessions,
                 onToggleSessionExpanded = viewModel::toggleSessionExpanded,
                 onSelectModel = viewModel::selectModel,
+                onOpenAIUsage = viewModel::loadAIUsage,
+                onRefreshAIUsage = viewModel::refreshAIUsage,
                 onNavigateToSettings = onNavigateToSettings,
                 onRenameSession = { title ->
                     state.currentSessionId?.let { sessionId ->
