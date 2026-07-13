@@ -77,6 +77,28 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getInt(KEY_MODEL_INDEX, 1)
         set(value) = encryptedPrefs.edit().putInt(KEY_MODEL_INDEX, value).apply()
 
+    fun migrateRemovedGpt56SolProModelIndices() {
+        if (encryptedPrefs.getInt(KEY_MODEL_PRESET_SCHEMA_VERSION, 0) >= MODEL_PRESET_SCHEMA_VERSION) return
+
+        val sessionModels = encryptedPrefs.getString(KEY_SESSION_MODELS, null)?.let { encoded ->
+            try {
+                Json.decodeFromString<Map<String, String>>(encoded).mapValues { (_, value) ->
+                    value.toIntOrNull()?.let(::migrateLegacyModelIndex)?.toString() ?: value
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        encryptedPrefs.edit().apply {
+            if (encryptedPrefs.contains(KEY_MODEL_INDEX)) {
+                putInt(KEY_MODEL_INDEX, migrateLegacyModelIndex(encryptedPrefs.getInt(KEY_MODEL_INDEX, 1)))
+            }
+            if (sessionModels != null) putString(KEY_SESSION_MODELS, Json.encodeToString(sessionModels))
+            putInt(KEY_MODEL_PRESET_SCHEMA_VERSION, MODEL_PRESET_SCHEMA_VERSION)
+        }.apply()
+    }
+
     var selectedAgentName: String?
         get() = encryptedPrefs.getString(KEY_AGENT_NAME, null)
         set(value) = encryptedPrefs.edit().putString(KEY_AGENT_NAME, value).apply()
@@ -211,6 +233,7 @@ class SettingsManager @Inject constructor(
         private const val KEY_KNOWN_HOSTS = "ssh_known_hosts_json"
         private const val KEY_SESSION_ID = "session_id"
         private const val KEY_MODEL_INDEX = "model_index"
+        private const val KEY_MODEL_PRESET_SCHEMA_VERSION = "model_preset_schema_version"
         private const val KEY_AGENT_NAME = "agent_name"
         private const val KEY_THEME = "theme"
         private const val KEY_LANGUAGE = "language"
@@ -228,8 +251,16 @@ class SettingsManager @Inject constructor(
         private const val KEY_NFC_PROMPT = "nfc_prompt"
         private const val KEY_NFC_AUTO_SEND = "nfc_auto_send"
 
+        private const val MODEL_PRESET_SCHEMA_VERSION = 1
+
         private fun basicAuthPasswordKey(passwordId: String): String = "basic_auth_password_$passwordId"
     }
+}
+
+internal fun migrateLegacyModelIndex(index: Int): Int = when (index) {
+    6 -> 1 // Removed GPT-5.6 Sol Pro now falls back to regular Sol.
+    7 -> 6 // GPT-5.6 Sol Fast shifted left by one slot.
+    else -> index
 }
 
 enum class ThemeMode {
