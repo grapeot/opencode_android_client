@@ -1017,6 +1017,30 @@ NTAG215 用户可用 504 字节。NDEF TLV wrapper ≈ 3 字节，NDEF Record he
 - **ROM 兼容**：`enableReaderMode` 在 MIUI/HyperOS 不抑制弹窗
 - **Composable 重组**：`handleNfcIntent` 绝不能放在 `setContent` lambda 中
 
+### 5.13 Session Deep Link
+
+V1 严格接受 `opencode://session/<session_id>`。`OpenCodeDeepLinkParser` 使用 `java.net.URI`，供 JVM unit test、系统 Intent 和 Chat Markdown 共用；要求 scheme/host 为 `opencode`/`session`，path 只有一个 segment，ID 以 `ses_` 开头且仅含 ASCII 字母、数字、下划线和连字符。parser 拒绝 userinfo、port、query、fragment、encoded slash、重复 percent encoding 和过长 ID。
+
+Manifest 为 `MainActivity` 增加独立的 `ACTION_VIEW + DEFAULT + BROWSABLE` filter，不与 NFC 的 `NDEF_DISCOVERED` filter 合并。`handleIncomingIntent()` 统一分派 cold-start `intent` 与 warm `onNewIntent()`；NFC debounce 和 feature flag 不作用于 session link。手机成功解析后通过 `deepLinkNavigationVersion` 回到 Chat 顶层 route，平板三栏中的 Chat 始终可见。
+
+ViewModel 状态机为：
+
+```text
+receive URL
+  -> strict parse
+  -> store latest pending session ID
+  -> wait while disconnected
+  -> GET /session/:id on current Host
+  -> upsert complete Session
+  -> selectSession + existing message/status hydration
+```
+
+`deepLinkRouteGeneration` 和当前 Host Profile ID 共同校验异步结果。新链接覆盖旧链接；Host 切换时取消旧 job、递增 generation、保留 pending ID，待新 Host 连接成功后重新 resolve。GET 成功前不修改 `currentSessionId` 或 messages。Session 列表刷新使用 `mergeRefreshedSessionsPreservingLocalActivity(..., currentSessionId)` 保留不在当前分页窗口内的已验证目标，同时用原始 server response 数量计算 `hasMoreSessions`。
+
+Chat Markdown 在 `WorkspaceMarkdownLinkResolver` 之前拦截 `opencode` scheme：合法链接进入同一 ViewModel router，非法链接显示全局 deep-link error；普通 HTTP、file 和 workspace relative link 保持原路径。Activity 根层显示 `deep-link-opening` / `deep-link-error`，因此从 Chat、Files 或 Settings 唤起都可见。
+
+安全边界与 iOS 一致：当前 Host only，不轮询其他 Host，不恢复离线 archive DB，不接受 server/凭证/prompt/tool action，不自动执行 Markdown link。测试覆盖 parser contract、repository by-ID path、断连 pending、成功 hydration、失败保留上下文和 session-window preservation；系统 cold/warm Intent 的 emulator E2E 作为后续可选 Tier 3，不在物理设备执行。
+
 ---
 
 ## 6. 安全设计

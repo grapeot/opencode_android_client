@@ -48,6 +48,10 @@
     <string name="common_import">导入</string>
     <string name="common_delete">删除</string>
     <string name="common_refresh">刷新</string>
+    <string name="deep_link_opening">正在打开会话…</string>
+    <string name="deep_link_invalid">这个 OpenCode 会话链接无效。</string>
+    <string name="deep_link_session_unavailable">当前主机上找不到这个会话。它可能属于其他主机，或只存在于离线历史中。</string>
+    <string name="deep_link_open_failed">无法打开这个会话，请检查当前主机连接后重试。</string>
     <string name="common_ok">确定</string>
     <string name="common_json">JSON</string>
     <string name="sessions_title">会话</string>

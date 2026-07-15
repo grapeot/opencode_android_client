@@ -114,6 +114,18 @@ class OpenCodeRepositoryTest {
     }
 
     @Test
+    fun `getSession requests session by id`() = runBlocking {
+        val session = Session(id = "ses_target", directory = "/project", title = "Target")
+        server.enqueue(jsonResponse(json.encodeToString(session)))
+
+        val result = repository.getSession(session.id)
+
+        assertTrue(result.isSuccess)
+        assertEquals(session, result.getOrThrow())
+        assertEquals("/session/ses_target", server.takeRequest().path)
+    }
+
+    @Test
     fun `getAgents returns list`() = runBlocking {
         val agents = listOf(
             AgentInfo(

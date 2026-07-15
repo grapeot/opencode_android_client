@@ -2,6 +2,7 @@ package com.yage.opencode_client.data.repository
 
 import com.yage.opencode_client.data.api.*
 import com.yage.opencode_client.data.model.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -81,32 +82,44 @@ class OpenCodeRepository @Inject constructor() {
         rebuildClients()
     }
 
-    suspend fun checkHealth(): Result<HealthResponse> = runCatching { api.getHealth() }
+    private suspend fun <T> apiCall(block: suspend () -> T): Result<T> {
+        return try {
+            Result.success(block())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Result.failure(error)
+        }
+    }
 
-    suspend fun getSessions(limit: Int? = null): Result<List<Session>> = runCatching { api.getSessions(limit) }
+    suspend fun checkHealth(): Result<HealthResponse> = apiCall { api.getHealth() }
 
-    suspend fun createSession(title: String? = null): Result<Session> = runCatching {
+    suspend fun getSessions(limit: Int? = null): Result<List<Session>> = apiCall { api.getSessions(limit) }
+
+    suspend fun getSession(sessionId: String): Result<Session> = apiCall { api.getSession(sessionId) }
+
+    suspend fun createSession(title: String? = null): Result<Session> = apiCall {
         api.createSession(CreateSessionRequest(title = title))
     }
 
-    suspend fun updateSession(sessionId: String, title: String): Result<Session> = runCatching {
+    suspend fun updateSession(sessionId: String, title: String): Result<Session> = apiCall {
         api.updateSession(sessionId, UpdateSessionRequest(title = title))
     }
 
-    suspend fun updateSessionArchived(sessionId: String, archived: Long): Result<Session> = runCatching {
+    suspend fun updateSessionArchived(sessionId: String, archived: Long): Result<Session> = apiCall {
         api.updateSession(sessionId, UpdateSessionRequest(time = UpdateSessionTimeRequest(archived = archived)))
     }
 
-    suspend fun deleteSession(sessionId: String): Result<Unit> = runCatching {
+    suspend fun deleteSession(sessionId: String): Result<Unit> = apiCall {
         api.deleteSession(sessionId)
     }
 
-    suspend fun getSessionStatus(): Result<Map<String, SessionStatus>> = runCatching {
+    suspend fun getSessionStatus(): Result<Map<String, SessionStatus>> = apiCall {
         api.getSessionStatus()
     }
 
     suspend fun getMessages(sessionId: String, limit: Int? = null): Result<List<MessageWithParts>> =
-        runCatching { api.getMessages(sessionId, limit) }
+        apiCall { api.getMessages(sessionId, limit) }
 
     suspend fun sendMessage(
         sessionId: String,
@@ -114,7 +127,7 @@ class OpenCodeRepository @Inject constructor() {
         agent: String = "build",
         model: Message.ModelInfo? = null,
         attachments: List<ComposerImageAttachment> = emptyList()
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = apiCall {
         val parts = buildList {
             if (text.isNotBlank()) add(PromptRequest.PartInput(type = "text", text = text))
             attachments.forEach { attachment ->
@@ -140,19 +153,19 @@ class OpenCodeRepository @Inject constructor() {
         }
     }
 
-    suspend fun abortSession(sessionId: String): Result<Unit> = runCatching {
+    suspend fun abortSession(sessionId: String): Result<Unit> = apiCall {
         api.abortSession(sessionId)
     }
 
-    suspend fun forkSession(sessionId: String, messageId: String? = null): Result<Session> = runCatching {
+    suspend fun forkSession(sessionId: String, messageId: String? = null): Result<Session> = apiCall {
         api.forkSession(sessionId, ForkSessionRequest(messageId))
     }
 
-    suspend fun revertSession(sessionId: String, messageId: String, partId: String? = null): Result<Session> = runCatching {
+    suspend fun revertSession(sessionId: String, messageId: String, partId: String? = null): Result<Session> = apiCall {
         api.revertSession(sessionId, RevertSessionRequest(messageId, partId))
     }
 
-    suspend fun getPendingPermissions(): Result<List<PermissionRequest>> = runCatching {
+    suspend fun getPendingPermissions(): Result<List<PermissionRequest>> = apiCall {
         api.getPendingPermissions()
     }
 
@@ -160,15 +173,15 @@ class OpenCodeRepository @Inject constructor() {
         sessionId: String,
         permissionId: String,
         response: PermissionResponse
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = apiCall {
         api.respondPermission(sessionId, permissionId, PermissionResponseRequest(response.value))
     }
 
-    suspend fun getPendingQuestions(): Result<List<QuestionRequest>> = runCatching {
+    suspend fun getPendingQuestions(): Result<List<QuestionRequest>> = apiCall {
         api.getPendingQuestions()
     }
 
-    suspend fun replyQuestion(requestId: String, answers: List<List<String>>): Result<Unit> = runCatching {
+    suspend fun replyQuestion(requestId: String, answers: List<List<String>>): Result<Unit> = apiCall {
         val response = api.replyQuestion(requestId, QuestionReplyRequest(answers))
         if (!response.isSuccessful) {
             val errorBody = response.errorBody()?.string() ?: response.message()
@@ -176,7 +189,7 @@ class OpenCodeRepository @Inject constructor() {
         }
     }
 
-    suspend fun rejectQuestion(requestId: String): Result<Unit> = runCatching {
+    suspend fun rejectQuestion(requestId: String): Result<Unit> = apiCall {
         val response = api.rejectQuestion(requestId)
         if (!response.isSuccessful) {
             val errorBody = response.errorBody()?.string() ?: response.message()
@@ -184,31 +197,31 @@ class OpenCodeRepository @Inject constructor() {
         }
     }
 
-    suspend fun getProviders(): Result<ProvidersResponse> = runCatching { api.getProviders() }
+    suspend fun getProviders(): Result<ProvidersResponse> = apiCall { api.getProviders() }
 
-    suspend fun getAgents(): Result<List<AgentInfo>> = runCatching { api.getAgents() }
+    suspend fun getAgents(): Result<List<AgentInfo>> = apiCall { api.getAgents() }
 
-    suspend fun getSessionDiff(sessionId: String): Result<List<FileDiff>> = runCatching {
+    suspend fun getSessionDiff(sessionId: String): Result<List<FileDiff>> = apiCall {
         api.getSessionDiff(sessionId)
     }
 
-    suspend fun getSessionTodos(sessionId: String): Result<List<TodoItem>> = runCatching {
+    suspend fun getSessionTodos(sessionId: String): Result<List<TodoItem>> = apiCall {
         api.getSessionTodos(sessionId)
     }
 
-    suspend fun getFileTree(path: String? = null): Result<List<FileNode>> = runCatching {
+    suspend fun getFileTree(path: String? = null): Result<List<FileNode>> = apiCall {
         api.getFileTree(path ?: "")
     }
 
-    suspend fun getFileContent(path: String): Result<FileContent> = runCatching {
+    suspend fun getFileContent(path: String): Result<FileContent> = apiCall {
         api.getFileContent(path)
     }
 
-    suspend fun getFileStatus(): Result<List<FileStatusEntry>> = runCatching {
+    suspend fun getFileStatus(): Result<List<FileStatusEntry>> = apiCall {
         api.getFileStatus()
     }
 
-    suspend fun findFile(query: String, limit: Int = 50): Result<List<String>> = runCatching {
+    suspend fun findFile(query: String, limit: Int = 50): Result<List<String>> = apiCall {
         api.findFile(query, limit)
     }
 

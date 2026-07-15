@@ -13,11 +13,13 @@ import com.yage.opencode_client.data.model.SSEEvent
 import com.yage.opencode_client.data.model.SSEPayload
 import com.yage.opencode_client.data.model.HealthResponse
 import com.yage.opencode_client.data.model.HostProfile
+import com.yage.opencode_client.data.model.HostTransport
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ssh.SSHKeyManager
 import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ui.AppState
+import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.ModelPresets
 import com.yage.opencode_client.ui.session.buildSessionTree
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -152,6 +155,176 @@ class MainViewModelTest {
         return MessageDigest.getInstance("SHA-256")
             .digest(input.toByteArray())
             .joinToString("") { "%02x".format(it) }
+    }
+
+    @Test
+    fun `deep link stays pending until connected`() = runTest {
+        val viewModel = createViewModel()
+
+        viewModel.receiveDeepLink("opencode://session/ses_later")
+        advanceUntilIdle()
+
+        assertEquals("ses_later", viewModel.state.value.pendingDeepLinkSessionId)
+        assertFalse(viewModel.state.value.isResolvingDeepLink)
+        coVerify(exactly = 0) { repository.getSession(any()) }
+    }
+
+    @Test
+    fun `deep link verifies and hydrates session outside list`() = runTest {
+        val source = Session(id = "ses_source", directory = "/source", title = "Source")
+        val target = Session(id = "ses_target", directory = "/target", title = "Target")
+        coEvery { repository.getSession(target.id) } returns Result.success(target)
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(isConnected = true, sessions = listOf(source), currentSessionId = source.id)
+        }
+
+        viewModel.receiveDeepLink("opencode://session/${target.id}")
+        advanceUntilIdle()
+
+        assertEquals(target.id, viewModel.state.value.currentSessionId)
+        assertEquals(target, viewModel.state.value.currentSession)
+        assertNull(viewModel.state.value.pendingDeepLinkSessionId)
+        assertFalse(viewModel.state.value.isResolvingDeepLink)
+        assertEquals(1L, viewModel.state.value.deepLinkNavigationVersion)
+        coVerify(exactly = 1) { repository.getSession(target.id) }
+        coVerify(atLeast = 1) { repository.getMessages(target.id, any()) }
+    }
+
+    @Test
+    fun `deep link failure preserves current session`() = runTest {
+        val source = Session(id = "ses_source", directory = "/source", title = "Source")
+        coEvery { repository.getSession("ses_missing") } returns Result.failure(IllegalStateException("offline"))
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(isConnected = true, sessions = listOf(source), currentSessionId = source.id)
+        }
+
+        viewModel.receiveDeepLink("opencode://session/ses_missing")
+        advanceUntilIdle()
+
+        assertEquals(source.id, viewModel.state.value.currentSessionId)
+        assertEquals(listOf(source), viewModel.state.value.sessions)
+        assertEquals(DeepLinkError.OPEN_FAILED, viewModel.state.value.deepLinkError)
+    }
+
+    @Test
+    fun `invalid deep link cancels older pending route`() = runTest {
+        val viewModel = createViewModel()
+        viewModel.receiveDeepLink("opencode://session/ses_older")
+
+        viewModel.receiveDeepLink("opencode://session/not-valid")
+        advanceUntilIdle()
+
+        assertNull(viewModel.state.value.pendingDeepLinkSessionId)
+        assertEquals(DeepLinkError.INVALID, viewModel.state.value.deepLinkError)
+        coVerify(exactly = 0) { repository.getSession(any()) }
+    }
+
+    @Test
+    fun `reprocessing same pending deep link invalidates cancelled request`() = runTest {
+        val target = Session(id = "ses_target", directory = "/target", title = "Target")
+        var requestCount = 0
+        coEvery { repository.getSession(target.id) } coAnswers {
+            requestCount += 1
+            if (requestCount == 1) {
+                delay(10_000)
+            }
+            Result.success(target)
+        }
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(isConnected = true) }
+
+        viewModel.receiveDeepLink("opencode://session/${target.id}")
+        runCurrent()
+        viewModel.processPendingDeepLinkIfPossible()
+        advanceUntilIdle()
+
+        assertEquals(2, requestCount)
+        assertEquals(target.id, viewModel.state.value.currentSessionId)
+        assertNull(viewModel.state.value.pendingDeepLinkSessionId)
+        assertNull(viewModel.state.value.deepLinkError)
+    }
+
+    @Test
+    fun `host switch clears old runtime and keeps pending deep link`() = runTest {
+        val first = HostProfile(
+            id = "host-1",
+            name = "First",
+            transport = HostTransport.DIRECT,
+            serverUrl = "http://first.test"
+        )
+        val second = HostProfile(
+            id = "host-2",
+            name = "Second",
+            transport = HostTransport.DIRECT,
+            serverUrl = "http://second.test"
+        )
+        var currentProfile = first
+        every { hostProfileStore.currentProfile() } answers { currentProfile }
+        every { hostProfileStore.profiles() } returns listOf(first, second)
+        every { hostProfileStore.select(second.id) } answers {
+            currentProfile = second
+            second
+        }
+        coEvery { repository.checkHealth() } returns Result.failure(IllegalStateException("offline"))
+        coEvery { repository.getSession("ses_target") } coAnswers {
+            delay(10_000)
+            Result.success(Session(id = "ses_target", directory = "/target", title = "Target"))
+        }
+        val viewModel = createViewModel()
+        val source = Session(id = "ses_source", directory = "/source", title = "Source")
+        updateState(viewModel) {
+            it.copy(
+                isConnected = true,
+                sessions = listOf(source),
+                currentSessionId = source.id,
+                messages = listOf(MessageWithParts(Message(id = "m1", sessionId = source.id, role = "user"))),
+                streamingPartTexts = mapOf("p1" to "old"),
+                streamingReasoningPart = Part(id = "p2", type = "reasoning", text = "old"),
+                sessionTodos = mapOf(source.id to emptyList()),
+                sendingSessionIds = setOf(source.id),
+                filePathToShowInFiles = "old.md"
+            )
+        }
+        viewModel.receiveDeepLink("opencode://session/ses_target")
+        runCurrent()
+
+        viewModel.selectHostProfile(second.id)
+        advanceUntilIdle()
+
+        assertEquals(second.id, viewModel.state.value.currentHostProfileId)
+        assertTrue(viewModel.state.value.sessions.isEmpty())
+        assertNull(viewModel.state.value.currentSessionId)
+        assertTrue(viewModel.state.value.messages.isEmpty())
+        assertTrue(viewModel.state.value.streamingPartTexts.isEmpty())
+        assertNull(viewModel.state.value.streamingReasoningPart)
+        assertTrue(viewModel.state.value.sessionTodos.isEmpty())
+        assertTrue(viewModel.state.value.sendingSessionIds.isEmpty())
+        assertNull(viewModel.state.value.filePathToShowInFiles)
+        assertEquals("ses_target", viewModel.state.value.pendingDeepLinkSessionId)
+        assertFalse(viewModel.state.value.isResolvingDeepLink)
+        verify(exactly = 1) { tunnelManager.disconnect() }
+    }
+
+    @Test
+    fun `selectSession clears streaming state from previous session`() = runTest {
+        val source = Session(id = "ses_source", directory = "/source", title = "Source")
+        val target = Session(id = "ses_target", directory = "/target", title = "Target")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                sessions = listOf(source, target),
+                currentSessionId = source.id,
+                streamingPartTexts = mapOf("part" to "old text"),
+                streamingReasoningPart = Part(id = "reasoning", type = "reasoning", text = "old")
+            )
+        }
+
+        viewModel.selectSession(target.id)
+
+        assertTrue(viewModel.state.value.streamingPartTexts.isEmpty())
+        assertNull(viewModel.state.value.streamingReasoningPart)
     }
 
     @Test

@@ -25,58 +25,80 @@ class JschTunnelManager @Inject constructor(
     private val knownHostStore: KnownHostStore
 ) : TunnelManager {
     private var active: ActiveTunnel? = null
+    private val activeLock = Any()
+    private var connectionGeneration = 0L
 
-    override suspend fun ensureStarted(config: SshTunnelConfig): TunnelResult = withContext(Dispatchers.IO) {
-        config.validationError?.let { return@withContext TunnelResult.Failure(ConnectionPhase.SSH_GATEWAY, it) }
-        active?.takeIf { it.config == config && it.session.isConnected }?.let {
-            return@withContext TunnelResult.Success(it.localUrl)
-        }
-        disconnect()
-
-        val privateKey = keyManager.privateKeyBytes() ?: run {
-            keyManager.ensureKeyPair()
-            keyManager.privateKeyBytes()
-        } ?: return@withContext TunnelResult.Failure(ConnectionPhase.SSH_AUTH, "SSH private key is missing")
-
-        val localPort = chooseLocalPort(preferred = 4096)
-        val hostKeyRepository = TofuHostKeyRepository(config, knownHostStore)
-        val jsch = JSch().apply {
-            ensureBouncyCastleProvider()
-            addIdentity("opencode-android", privateKey, null, null)
-            this.hostKeyRepository = hostKeyRepository
-        }
-
-        val session = try {
-            jsch.getSession(config.username.trim(), config.host.trim(), config.port).apply {
-                setConfig("StrictHostKeyChecking", "yes")
-                userInfo = NonInteractiveUserInfo
-                connect(15_000)
+    override suspend fun ensureStarted(config: SshTunnelConfig): TunnelResult {
+        val generation = synchronized(activeLock) { ++connectionGeneration }
+        return withContext(Dispatchers.IO) {
+            config.validationError?.let { return@withContext TunnelResult.Failure(ConnectionPhase.SSH_GATEWAY, it) }
+            synchronized(activeLock) {
+                if (generation != connectionGeneration) {
+                    return@withContext TunnelResult.Failure(ConnectionPhase.SSH_GATEWAY, "SSH connection was superseded")
+                }
+                active?.takeIf { it.config == config && it.session.isConnected }?.let {
+                    return@withContext TunnelResult.Success(it.localUrl)
+                }
+                active?.session?.disconnect()
+                active = null
             }
-        } catch (error: Exception) {
-            hostKeyRepository.mismatch?.let { mismatch ->
-                return@withContext TunnelResult.Failure(
-                    ConnectionPhase.SSH_HOST_KEY,
-                    "SSH host key changed. Expected ${mismatch.expected}, got ${mismatch.actual}. Reset trusted host only if you recognize this server."
-                )
+
+            val privateKey = keyManager.privateKeyBytes() ?: run {
+                keyManager.ensureKeyPair()
+                keyManager.privateKeyBytes()
+            } ?: return@withContext TunnelResult.Failure(ConnectionPhase.SSH_AUTH, "SSH private key is missing")
+
+            val localPort = chooseLocalPort(preferred = 4096)
+            val hostKeyRepository = TofuHostKeyRepository(config, knownHostStore)
+            val jsch = JSch().apply {
+                ensureBouncyCastleProvider()
+                addIdentity("opencode-android", privateKey, null, null)
+                this.hostKeyRepository = hostKeyRepository
             }
-            return@withContext TunnelResult.Failure(classifyConnectFailure(error), error.message ?: "SSH connection failed")
-        }
 
-        try {
-            session.setPortForwardingL(localPort, "127.0.0.1", config.remotePort)
-        } catch (error: Exception) {
-            session.disconnect()
-            return@withContext TunnelResult.Failure(ConnectionPhase.LOCAL_TUNNEL, error.message ?: "Local tunnel failed")
-        }
+            val session = try {
+                jsch.getSession(config.username.trim(), config.host.trim(), config.port).apply {
+                    setConfig("StrictHostKeyChecking", "yes")
+                    userInfo = NonInteractiveUserInfo
+                    connect(15_000)
+                }
+            } catch (error: Exception) {
+                hostKeyRepository.mismatch?.let { mismatch ->
+                    return@withContext TunnelResult.Failure(
+                        ConnectionPhase.SSH_HOST_KEY,
+                        "SSH host key changed. Expected ${mismatch.expected}, got ${mismatch.actual}. Reset trusted host only if you recognize this server."
+                    )
+                }
+                return@withContext TunnelResult.Failure(classifyConnectFailure(error), error.message ?: "SSH connection failed")
+            }
 
-        val tunnel = ActiveTunnel(config = config, localPort = localPort, session = session)
-        active = tunnel
-        TunnelResult.Success(tunnel.localUrl)
+            val tunnel = ActiveTunnel(config = config, localPort = localPort, session = session)
+            synchronized(activeLock) {
+                if (generation != connectionGeneration) {
+                    session.disconnect()
+                    return@withContext TunnelResult.Failure(ConnectionPhase.SSH_GATEWAY, "SSH connection was superseded")
+                }
+                try {
+                    session.setPortForwardingL(localPort, "127.0.0.1", config.remotePort)
+                } catch (error: Exception) {
+                    session.disconnect()
+                    return@withContext TunnelResult.Failure(
+                        ConnectionPhase.LOCAL_TUNNEL,
+                        error.message ?: "Local tunnel failed"
+                    )
+                }
+                active = tunnel
+            }
+            TunnelResult.Success(tunnel.localUrl)
+        }
     }
 
     override fun disconnect() {
-        active?.session?.disconnect()
-        active = null
+        synchronized(activeLock) {
+            connectionGeneration++
+            active?.session?.disconnect()
+            active = null
+        }
     }
 
     private fun chooseLocalPort(preferred: Int): Int {

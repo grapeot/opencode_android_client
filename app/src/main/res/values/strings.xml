@@ -48,6 +48,10 @@
     <string name="common_import">Import</string>
     <string name="common_delete">Delete</string>
     <string name="common_refresh">Refresh</string>
+    <string name="deep_link_opening">Opening session…</string>
+    <string name="deep_link_invalid">This OpenCode session link is invalid.</string>
+    <string name="deep_link_session_unavailable">This session is not available on the current host. It may belong to another host or exist only in offline history.</string>
+    <string name="deep_link_open_failed">OpenCode could not open this session. Check the current host connection and try again.</string>
     <string name="common_ok">OK</string>
     <string name="common_json">JSON</string>
     <string name="sessions_title">Sessions</string>
