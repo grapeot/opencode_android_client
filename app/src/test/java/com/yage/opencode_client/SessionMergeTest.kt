@@ -6,6 +6,20 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SessionMergeTest {
+    @Test
+    fun `preserves selected local session outside refreshed window`() {
+        val selected = Session(id = "ses_old", directory = "/old", title = "Old target")
+        val recent = Session(id = "ses_recent", directory = "/new", title = "Recent")
+
+        val merged = mergeRefreshedSessionsPreservingLocalActivity(
+            refreshed = listOf(recent),
+            local = listOf(selected),
+            currentSessionId = selected.id
+        )
+
+        assertEquals(listOf(selected, recent), merged)
+    }
+
 
     @Test
     fun `fresher server data wins title and time`() {

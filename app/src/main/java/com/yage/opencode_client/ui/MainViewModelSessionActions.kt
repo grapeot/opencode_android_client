@@ -31,10 +31,14 @@ internal fun launchLoadSessions(
         repository.getSessions(limit)
             .onSuccess { sessions ->
                 state.update {
-                    val mergedSessions = mergeRefreshedSessionsPreservingLocalActivity(sessions, it.sessions)
+                    val mergedSessions = mergeRefreshedSessionsPreservingLocalActivity(
+                        sessions,
+                        it.sessions,
+                        it.currentSessionId
+                    )
                     it.copy(
                         sessions = mergedSessions,
-                        hasMoreSessions = mergedSessions.size >= limit,
+                        hasMoreSessions = sessions.size >= limit,
                         isLoadingMoreSessions = false,
                         isRefreshingSessions = false
                     )
@@ -94,11 +98,15 @@ internal fun launchLoadMoreSessions(
                     return@onSuccess
                 }
                 state.update {
-                    val mergedSessions = mergeRefreshedSessionsPreservingLocalActivity(sessions, it.sessions)
+                    val mergedSessions = mergeRefreshedSessionsPreservingLocalActivity(
+                        sessions,
+                        it.sessions,
+                        it.currentSessionId
+                    )
                     it.copy(
                         sessions = mergedSessions,
                         loadedSessionLimit = nextLimit,
-                        hasMoreSessions = mergedSessions.size >= nextLimit,
+                        hasMoreSessions = sessions.size >= nextLimit,
                         isLoadingMoreSessions = false
                     )
                 }
@@ -156,6 +164,8 @@ internal fun selectSessionState(
         it.copy(
             currentSessionId = sessionId,
             messages = emptyList(),
+            streamingPartTexts = emptyMap(),
+            streamingReasoningPart = null,
             messageLimit = 30,
             inputText = restoredDraft
         )

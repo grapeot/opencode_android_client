@@ -8,8 +8,10 @@ import com.yage.opencode_client.ui.files.FilesViewModel
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -59,6 +61,29 @@ class FilesViewModelTest {
         assertEquals("", viewModel.state.value.currentPath)
         coVerify { repository.getFileTree(null) }
         coVerify { repository.getFileStatus() }
+    }
+
+    @Test
+    fun `resetForHost ignores a file response from the previous host`() = runTest {
+        val oldResponse = CompletableDeferred<Result<List<FileNode>>>()
+        val oldFiles = listOf(FileNode(name = "old.txt", path = "old.txt", type = "file"))
+        val newFiles = listOf(FileNode(name = "new.txt", path = "new.txt", type = "file"))
+        var calls = 0
+        coEvery { repository.getFileTree(null) } coAnswers {
+            if (calls++ == 0) oldResponse.await() else Result.success(newFiles)
+        }
+
+        val viewModel = FilesViewModel(repository)
+        runCurrent()
+
+        viewModel.resetForHost()
+        runCurrent()
+        assertEquals(newFiles, viewModel.state.value.files)
+
+        oldResponse.complete(Result.success(oldFiles))
+        advanceUntilIdle()
+
+        assertEquals(newFiles, viewModel.state.value.files)
     }
 
     @Test

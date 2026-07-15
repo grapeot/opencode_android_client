@@ -31,6 +31,7 @@ class FilesViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(FilesUiState())
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
+    private var hostGeneration = 0L
 
     init {
         refresh()
@@ -39,6 +40,12 @@ class FilesViewModel @Inject constructor(
     fun refresh() {
         loadFiles(_state.value.currentPath)
         loadFileStatuses()
+    }
+
+    fun resetForHost() {
+        hostGeneration++
+        _state.value = FilesUiState()
+        refresh()
     }
 
     fun navigateUp() {
@@ -95,12 +102,15 @@ class FilesViewModel @Inject constructor(
 
     private fun loadPreview(pathToShow: String, sessionDirectory: String?, isRefresh: Boolean) {
         val relPath = resolveRelativePreviewPath(pathToShow, sessionDirectory)
+        val generation = hostGeneration
         viewModelScope.launch {
+            if (generation != hostGeneration) return@launch
             if (isRefresh) {
                 _state.update { it.copy(isPreviewRefreshing = true, error = null) }
             }
             repository.getFileContent(relPath)
                 .onSuccess { content ->
+                    if (generation != hostGeneration) return@onSuccess
                     if (!content.content.isNullOrBlank()) {
                         _state.update {
                             it.copy(
@@ -111,11 +121,13 @@ class FilesViewModel @Inject constructor(
                             )
                         }
                     } else {
-                        loadDirectoryPreview(pathToShow, relPath, isRefresh)
+                        loadDirectoryPreview(pathToShow, relPath, isRefresh, generation)
                     }
                 }
                 .onFailure {
-                    loadDirectoryPreview(pathToShow, relPath, isRefresh)
+                    if (generation == hostGeneration) {
+                        loadDirectoryPreview(pathToShow, relPath, isRefresh, generation)
+                    }
                 }
         }
     }
@@ -134,71 +146,94 @@ class FilesViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadDirectoryPreview(path: String, relPath: String, isRefresh: Boolean = false) {
+    private suspend fun loadDirectoryPreview(
+        path: String,
+        relPath: String,
+        isRefresh: Boolean = false,
+        generation: Long = hostGeneration
+    ) {
         repository.getFileTree(relPath)
-            .onSuccess { tree -> setDirectoryPreview(path, relPath, tree) }
+            .onSuccess { tree ->
+                if (generation == hostGeneration) setDirectoryPreview(path, relPath, tree)
+            }
             .onFailure { throwable ->
-                _state.update {
-                    it.copy(
-                        isPreviewRefreshing = if (isRefresh) false else it.isPreviewRefreshing,
-                        error = throwable.message
-                    )
+                if (generation == hostGeneration) {
+                    _state.update {
+                        it.copy(
+                            isPreviewRefreshing = if (isRefresh) false else it.isPreviewRefreshing,
+                            error = throwable.message
+                        )
+                    }
                 }
             }
     }
 
     private fun loadFiles(path: String) {
+        val generation = hostGeneration
         viewModelScope.launch {
+            if (generation != hostGeneration) return@launch
             _state.update { it.copy(isLoading = true, error = null) }
             repository.getFileTree(path.ifEmpty { null })
                 .onSuccess { tree ->
-                    _state.update {
-                        it.copy(
-                            files = tree,
-                            isLoading = false
-                        )
+                    if (generation == hostGeneration) {
+                        _state.update {
+                            it.copy(
+                                files = tree,
+                                isLoading = false
+                            )
+                        }
                     }
                 }
                 .onFailure { throwable ->
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            error = throwable.message
-                        )
+                    if (generation == hostGeneration) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                error = throwable.message
+                            )
+                        }
                     }
                 }
         }
     }
 
     private fun loadFileStatuses() {
+        val generation = hostGeneration
         viewModelScope.launch {
             repository.getFileStatus()
                 .onSuccess { statuses ->
-                    _state.update {
-                        it.copy(
-                            fileStatuses = statuses.mapNotNull { entry ->
-                                entry.path?.let { path -> path to (entry.status ?: "untracked") }
-                            }.toMap()
-                        )
+                    if (generation == hostGeneration) {
+                        _state.update {
+                            it.copy(
+                                fileStatuses = statuses.mapNotNull { entry ->
+                                    entry.path?.let { path -> path to (entry.status ?: "untracked") }
+                                }.toMap()
+                            )
+                        }
                     }
                 }
         }
     }
 
     private fun loadFileContent(path: String) {
+        val generation = hostGeneration
         viewModelScope.launch {
             repository.getFileContent(path)
                 .onSuccess { content ->
-                    _state.update {
-                        it.copy(
-                            selectedFileContent = content,
-                            selectedFilePath = path,
-                            error = null
-                        )
+                    if (generation == hostGeneration) {
+                        _state.update {
+                            it.copy(
+                                selectedFileContent = content,
+                                selectedFilePath = path,
+                                error = null
+                            )
+                        }
                     }
                 }
                 .onFailure { throwable ->
-                    _state.update { it.copy(error = throwable.message) }
+                    if (generation == hostGeneration) {
+                        _state.update { it.copy(error = throwable.message) }
+                    }
                 }
         }
     }

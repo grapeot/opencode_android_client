@@ -40,6 +40,7 @@ import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.files.FilesScreen
 import com.yage.opencode_client.ui.files.WorkspaceMarkdownLinkResolver
+import com.yage.opencode_client.util.OpenCodeDeepLinkParser
 import com.yage.opencode_client.ui.sanitizeBearerToken
 import kotlinx.coroutines.launch
 
@@ -79,6 +80,10 @@ fun ChatScreen(
     var linkError by remember { mutableStateOf<String?>(null) }
 
     fun handleAssistantMarkdownLink(href: String) {
+        if (OpenCodeDeepLinkParser.handles(href)) {
+            viewModel.receiveDeepLink(href)
+            return
+        }
         val workspaceDirectory = state.currentSession?.directory
         when (val resolution = WorkspaceMarkdownLinkResolver.resolve(href, workspaceDirectory)) {
             is WorkspaceMarkdownLinkResolver.Resolution.External -> {

@@ -264,8 +264,16 @@ Android 端需要补齐 iOS 已有的连接能力，而不是继续把 Tailscale
 - NTAG215 用户可用 504 字节，扣 NDEF overhead 后 prompt 上限 480 UTF-8 字节
 - 熄屏不工作（Android tag dispatch 要求屏幕亮）
 - tag 内容明文，无加密
-- 自定义 scheme `opencode://` 仅 Android 可用，iOS 需另外走 Universal Links
+- NFC prompt action 仍是 Android 专属；session 导航则由 iOS/Android 共享 `opencode://session/<id>` contract
 - 非目标：熄屏触发、多 tag 身份管理、iOS 适配、tag 内容加密、从服务器拉 prompt 的间接模式
+
+#### Session Deep Link（跨平台会话导航）
+
+iOS 与 Android 共享同一个只读导航协议：`opencode://session/<session_id>`。链接可以来自 Chat 中的 Agent Markdown，也可以来自邮件、Notes、网页或系统 Intent。用户点击后，客户端只在当前 Host 调用 `GET /session/:id` 验证；成功才切换到目标 session 和 Chat，失败保留原上下文并显示全局错误。
+
+Android cold start 与 warm launch 都支持该协议。连接尚未恢复时保存最后一个 pending link，连接成功后再解析。目标 session 不要求已进入当前 100 条列表窗口；验证成功后把完整 Session 注入列表，保证 Chat、Files 和 workspace Markdown link 使用目标 `directory`。
+
+Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜索页面、embedding 索引或离线 archive 读取能力。V1 不自动切换 Host，不携带 Host Profile、server URL、凭证、query 或绝对路径，不支持 message 定位，也不能发送 prompt、批准权限、执行 tool、删除或归档 session。
 
 ---
 
@@ -334,6 +342,7 @@ Android 端需要补齐 iOS 已有的连接能力，而不是继续把 Tailscale
 | Fork Session | 消息节点 fork | ✅ Phase 5b 完成 | API + DropdownMenu 已实现 |
 | Markdown Web Preview | Files 默认 Web Preview，Native/Source 回退 | 🔲 Phase 7 | 对齐 iOS PR #94，Android 使用本地 WebView + bundled JS/CSS |
 | Tablet Sessions pane collapse | 左侧 Sessions pane 可折叠 | 🔲 Phase 7 | 对齐 iOS PR #95，只影响 expanded width 三栏布局 |
+| Session Deep Link | `opencode://session/<id>` cold/warm + Chat Markdown | ✅ 已对齐 | 当前 Host 验证、pending reconnect、旧响应失效 |
 
 ---
 

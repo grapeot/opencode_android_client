@@ -1,5 +1,14 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-07-15 — Session Deep Link
+
+- 分支：`feat/session-deep-links`，基于 `github/master`；本地 `master` 的独立 commit `18f4a30` 保持不动，不混入本 PR。
+- 对齐 iOS `opencode://session/<session_id>` contract：Manifest system Intent、Chat Markdown、严格 JVM parser 和 ViewModel router 共用同一路径。
+- 当前 Host 通过 `GET /session/:id` 验证后才切 session；断连时 pending，Host 切换/连续链接用 generation token 丢弃旧响应。
+- by-ID 目标先 upsert 完整 Session，再复用现有 message/status hydration；session refresh 保留不在分页窗口中的当前目标。
+- 根层提供 opening/error UI，手机成功后回到 Chat；平板保留三栏。
+- 主产品与技术 contract 已并入 `docs/PRD.md` 和 `docs/RFC.md` §5.13。
+
 ## 2026-06-30 — NFC Quick Prompt (Experimental)
 
 ### 目标

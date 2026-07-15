@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
@@ -41,6 +42,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.chat.ChatScreen
 import com.yage.opencode_client.ui.files.FilesScreen
 import com.yage.opencode_client.ui.files.FilesViewModel
@@ -106,6 +108,10 @@ class MainActivity : AppCompatActivity() {
                 pendingNfcPrompt = null
                 mainViewModel.handleNfcPrompt(prompt, autoSend)
             }
+            pendingDeepLinkUrl?.let { rawUrl ->
+                pendingDeepLinkUrl = null
+                mainViewModel.receiveDeepLink(rawUrl)
+            }
             val lifecycleOwner = LocalLifecycleOwner.current
             LaunchedEffect(lifecycleOwner) {
                 // Debug-only credential injection: if the launch Intent carries
@@ -140,25 +146,43 @@ class MainActivity : AppCompatActivity() {
             val isTablet = windowSizeClass.widthSizeClass == WindowWidthSizeClass.Expanded
 
             OpenCodeTheme(darkTheme = darkTheme) {
-                if (isTablet) {
-                    TabletLayout(viewModel = mainViewModel)
-                } else {
-                    PhoneLayout(viewModel = mainViewModel)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (isTablet) {
+                        TabletLayout(viewModel = mainViewModel)
+                    } else {
+                        PhoneLayout(viewModel = mainViewModel)
+                    }
+                    DeepLinkFeedback(
+                        isResolving = state.isResolvingDeepLink,
+                        error = state.deepLinkError,
+                        onDismissError = mainViewModel::clearDeepLinkError
+                    )
                 }
             }
         }
-        // Handle NFC intent if app was launched by tapping a tag (cold start via NFC).
-        // In this case onNewIntent is NOT called; the intent comes via getIntent().
-        handleNfcIntent(intent)
+        // Cold-start intents arrive through getIntent(); warm intents use onNewIntent.
+        handleIncomingIntent(intent)
     }
 
     private var lastNfcTriggerTimeMs: Long = 0
     private var pendingNfcPrompt: Pair<String, Boolean>? = null
+    private var pendingDeepLinkUrl: String? = null
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
         handleNfcIntent(intent)
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val rawUrl = intent.data?.toString() ?: return
+        if (::mainViewModel.isInitialized) {
+            mainViewModel.receiveDeepLink(rawUrl)
+        } else {
+            pendingDeepLinkUrl = rawUrl
+        }
     }
 
     private fun handleNfcIntent(intent: Intent?) {
@@ -192,6 +216,7 @@ private fun PhoneLayout(viewModel: MainViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
     fun navigateToTopLevel(route: String) {
         if (currentRoute == route) return
@@ -201,6 +226,12 @@ private fun PhoneLayout(viewModel: MainViewModel) {
             }
             launchSingleTop = true
             restoreState = true
+        }
+    }
+
+    LaunchedEffect(state.deepLinkNavigationVersion) {
+        if (state.deepLinkNavigationVersion > 0) {
+            navigateToTopLevel(Screen.Chat.route)
         }
     }
 
@@ -246,7 +277,12 @@ private fun PhoneLayout(viewModel: MainViewModel) {
             }
             composable(Screen.Files.route) {
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                val filesViewModel: FilesViewModel = hiltViewModel()
+                val filesViewModel: FilesViewModel = hiltViewModel(
+                    key = "files-${state.currentHostProfileId ?: "none"}"
+                )
+                LaunchedEffect(state.currentHostProfileId) {
+                    filesViewModel.resetForHost()
+                }
                 FilesScreen(
                     viewModel = filesViewModel,
                     pathToShow = state.filePathToShowInFiles,
@@ -264,6 +300,57 @@ private fun PhoneLayout(viewModel: MainViewModel) {
             composable(Screen.Settings.route) {
                 SettingsScreen(viewModel = viewModel)
             }
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.DeepLinkFeedback(
+    isResolving: Boolean,
+    error: DeepLinkError?,
+    onDismissError: () -> Unit
+) {
+    if (isResolving) {
+        Surface(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .testTag("deep-link-opening"),
+            shape = MaterialTheme.shapes.medium,
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                Text(stringResource(R.string.deep_link_opening))
+            }
+        }
+    }
+
+    if (error != null) {
+        Snackbar(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp)
+                .testTag("deep-link-error"),
+            action = {
+                TextButton(onClick = onDismissError) {
+                    Text(stringResource(R.string.common_dismiss))
+                }
+            }
+        ) {
+            Text(
+                stringResource(
+                    when (error) {
+                        DeepLinkError.INVALID -> R.string.deep_link_invalid
+                        DeepLinkError.SESSION_UNAVAILABLE -> R.string.deep_link_session_unavailable
+                        DeepLinkError.OPEN_FAILED -> R.string.deep_link_open_failed
+                    }
+                )
+            )
         }
     }
 }
@@ -331,7 +418,12 @@ private fun TabletLayout(viewModel: MainViewModel) {
                 colorScheme = MaterialTheme.colorScheme,
                 typography = compactTypography(MaterialTheme.typography)
             ) {
-                val filesViewModel: FilesViewModel = hiltViewModel()
+                val filesViewModel: FilesViewModel = hiltViewModel(
+                    key = "files-${state.currentHostProfileId ?: "none"}"
+                )
+                LaunchedEffect(state.currentHostProfileId) {
+                    filesViewModel.resetForHost()
+                }
                 Box(modifier = Modifier.fillMaxSize()) {
                     FilesScreen(
                         viewModel = filesViewModel,
