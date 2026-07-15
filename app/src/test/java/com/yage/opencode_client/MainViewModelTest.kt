@@ -14,6 +14,9 @@ import com.yage.opencode_client.data.model.SSEPayload
 import com.yage.opencode_client.data.model.HealthResponse
 import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
+import com.yage.opencode_client.data.model.ConfigProvider
+import com.yage.opencode_client.data.model.ProviderModel
+import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ssh.SSHKeyManager
@@ -21,7 +24,7 @@ import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.MainViewModel
-import com.yage.opencode_client.ui.ModelPresets
+import com.yage.opencode_client.ui.buildModelCatalog
 import com.yage.opencode_client.ui.session.buildSessionTree
 import com.yage.opencode_client.util.SettingsManager
 import com.yage.opencode_client.util.ThemeMode
@@ -37,12 +40,14 @@ import io.mockk.mockkStatic
 import io.mockk.runs
 import io.mockk.unmockkAll
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.serialization.json.JsonPrimitive
@@ -95,7 +100,7 @@ class MainViewModelTest {
         every { settingsManager.username } returns null
         every { settingsManager.password } returns null
         every { settingsManager.currentSessionId } returns null
-        every { settingsManager.selectedModelIndex } returns 0
+        every { settingsManager.selectedModelIndex } returns -1
         every { settingsManager.selectedAgentName } returns null
         every { settingsManager.themeMode } returns ThemeMode.SYSTEM
         every { settingsManager.aiBuilderBaseURL } returns "https://space.ai-builders.com/backend"
@@ -121,8 +126,12 @@ class MainViewModelTest {
 
         every { settingsManager.getDraftText(any()) } returns ""
         every { settingsManager.setDraftText(any(), any()) } just runs
+        every { settingsManager.selectedModelSelection() } returns null
+        every { settingsManager.setSelectedModel(any(), any()) } just runs
         every { settingsManager.getModelForSession(any()) } returns null
         every { settingsManager.setModelForSession(any(), any()) } just runs
+        every { settingsManager.getModelSelectionForSession(any()) } returns null
+        every { settingsManager.setModelForSession(any(), any(), any()) } just runs
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
@@ -131,6 +140,7 @@ class MainViewModelTest {
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         coEvery { repository.getPendingPermissions() } returns Result.success(emptyList())
+        coEvery { repository.getProviders() } returns Result.success(ProvidersResponse())
     }
 
     private fun createViewModel(): MainViewModel {
@@ -145,16 +155,69 @@ class MainViewModelTest {
         flow.value = transform(flow.value)
     }
 
+    private fun AppState.withProviders(providers: ProvidersResponse): AppState {
+        val catalog = buildModelCatalog(providers)
+        return copy(
+            providers = providers,
+            availableModels = catalog.options,
+            providerModelsIndex = catalog.providerModelsIndex
+        )
+    }
+
     private fun handleSse(viewModel: MainViewModel, event: SSEEvent) {
         val method = MainViewModel::class.java.getDeclaredMethod("handleSSEEvent", SSEEvent::class.java)
         method.isAccessible = true
         method.invoke(viewModel, event)
     }
 
+    private fun loadProviders(viewModel: MainViewModel) {
+        val method = MainViewModel::class.java.getDeclaredMethod("loadProviders")
+        method.isAccessible = true
+        method.invoke(viewModel)
+    }
+
     private fun sha256(input: String): String {
         return MessageDigest.getInstance("SHA-256")
             .digest(input.toByteArray())
             .joinToString("") { "%02x".format(it) }
+    }
+
+    private fun providersResponse(
+        defaultProviderId: String? = null,
+        defaultModelId: String? = null
+    ): ProvidersResponse {
+        return ProvidersResponse(
+            providers = listOf(
+                ConfigProvider(
+                    id = "anthropic",
+                    models = mapOf("claude-sonnet" to ProviderModel(id = "claude-sonnet", name = "Claude Sonnet"))
+                ),
+                ConfigProvider(
+                    id = "openai",
+                    models = mapOf("gpt-5" to ProviderModel(id = "gpt-5", name = "GPT-5"))
+                )
+            ),
+            defaultByProvider = if (defaultProviderId != null && defaultModelId != null) {
+                mapOf(defaultProviderId to defaultModelId)
+            } else {
+                emptyMap()
+            }
+        )
+    }
+
+    private fun providersWithLegacyPreset(): ProvidersResponse {
+        return ProvidersResponse(
+            providers = listOf(
+                ConfigProvider(
+                    id = "anthropic",
+                    models = mapOf("claude-sonnet" to ProviderModel(id = "claude-sonnet", name = "Claude Sonnet"))
+                ),
+                ConfigProvider(
+                    id = "openai",
+                    models = mapOf("gpt-5.5" to ProviderModel(id = "gpt-5.5", name = "GPT-5.5"))
+                )
+            )
+        )
     }
 
     @Test
@@ -328,13 +391,14 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `init clamps saved model index and configures repository`() = runTest {
+    fun `init leaves model selection unresolved until providers load and configures repository`() = runTest {
         every { settingsManager.selectedModelIndex } returns 999
+        every { settingsManager.selectedModelSelection() } returns ("openai" to "gpt-5")
 
         val viewModel = createViewModel()
 
-        assertEquals(ModelPresets.list.lastIndex, viewModel.state.value.selectedModelIndex)
-        verify { settingsManager.selectedModelIndex = ModelPresets.list.lastIndex }
+        assertNull(viewModel.state.value.selectedModel)
+        verify(exactly = 0) { settingsManager.selectedModelIndex = any() }
         verify { repository.configure("http://server.test", null, null) }
     }
 
@@ -352,13 +416,14 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `sendMessage success clears input and uses selected preset model`() = runTest {
+    fun `sendMessage success clears input and uses selected server model`() = runTest {
         coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
         coEvery { repository.getSessions(100) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
 
         val viewModel = createViewModel()
+        updateState(viewModel) { it.withProviders(providersResponse()) }
         viewModel.selectSession("session-1")
         advanceUntilIdle()
         viewModel.setInputText("  hello world  ")
@@ -368,13 +433,12 @@ class MainViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        val selected = ModelPresets.list[1]
         coVerify {
             repository.sendMessage(
                 "session-1",
                 "hello world",
                 "review",
-                Message.ModelInfo(selected.providerId, selected.modelId)
+                Message.ModelInfo("openai", "gpt-5")
             )
         }
         assertEquals("", viewModel.state.value.inputText)
@@ -931,8 +995,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `loadMessages updates selected agent and preset model from last assistant`() = runTest {
-        val preset = ModelPresets.list[2]
+    fun `loadMessages updates selected agent and server model from last assistant`() = runTest {
         val messages = listOf(
             MessageWithParts(info = Message(id = "u1", role = "user")),
             MessageWithParts(
@@ -940,21 +1003,79 @@ class MainViewModelTest {
                     id = "a1",
                     role = "assistant",
                     agent = "plan",
-                    model = Message.ModelInfo(preset.providerId, preset.modelId)
+                    model = Message.ModelInfo("openai", "gpt-5")
                 )
             )
         )
         coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
 
         val viewModel = createViewModel()
-        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+        updateState(viewModel) { it.withProviders(providersResponse()).copy(currentSessionId = "session-1") }
 
         viewModel.loadMessages("session-1")
         advanceUntilIdle()
 
         assertEquals(messages, viewModel.state.value.messages)
         assertEquals("plan", viewModel.state.value.selectedAgentName)
-        assertEquals(2, viewModel.state.value.selectedModelIndex)
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `loadProviders loads provider models and selects server default`() = runTest {
+        coEvery { repository.getProviders() } returns Result.success(providersResponse("openai", "gpt-5"))
+
+        val viewModel = createViewModel()
+
+        loadProviders(viewModel)
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                AppState.ModelOption("Claude Sonnet (anthropic)", "anthropic", "claude-sonnet"),
+                AppState.ModelOption("GPT-5 (openai)", "openai", "gpt-5")
+            ),
+            viewModel.state.value.availableModels
+        )
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `loadProviders selects first model when no saved default or legacy index exists`() = runTest {
+        every { settingsManager.selectedModelIndex } returns -1
+        coEvery { repository.getProviders() } returns Result.success(providersResponse())
+
+        val viewModel = createViewModel()
+
+        loadProviders(viewModel)
+        advanceUntilIdle()
+
+        assertEquals(Message.ModelInfo("anthropic", "claude-sonnet"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `loadProviders infers model from already loaded messages when providers arrive later`() = runTest {
+        val messages = listOf(
+            MessageWithParts(
+                info = Message(
+                    id = "a1",
+                    role = "assistant",
+                    model = Message.ModelInfo("openai", "gpt-5")
+                )
+            )
+        )
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
+        coEvery { repository.getProviders() } returns Result.success(providersResponse())
+
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+        viewModel.loadMessages("session-1")
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.selectedModel)
+
+        loadProviders(viewModel)
+        advanceUntilIdle()
+
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
     }
 
     @Test
@@ -1275,13 +1396,72 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `selectModel with active session saves model index per session`() = runTest {
+    fun `selectModel with active session saves stable model selection per session`() = runTest {
         val viewModel = createViewModel()
-        updateState(viewModel) { it.copy(currentSessionId = "s1") }
+        updateState(viewModel) { it.withProviders(providersResponse()).copy(currentSessionId = "s1") }
 
-        viewModel.selectModel(2)
+        viewModel.selectModel(1)
 
-        verify { settingsManager.setModelForSession("s1", 2) }
+        verify { settingsManager.setSelectedModel("openai", "gpt-5") }
+        verify { settingsManager.setModelForSession("s1", "openai", "gpt-5") }
+        verify(exactly = 0) { settingsManager.selectedModelIndex = any() }
+        verify(exactly = 0) { settingsManager.setModelForSession("s1", any<Int>()) }
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `testConnection clears stale provider models before probing current profile`() = runTest {
+        coEvery { repository.checkHealth() } returns Result.success(HealthResponse(healthy = false, version = "1.0"))
+        every { settingsManager.selectedModelSelection() } returns ("openai" to "gpt-5")
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.withProviders(providersResponse()).copy(selectedModel = Message.ModelInfo("anthropic", "claude-sonnet"))
+        }
+
+        viewModel.testConnection(force = true)
+        advanceUntilIdle()
+
+        assertNull(viewModel.state.value.providers)
+        assertTrue(viewModel.state.value.availableModels.isEmpty())
+        assertNull(viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `testConnection keeps model catalog when profile is unchanged`() = runTest {
+        coEvery { repository.checkHealth() } returns Result.success(HealthResponse(healthy = false, version = "1.0"))
+
+        val viewModel = createViewModel()
+        viewModel.testConnection(force = true)
+        advanceUntilIdle()
+
+        updateState(viewModel) {
+            it.withProviders(providersResponse()).copy(selectedModel = Message.ModelInfo("openai", "gpt-5"))
+        }
+
+        viewModel.testConnection(force = true)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.availableModels.isNotEmpty())
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `provider response from previous server is ignored after reconfigure`() = runTest {
+        val oldServerResponse = CompletableDeferred<Result<ProvidersResponse>>()
+        coEvery { repository.getProviders() } coAnswers { oldServerResponse.await() }
+
+        val viewModel = createViewModel()
+        loadProviders(viewModel)
+        runCurrent()
+
+        viewModel.configureServer("http://new-server.test")
+        oldServerResponse.complete(Result.success(providersResponse("openai", "gpt-5")))
+        advanceUntilIdle()
+
+        assertNull(viewModel.state.value.providers)
+        assertTrue(viewModel.state.value.availableModels.isEmpty())
+        assertNull(viewModel.state.value.selectedModel)
     }
 
     @Test
@@ -1310,27 +1490,91 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `loadMessages uses per-session saved model index over message inference`() = runTest {
-        val inferredPreset = ModelPresets.list[2]
+    fun `sendMessage omits persisted model while providers are not loaded`() = runTest {
+        every { settingsManager.selectedModelSelection() } returns ("openai" to "gpt-5")
+        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        viewModel.selectSession("s1")
+        advanceUntilIdle()
+        viewModel.setInputText("hello")
+
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        coVerify {
+            repository.sendMessage(
+                "s1",
+                "hello",
+                "build",
+                null
+            )
+        }
+    }
+
+    @Test
+    fun `selectSession falls back to global model instead of previous session model`() = runTest {
+        every { settingsManager.selectedModelSelection() } returns ("openai" to "gpt-5")
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.withProviders(providersResponse()).copy(
+                currentSessionId = "session-a",
+                selectedModel = Message.ModelInfo("anthropic", "claude-sonnet")
+            )
+        }
+
+        viewModel.selectSession("session-b")
+
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+        advanceUntilIdle()
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `loadMessages uses per-session saved model selection over message inference`() = runTest {
         val messages = listOf(
             MessageWithParts(
                 info = Message(
                     id = "a1",
                     role = "assistant",
-                    model = Message.ModelInfo(inferredPreset.providerId, inferredPreset.modelId)
+                    model = Message.ModelInfo("anthropic", "claude-sonnet")
                 )
             )
         )
         coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
-        every { settingsManager.getModelForSession("session-1") } returns 3
+        every { settingsManager.getModelSelectionForSession("session-1") } returns ("openai" to "gpt-5")
 
         val viewModel = createViewModel()
-        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+        updateState(viewModel) { it.withProviders(providersResponse()).copy(currentSessionId = "session-1") }
 
         viewModel.loadMessages("session-1")
         advanceUntilIdle()
 
-        assertEquals(3, viewModel.state.value.selectedModelIndex)
+        assertEquals(Message.ModelInfo("openai", "gpt-5"), viewModel.state.value.selectedModel)
+    }
+
+    @Test
+    fun `loadMessages uses message inference before legacy session model selection`() = runTest {
+        val messages = listOf(
+            MessageWithParts(
+                info = Message(
+                    id = "a1",
+                    role = "assistant",
+                    model = Message.ModelInfo("anthropic", "claude-sonnet")
+                )
+            )
+        )
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
+        every { settingsManager.getModelForSession("session-1") } returns 1
+
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.withProviders(providersWithLegacyPreset()).copy(currentSessionId = "session-1") }
+
+        viewModel.loadMessages("session-1")
+        advanceUntilIdle()
+
+        assertEquals(Message.ModelInfo("anthropic", "claude-sonnet"), viewModel.state.value.selectedModel)
     }
 
     @Test

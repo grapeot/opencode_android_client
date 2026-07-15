@@ -70,7 +70,9 @@ data class AppState(
     val isLoadingMessages: Boolean = false,
     val agents: List<AgentInfo> = emptyList(),
     val selectedAgentName: String = "build",
-    val selectedModelIndex: Int = 2,
+    val selectedModel: Message.ModelInfo? = null,
+    val availableModels: List<ModelOption> = emptyList(),
+    val providerModelsIndex: Map<String, ProviderModel> = emptyMap(),
     val providers: ProvidersResponse? = null,
     val pendingPermissions: List<PermissionRequest> = emptyList(),
     val pendingQuestions: List<QuestionRequest> = emptyList(),
@@ -110,20 +112,25 @@ data class AppState(
     val aiUsageError: String? = null
 ) {
     data class NfcPendingAction(val prompt: String, val autoSend: Boolean)
-    data class ModelOption(val displayName: String, val providerId: String, val modelId: String) {
+    data class ModelOption(
+        val displayName: String,
+        val providerId: String,
+        val modelId: String,
+        val modelLabel: String = displayName.substringBefore(" (")
+    ) {
         val shortName: String
             get() = when {
-                displayName == "DeepSeek V4 Flash" -> "DS-Flash"
-                displayName == "DeepSeek Local" -> "DS-L"
-                displayName == "DeepSeek V4 Pro" -> "DS-Pro"
-                displayName == "Ollama GLM 5.2" -> "OGLM-5.2"
-                displayName == "GPT-5.6 Sol Pro" -> "GPT-P"
-                displayName == "GPT-5.6 Sol Fast" -> "GPT-F"
-                "Haiku" in displayName -> "Haiku"
-                "Gemini" in displayName -> "Gemini"
-                "GPT" in displayName -> "GPT"
-                "Grok" in displayName -> "Grok"
-                else -> displayName.split(" ").firstOrNull() ?: displayName
+                modelLabel == "GPT-5.6 Sol Pro" -> "GPT-P"
+                modelLabel == "GPT-5.6 Sol Fast" -> "GPT-F"
+                "Haiku" in modelLabel -> "Haiku"
+                "Sonnet" in modelLabel -> "Sonnet"
+                "Opus" in modelLabel -> "Opus"
+                "Gemini" in modelLabel -> "Gemini"
+                "GPT" in modelLabel -> modelLabel.split(" ").firstOrNull() ?: modelLabel
+                "Grok" in modelLabel -> "Grok"
+                "DeepSeek" in modelLabel -> "DeepSeek"
+                "GLM" in modelLabel -> "GLM"
+                else -> modelLabel.split(" ").firstOrNull() ?: modelLabel
             }
     }
 
@@ -202,9 +209,9 @@ data class AppState(
         val error: String? = null,
         val themeMode: ThemeMode = ThemeMode.SYSTEM,
         val languageMode: LanguageMode = LanguageMode.SYSTEM,
-        val selectedModelIndex: Int = 2,
+        val selectedModelIndex: Int = 0,
         val selectedAgentName: String = "build",
-        val availableModels: List<ModelOption> = ModelPresets.list,
+        val availableModels: List<ModelOption> = emptyList(),
         val contextUsage: ContextUsage? = null,
         val agents: List<AgentInfo> = emptyList(),
         val providers: ProvidersResponse? = null,
@@ -296,13 +303,12 @@ data class AppState(
     val visibleAgents: List<AgentInfo>
         get() = agents.filter { it.isVisible }
 
-    /** Curated model list (filtered like iOS), not the full API response. */
-    val availableModels: List<ModelOption>
-        get() = ModelPresets.list
+    val selectedModelIndex: Int
+        get() = modelIndexFor(availableModels, selectedModel) ?: 0
 
     val selectedAIUsageQuota: AIUsageQuota?
         get() {
-            val provider = when (availableModels.getOrNull(selectedModelIndex)?.providerId) {
+            val provider = when (selectedModel?.providerId) {
                 "openai" -> "codex"
                 "zai-coding-plan" -> "glm"
                 "ollama-cloud" -> "ollama"
@@ -312,19 +318,6 @@ data class AppState(
                 it.provider.equals(provider, ignoreCase = true) && it.label.equals("5h", ignoreCase = true)
             }
         }
-
-    private val providerModelsIndex: Map<String, ProviderModel>
-        get() = providers?.providers?.flatMap { provider ->
-            provider.models.flatMap { (modelKey, model) ->
-                listOfNotNull(
-                    "${provider.id}/$modelKey" to model,
-                    model.id.takeIf { it.isNotEmpty() }?.let { "${provider.id}/$it" to model },
-                    model.resolvedProviderId?.let { resolvedProvider ->
-                        model.id.takeIf { it.isNotEmpty() }?.let { modelId -> "$resolvedProvider/$modelId" to model }
-                    }
-                )
-            }
-        }?.toMap() ?: emptyMap()
 
     val contextUsage: ContextUsage?
         get() {
@@ -408,6 +401,8 @@ class MainViewModel @Inject constructor(
     private var hostRuntimeJob = SupervisorJob(viewModelScope.coroutineContext[Job])
     private val hostRuntimeScope: CoroutineScope
         get() = CoroutineScope(viewModelScope.coroutineContext + hostRuntimeJob)
+    private var modelCatalogRequestGeneration = 0L
+    private var configuredRepositoryTarget: RepositoryTarget? = null
 
     init {
         loadSettings()
@@ -422,7 +417,7 @@ class MainViewModel @Inject constructor(
         settingsManager.serverUrl = url
         settingsManager.username = username
         settingsManager.password = password
-        repository.configure(url, username, password)
+        configureRepository(url, username, password)
     }
 
     fun getHostProfiles(): List<HostProfile> = hostProfileStore.profiles()
@@ -500,7 +495,7 @@ class MainViewModel @Inject constructor(
             hostRuntimeScope.launch { configureRepositoryForProfileAsync(profile) }
             return
         }
-        repository.configure(profile.serverUrl, profile.basicAuth?.username, password)
+        configureRepository(profile.serverUrl, profile.basicAuth?.username, password)
     }
 
     private suspend fun configureRepositoryForProfileAsync(profile: HostProfile): Boolean {
@@ -528,8 +523,40 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
-        repository.configure(baseUrl, profile.basicAuth?.username, password)
+        configureRepository(baseUrl, profile.basicAuth?.username, password)
         return true
+    }
+
+    private data class RepositoryTarget(
+        val baseUrl: String,
+        val username: String?,
+        val password: String?
+    )
+
+    /**
+     * Points the repository at [baseUrl], clearing the model catalog only when the
+     * effective target actually changes so same-profile reconnects (e.g. the
+     * lifecycle-driven health check) keep the loaded catalog and selection.
+     */
+    private fun configureRepository(baseUrl: String, username: String?, password: String?) {
+        val target = RepositoryTarget(baseUrl, username, password)
+        if (configuredRepositoryTarget != target) {
+            configuredRepositoryTarget = target
+            resetModelCatalogForCurrentProfile()
+        }
+        repository.configure(baseUrl, username, password)
+    }
+
+    private fun resetModelCatalogForCurrentProfile() {
+        modelCatalogRequestGeneration += 1
+        _state.update {
+            it.copy(
+                providers = null,
+                availableModels = emptyList(),
+                providerModelsIndex = emptyMap(),
+                selectedModel = null
+            )
+        }
     }
 
     fun getSavedConnectionSettings(): ConnectionFormSettings = ConnectionFormSettings(
@@ -1032,6 +1059,9 @@ class MainViewModel @Inject constructor(
                 sessionSendTimestamps = emptyMap(),
                 agents = emptyList(),
                 providers = null,
+                availableModels = emptyList(),
+                providerModelsIndex = emptyMap(),
+                selectedModel = null,
                 filePathToShowInFiles = null,
                 filePreviewOriginRoute = null,
                 pendingNfcAction = null,
@@ -1075,9 +1105,14 @@ class MainViewModel @Inject constructor(
     }
 
     private fun loadProviders() {
-        launchLoadProviders(hostRuntimeScope, repository, _state) { message, error ->
-            reportNonFatalIssue(TAG, message, error)
-        }
+        val requestGeneration = ++modelCatalogRequestGeneration
+        launchLoadProviders(
+            scope = hostRuntimeScope,
+            repository = repository,
+            state = _state,
+            settingsManager = settingsManager,
+            shouldApply = { requestGeneration == modelCatalogRequestGeneration }
+        ) { message, error -> reportNonFatalIssue(TAG, message, error) }
     }
 
     fun createSession(title: String? = null) {
@@ -1263,10 +1298,16 @@ class MainViewModel @Inject constructor(
     }
 
     fun selectModel(index: Int) {
-        val clamped = index.coerceIn(0, ModelPresets.list.size - 1)
-        settingsManager.selectedModelIndex = clamped
-        _state.update { it.copy(selectedModelIndex = clamped) }
-        _state.value.currentSessionId?.let { settingsManager.setModelForSession(it, clamped) }
+        val models = _state.value.availableModels
+        if (models.isEmpty()) return
+        val clamped = index.coerceIn(0, models.size - 1)
+        val selected = models[clamped]
+        settingsManager.setSelectedModel(selected.providerId, selected.modelId)
+        val selectedModel = Message.ModelInfo(selected.providerId, selected.modelId)
+        _state.update { it.copy(selectedModel = selectedModel) }
+        _state.value.currentSessionId?.let {
+            settingsManager.setModelForSession(it, selected.providerId, selected.modelId)
+        }
     }
 
     fun setThemeMode(mode: ThemeMode) {

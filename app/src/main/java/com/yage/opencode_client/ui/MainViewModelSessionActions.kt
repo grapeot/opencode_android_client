@@ -2,6 +2,7 @@ package com.yage.opencode_client.ui
 
 import com.yage.opencode_client.data.model.ComposerImageAttachment
 import com.yage.opencode_client.data.model.Message
+import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
@@ -160,14 +161,22 @@ internal fun selectSessionState(
 
     settingsManager.currentSessionId = sessionId
     val restoredDraft = settingsManager.getDraftText(sessionId)
-    state.update {
-        it.copy(
+    state.update { current ->
+        val selectedModel = resolveSelectedModel(
+            models = current.availableModels,
+            providers = current.providers,
+            settingsManager = settingsManager,
+            sessionId = sessionId,
+            messages = emptyList()
+        )
+        current.copy(
             currentSessionId = sessionId,
             messages = emptyList(),
             streamingPartTexts = emptyMap(),
             streamingReasoningPart = null,
             messageLimit = 30,
-            inputText = restoredDraft
+            inputText = restoredDraft,
+            selectedModel = selectedModel
         )
     }
 }
@@ -188,21 +197,24 @@ internal fun launchLoadMessages(
             .onSuccess { messages ->
                 if (sessionId == state.value.currentSessionId) {
                     val lastAssistant = messages.lastOrNull { it.info.isAssistant }
-                    val inferredModelIndex = lastAssistant?.info?.resolvedModel?.let { model ->
-                        ModelPresets.list.indexOfFirst {
-                            it.providerId == model.providerId && it.modelId == model.modelId
-                        }.takeIf { it >= 0 }
-                    }
                     val inferredAgentName = lastAssistant?.info?.agent
-                    val modelIndex = settingsManager?.getModelForSession(sessionId) ?: inferredModelIndex
                     val agentName = settingsManager?.getAgentForSession(sessionId) ?: inferredAgentName
-                    state.update {
-                        it.copy(
+                    state.update { current ->
+                        val selectedModel = settingsManager?.let { manager ->
+                            resolveSelectedModel(
+                                models = current.availableModels,
+                                providers = current.providers,
+                                settingsManager = manager,
+                                sessionId = sessionId,
+                                messages = messages
+                            )
+                        }
+                        current.copy(
                             messages = messages,
                             messageLimit = limit,
                             isLoadingMessages = false,
-                            selectedModelIndex = modelIndex ?: it.selectedModelIndex,
-                            selectedAgentName = agentName ?: it.selectedAgentName
+                            selectedModel = selectedModel,
+                            selectedAgentName = agentName ?: current.selectedAgentName
                         )
                     }
                     onMessagesLoaded?.invoke()
@@ -286,17 +298,67 @@ internal fun launchLoadProviders(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
+    settingsManager: SettingsManager,
+    shouldApply: () -> Boolean = { true },
     onNonFatalError: (String, Throwable?) -> Unit
 ) {
     scope.launch {
         repository.getProviders()
             .onSuccess { providers ->
-                state.update { it.copy(providers = providers) }
+                if (!shouldApply()) return@onSuccess
+                state.update { current ->
+                    val catalog = buildModelCatalog(providers)
+                    val selectedModel = resolveSelectedModel(
+                        models = catalog.options,
+                        providers = providers,
+                        settingsManager = settingsManager,
+                        sessionId = current.currentSessionId,
+                        messages = current.messages
+                    )
+                    current.copy(
+                        providers = providers,
+                        availableModels = catalog.options,
+                        providerModelsIndex = catalog.providerModelsIndex,
+                        selectedModel = selectedModel
+                    )
+                }
             }
             .onFailure { error ->
-                onNonFatalError("Failed to load providers", error)
+                if (shouldApply()) {
+                    onNonFatalError("Failed to load providers", error)
+                }
             }
     }
+}
+
+internal fun resolveSelectedModel(
+    models: List<AppState.ModelOption>,
+    providers: ProvidersResponse?,
+    settingsManager: SettingsManager,
+    sessionId: String?,
+    messages: List<com.yage.opencode_client.data.model.MessageWithParts>
+): Message.ModelInfo? {
+    if (models.isEmpty()) return null
+    sessionId
+        ?.let { settingsManager.getModelSelectionForSession(it) }
+        ?.let { (providerId, modelId) -> modelInfoFor(models, providerId, modelId) }
+        ?.let { return it }
+    messages.lastOrNull { it.info.isAssistant }?.info?.resolvedModel
+        ?.let { modelInfoFor(models, it) }
+        ?.let { return it }
+    settingsManager.selectedModelSelection()
+        ?.let { (providerId, modelId) -> modelInfoFor(models, providerId, modelId) }
+        ?.let { return it }
+    providers?.default
+        ?.let { modelInfoFor(models, it.providerId, it.modelId) }
+        ?.let { return it }
+    sessionId
+        ?.let { settingsManager.getModelForSession(it) }
+        ?.let { legacyPresetIndexToModelInfo(models, it) }
+        ?.let { return it }
+    legacyPresetIndexToModelInfo(models, settingsManager.selectedModelIndex)
+        ?.let { return it }
+    return models.firstOrNull()?.let { Message.ModelInfo(it.providerId, it.modelId) }
 }
 
 internal fun launchCreateSession(
@@ -422,11 +484,9 @@ internal fun launchDeleteSession(
 }
 
 internal fun buildSelectedModel(state: AppState): Message.ModelInfo? {
-    val selectedModel = state.availableModels.getOrNull(state.selectedModelIndex)
-    return selectedModel?.let {
-        Message.ModelInfo(it.providerId, it.modelId)
-    } ?: state.providers?.default?.let {
-        Message.ModelInfo(it.providerId, it.modelId)
+    modelInfoFor(state.availableModels, state.selectedModel)?.let { return it }
+    return state.providers?.default?.let {
+        modelInfoFor(state.availableModels, it.providerId, it.modelId)
     }
 }
 

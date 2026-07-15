@@ -60,13 +60,14 @@ fun ChatScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val aiBuilderToken = sanitizeBearerToken(viewModel.getAIBuilderSettings().token)
+    val microphonePermissionDeniedMessage = stringResource(R.string.chat_microphone_permission_denied)
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             viewModel.toggleRecording()
         } else {
-            viewModel.setSpeechError(context.getString(R.string.chat_microphone_permission_denied))
+            viewModel.setSpeechError(microphonePermissionDeniedMessage)
         }
     }
     val imagePickerLauncher = rememberLauncherForActivityResult(

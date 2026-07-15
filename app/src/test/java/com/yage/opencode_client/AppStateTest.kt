@@ -1,7 +1,7 @@
 package com.yage.opencode_client
 
 import com.yage.opencode_client.ui.AppState
-import com.yage.opencode_client.ui.ModelPresets
+import com.yage.opencode_client.ui.buildModelCatalog
 import com.yage.opencode_client.data.model.*
 import com.yage.opencode_client.util.ThemeMode
 import org.junit.Assert.*
@@ -27,7 +27,7 @@ class AppStateTest {
         assertFalse(state.isLoadingMessages)
         assertTrue(state.agents.isEmpty())
         assertEquals("build", state.selectedAgentName)
-        assertEquals(2, state.selectedModelIndex)
+        assertEquals(0, state.selectedModelIndex)
         assertNull(state.providers)
         assertTrue(state.pendingPermissions.isEmpty())
         assertEquals("", state.inputText)
@@ -152,33 +152,75 @@ class AppStateTest {
         return ProvidersResponse(providers = providers)
     }
 
-    @Test
-    fun `availableModels returns curated presets (filtered like iOS)`() {
-        val state = AppState()
-        val models = state.availableModels
-
-        assertEquals(ModelPresets.list.size, models.size)
-        assertEquals(ModelPresets.list, models)
-        assertEquals("GLM-5.2", models[0].displayName)
-        assertEquals("zai-coding-plan", models[0].providerId)
-        assertEquals("glm-5.2", models[0].modelId)
-        assertEquals("GPT-5.6 Sol", models[1].displayName)
-        assertEquals("openai", models[1].providerId)
-        assertEquals("gpt-5.6-sol", models[1].modelId)
-        assertTrue(models.any {
-            it.displayName == "GPT-5.6 Sol Pro" && it.providerId == "openai" && it.modelId == "gpt-5.6-sol-pro"
-        })
-        assertTrue(models.any {
-            it.displayName == "GPT-5.6 Sol Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-sol-fast"
-        })
+    private fun stateWithProviders(
+        providers: ProvidersResponse,
+        messages: List<MessageWithParts> = emptyList(),
+        selectedModel: Message.ModelInfo? = null
+    ): AppState {
+        val catalog = buildModelCatalog(providers)
+        return AppState(
+            messages = messages,
+            providers = providers,
+            availableModels = catalog.options,
+            providerModelsIndex = catalog.providerModelsIndex,
+            selectedModel = selectedModel
+        )
     }
 
     @Test
-    fun `availableModels independent of providers`() {
-        val stateWithProviders = AppState(providers = makeProviders(Triple("openai", "gpt-4", "GPT-4")))
-        val stateWithoutProviders = AppState(providers = null)
-        assertEquals(stateWithProviders.availableModels, stateWithoutProviders.availableModels)
-        assertEquals(ModelPresets.list, stateWithProviders.availableModels)
+    fun `availableModels is empty before providers are loaded`() {
+        val state = AppState()
+        val models = state.availableModels
+
+        assertTrue(models.isEmpty())
+    }
+
+    @Test
+    fun `availableModels returns all provider models sorted by provider and model`() {
+        val state = stateWithProviders(
+            makeProviders(
+                Triple("openai", "gpt-5", "GPT-5"),
+                Triple("anthropic", "claude-sonnet", "Claude Sonnet"),
+                Triple("openai", "gpt-4", "GPT-4")
+            )
+        )
+
+        val models = state.availableModels
+
+        assertEquals(
+            listOf(
+                AppState.ModelOption("Claude Sonnet (anthropic)", "anthropic", "claude-sonnet"),
+                AppState.ModelOption("GPT-4 (openai)", "openai", "gpt-4"),
+                AppState.ModelOption("GPT-5 (openai)", "openai", "gpt-5")
+            ),
+            models
+        )
+    }
+
+    @Test
+    fun `availableModels falls back to model key and resolved provider id`() {
+        val providers = ProvidersResponse(
+            providers = listOf(
+                ConfigProvider(
+                    id = "proxy",
+                    name = "Proxy",
+                    models = mapOf(
+                        "server-key" to ProviderModel(
+                            id = "",
+                            name = "Server Model",
+                            providerId = "resolved-provider"
+                        )
+                    )
+                )
+            )
+        )
+
+        val models = stateWithProviders(providers).availableModels
+
+        assertEquals(
+            listOf(AppState.ModelOption("Server Model (Proxy)", "resolved-provider", "server-key")),
+            models
+        )
     }
 
     private fun makeContextUsageState(
@@ -207,7 +249,7 @@ class AppStateTest {
                 )
             )
         )
-        return AppState(messages = listOf(message), providers = providers)
+        return stateWithProviders(providers, messages = listOf(message))
     }
 
     @Test
@@ -284,7 +326,7 @@ class AppStateTest {
                 )
             )
         )
-        val state = AppState(messages = listOf(message), providers = providers)
+        val state = stateWithProviders(providers, messages = listOf(message))
         assertNull(state.contextUsage)
     }
 
@@ -334,7 +376,7 @@ class AppStateTest {
                 )
             )
         )
-        val usage = AppState(messages = listOf(message), providers = providers).contextUsage
+        val usage = stateWithProviders(providers, messages = listOf(message)).contextUsage
 
         assertNotNull(usage)
         assertEquals(0.5f, usage!!.percentage, 0.001f)
@@ -383,10 +425,7 @@ class AppStateTest {
                 )
             )
         )
-        val state = AppState(
-            messages = listOf(oldAssistant, userMsg, newAssistant),
-            providers = providers
-        )
+        val state = stateWithProviders(providers, messages = listOf(oldAssistant, userMsg, newAssistant))
         val usage = state.contextUsage
 
         assertNotNull(usage)
@@ -431,9 +470,9 @@ class AppStateTest {
             )
         )
 
-        val usage = AppState(
-            messages = listOf(usableAssistant, emptyTokenAssistant),
-            providers = providers
+        val usage = stateWithProviders(
+            providers,
+            messages = listOf(usableAssistant, emptyTokenAssistant)
         ).contextUsage
 
         assertNotNull(usage)

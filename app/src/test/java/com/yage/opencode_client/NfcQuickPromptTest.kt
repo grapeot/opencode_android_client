@@ -71,7 +71,7 @@ class NfcQuickPromptTest {
         every { settingsManager.username } returns null
         every { settingsManager.password } returns null
         every { settingsManager.currentSessionId } returns null
-        every { settingsManager.selectedModelIndex } returns 0
+        every { settingsManager.selectedModelIndex } returns -1
         every { settingsManager.selectedAgentName } returns null
         every { settingsManager.themeMode } returns ThemeMode.SYSTEM
         every { settingsManager.aiBuilderBaseURL } returns "https://space.ai-builders.com/backend"
@@ -97,8 +97,12 @@ class NfcQuickPromptTest {
 
         every { settingsManager.getDraftText(any()) } returns ""
         every { settingsManager.setDraftText(any(), any()) } just runs
+        every { settingsManager.selectedModelSelection() } returns null
+        every { settingsManager.setSelectedModel(any(), any()) } just runs
         every { settingsManager.getModelForSession(any()) } returns null
         every { settingsManager.setModelForSession(any(), any()) } just runs
+        every { settingsManager.getModelSelectionForSession(any()) } returns null
+        every { settingsManager.setModelForSession(any(), any(), any()) } just runs
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 

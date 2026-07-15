@@ -145,6 +145,7 @@ class ReadToolCardIntegrationTest {
                     messageLimit = 200,
                     repository = repository,
                     workspaceDirectory = null,
+                    completedTurnActivities = emptyList(),
                     onLoadMore = {},
                     onFileClick = {},
                     onForkFromMessage = {},
