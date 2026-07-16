@@ -148,6 +148,7 @@ class ReadToolCardIntegrationTest {
                     completedTurnActivities = emptyList(),
                     onLoadMore = {},
                     onFileClick = {},
+                    onMarkdownLinkClick = {},
                     onForkFromMessage = {},
                     onEditFromMessage = {}
                 )
