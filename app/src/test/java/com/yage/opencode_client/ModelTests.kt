@@ -334,6 +334,11 @@ class ModelTests {
     }
 
     @Test
+    fun `ModelOption shortName distinguishes GPT Terra`() {
+        assertEquals("GPT-T", modelOption("GPT-5.6 Terra").shortName)
+    }
+
+    @Test
     fun `removed GPT Sol Pro preset indices migrate without changing other slots`() {
         assertEquals(1, migrateLegacyModelIndex(6))
         assertEquals(6, migrateLegacyModelIndex(7))

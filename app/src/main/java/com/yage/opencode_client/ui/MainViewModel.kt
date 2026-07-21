@@ -118,6 +118,7 @@ data class AppState(
                 displayName == "DeepSeek V4 Pro" -> "DS-Pro"
                 displayName == "Ollama GLM 5.2" -> "OGLM-5.2"
                 displayName == "GPT-5.6 Sol Fast" -> "GPT-F"
+                displayName == "GPT-5.6 Terra" -> "GPT-T"
                 "Haiku" in displayName -> "Haiku"
                 "Gemini" in displayName -> "Gemini"
                 "GPT" in displayName -> "GPT"

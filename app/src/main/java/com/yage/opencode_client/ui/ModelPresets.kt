@@ -13,5 +13,6 @@ object ModelPresets {
         AppState.ModelOption("DeepSeek V4 Pro", "deepseek", "deepseek-v4-pro"),
         AppState.ModelOption("Ollama GLM 5.2", "ollama-cloud", "glm-5.2"),
         AppState.ModelOption("GPT-5.6 Sol Fast", "openai", "gpt-5.6-sol-fast"),
+        AppState.ModelOption("GPT-5.6 Terra", "openai", "gpt-5.6-terra"),
     )
 }
