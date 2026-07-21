@@ -16,6 +16,7 @@ internal fun applySavedSettings(
     hostProfileStore: HostProfileStore,
     state: MutableStateFlow<AppState>
 ) {
+    settingsManager.migrateRemovedGpt56SolProModelIndices()
     val currentProfile = hostProfileStore.currentProfile()
     val password = currentProfile.basicAuth?.passwordId?.let { settingsManager.basicAuthPassword(it) }
     repository.configure(

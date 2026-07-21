@@ -278,6 +278,8 @@ class SettingsManager @Inject constructor(
         private const val KEY_NFC_PROMPT = "nfc_prompt"
         private const val KEY_NFC_AUTO_SEND = "nfc_auto_send"
 
+        private const val MODEL_PRESET_SCHEMA_VERSION = 1
+
         private fun basicAuthPasswordKey(passwordId: String): String = "basic_auth_password_$passwordId"
     }
 
@@ -286,6 +288,12 @@ class SettingsManager @Inject constructor(
         val providerId: String,
         val modelId: String
     )
+}
+
+internal fun migrateLegacyModelIndex(index: Int): Int = when (index) {
+    6 -> 1 // Removed GPT-5.6 Sol Pro now falls back to regular Sol.
+    7 -> 6 // GPT-5.6 Sol Fast shifted left by one slot.
+    else -> index
 }
 
 enum class ThemeMode {
