@@ -170,7 +170,7 @@ class AppStateTest {
             it.displayName == "GPT-5.6 Sol Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-sol-fast"
         })
         assertTrue(models.any {
-            it.displayName == "GPT-5.6 Terra" && it.providerId == "openai" && it.modelId == "gpt-5.6-terra"
+            it.displayName == "GPT-5.6 Terra Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-terra-fast"
         })
     }
 

@@ -334,8 +334,8 @@ class ModelTests {
     }
 
     @Test
-    fun `ModelOption shortName distinguishes GPT Terra`() {
-        assertEquals("GPT-T", modelOption("GPT-5.6 Terra").shortName)
+    fun `ModelOption shortName distinguishes GPT Terra Fast`() {
+        assertEquals("GPT-TF", modelOption("GPT-5.6 Terra Fast").shortName)
     }
 
     @Test
