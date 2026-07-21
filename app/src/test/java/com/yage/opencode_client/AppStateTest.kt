@@ -165,11 +165,12 @@ class AppStateTest {
         assertEquals("GPT-5.6 Sol", models[1].displayName)
         assertEquals("openai", models[1].providerId)
         assertEquals("gpt-5.6-sol", models[1].modelId)
-        assertTrue(models.any {
-            it.displayName == "GPT-5.6 Sol Pro" && it.providerId == "openai" && it.modelId == "gpt-5.6-sol-pro"
-        })
+        assertFalse(models.any { it.providerId == "openai" && it.modelId == "gpt-5.6-sol-pro" })
         assertTrue(models.any {
             it.displayName == "GPT-5.6 Sol Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-sol-fast"
+        })
+        assertTrue(models.any {
+            it.displayName == "GPT-5.6 Terra Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-terra-fast"
         })
     }
 

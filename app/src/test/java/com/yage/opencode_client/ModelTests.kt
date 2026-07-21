@@ -3,6 +3,7 @@ package com.yage.opencode_client
 import com.yage.opencode_client.data.model.*
 import com.yage.opencode_client.data.api.PromptRequest
 import com.yage.opencode_client.ui.AppState
+import com.yage.opencode_client.util.migrateLegacyModelIndex
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
@@ -328,9 +329,20 @@ class ModelTests {
     }
 
     @Test
-    fun `ModelOption shortName distinguishes GPT Sol modes`() {
-        assertEquals("GPT-P", modelOption("GPT-5.6 Sol Pro").shortName)
+    fun `ModelOption shortName distinguishes GPT Sol Fast`() {
         assertEquals("GPT-F", modelOption("GPT-5.6 Sol Fast").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName distinguishes GPT Terra Fast`() {
+        assertEquals("GPT-TF", modelOption("GPT-5.6 Terra Fast").shortName)
+    }
+
+    @Test
+    fun `removed GPT Sol Pro preset indices migrate without changing other slots`() {
+        assertEquals(1, migrateLegacyModelIndex(6))
+        assertEquals(6, migrateLegacyModelIndex(7))
+        assertEquals(2, migrateLegacyModelIndex(2))
     }
 
     @Test
