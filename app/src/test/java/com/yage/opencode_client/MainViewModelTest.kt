@@ -354,7 +354,7 @@ class MainViewModelTest {
     @Test
     fun `sendMessage success clears input and uses selected preset model`() = runTest {
         coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
-        coEvery { repository.getSessions(100) } returns Result.success(
+        coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
 
@@ -405,7 +405,7 @@ class MainViewModelTest {
     @Test
     fun `sendMessage success refreshes sessions`() = runTest {
         coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
-        coEvery { repository.getSessions(100) } returns Result.success(
+        coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project", title = "Updated"))
         )
 
@@ -417,7 +417,7 @@ class MainViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        coVerify(atLeast = 1) { repository.getSessions(100) }
+        coVerify(atLeast = 1) { repository.getSessions(400) }
         assertEquals("Updated", viewModel.state.value.sessions.single().title)
     }
 
@@ -436,7 +436,7 @@ class MainViewModelTest {
             time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 2_000)
         )
         coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
-        coEvery { repository.getSessions(100) } returns Result.success(listOf(previousTop, current))
+        coEvery { repository.getSessions(400) } returns Result.success(listOf(previousTop, current))
 
         val viewModel = createViewModel()
         updateState(viewModel) {
@@ -571,7 +571,7 @@ class MainViewModelTest {
                 title = "Server Refreshed"
             )
         )
-        coEvery { repository.getSessions(100) } returns Result.success(updatedSessions)
+        coEvery { repository.getSessions(400) } returns Result.success(updatedSessions)
 
         val viewModel = createViewModel()
         updateState(viewModel) {
@@ -601,7 +601,7 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(100) }
+        coVerify { repository.getSessions(400) }
         assertEquals("Server Refreshed", viewModel.state.value.sessions.single().title)
     }
 
@@ -611,7 +611,7 @@ class MainViewModelTest {
         // but the full refresh it triggers returns a stale snapshot (placeholder title, older
         // timestamp). The freshly received title must remain visible (Chat header reads it from
         // state.sessions) rather than being clobbered by the stale refresh.
-        coEvery { repository.getSessions(100) } returns Result.success(
+        coEvery { repository.getSessions(400) } returns Result.success(
             listOf(
                 com.yage.opencode_client.data.model.Session(
                     id = "session-1",
@@ -661,7 +661,7 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(100) }
+        coVerify { repository.getSessions(400) }
         assertEquals(
             "Pythagorean theorem: history, proof, engineering",
             viewModel.state.value.sessions.single { it.id == "session-1" }.title
@@ -684,7 +684,7 @@ class MainViewModelTest {
                 time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 1_000)
             )
         )
-        coEvery { repository.getSessions(100) } returns Result.success(refreshedSessions)
+        coEvery { repository.getSessions(400) } returns Result.success(refreshedSessions)
 
         val viewModel = createViewModel()
         updateState(viewModel) {
@@ -707,13 +707,13 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(100) }
+        coVerify { repository.getSessions(400) }
         assertEquals("session-2", viewModel.state.value.sessions.first().id)
     }
 
     @Test
     fun `message updated SSE refreshes current messages and sessions`() = runTest {
-        coEvery { repository.getSessions(100) } returns Result.success(
+        coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
 
@@ -733,26 +733,26 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(100) }
+        coVerify { repository.getSessions(400) }
         coVerify { repository.getMessages("session-1", 30) }
     }
 
     @Test
     fun `loadSessions requests current limit and tracks hasMore`() = runTest {
-        val sessions = (1..100).map { index ->
+        val sessions = (1..400).map { index ->
             com.yage.opencode_client.data.model.Session(id = "session-$index", directory = "/tmp/$index")
         }
-        coEvery { repository.getSessions(100) } returns Result.success(sessions)
+        coEvery { repository.getSessions(400) } returns Result.success(sessions)
 
         val viewModel = createViewModel()
 
         viewModel.loadSessions()
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(100) }
-        assertEquals(100, viewModel.state.value.loadedSessionLimit)
+        coVerify { repository.getSessions(400) }
+        assertEquals(400, viewModel.state.value.loadedSessionLimit)
         assertTrue(viewModel.state.value.hasMoreSessions)
-        assertEquals(100, viewModel.state.value.sessions.size)
+        assertEquals(400, viewModel.state.value.sessions.size)
         assertFalse(viewModel.state.value.isRefreshingSessions)
     }
 
@@ -776,7 +776,7 @@ class MainViewModelTest {
         val initialSessions = listOf(
             com.yage.opencode_client.data.model.Session(id = "parent-1", directory = "/tmp/project")
         )
-        coEvery { repository.getSessions(100) } returns Result.success(initialSessions)
+        coEvery { repository.getSessions(400) } returns Result.success(initialSessions)
 
         val viewModel = createViewModel()
         viewModel.loadSessions()
@@ -793,7 +793,7 @@ class MainViewModelTest {
                 parentId = "parent-1"
             )
         )
-        coEvery { repository.getSessions(100) } returns Result.success(refreshedSessions)
+        coEvery { repository.getSessions(400) } returns Result.success(refreshedSessions)
 
         viewModel.loadSessions()
         advanceUntilIdle()
@@ -818,19 +818,19 @@ class MainViewModelTest {
 
     @Test
     fun `loadMoreSessions requests higher limit and replaces sessions`() = runTest {
-        val initial = (1..100).map { index ->
+        val initial = (1..400).map { index ->
             com.yage.opencode_client.data.model.Session(id = "session-$index", directory = "/tmp/$index")
         }
-        val expanded = (1..150).map { index ->
+        val expanded = (1..450).map { index ->
             com.yage.opencode_client.data.model.Session(id = "session-$index", directory = "/tmp/$index")
         }
-        coEvery { repository.getSessions(200) } returns Result.success(expanded)
+        coEvery { repository.getSessions(800) } returns Result.success(expanded)
 
         val viewModel = createViewModel()
         updateState(viewModel) {
             it.copy(
                 sessions = initial,
-                loadedSessionLimit = 100,
+                loadedSessionLimit = 400,
                 hasMoreSessions = true,
                 currentSessionId = "session-20"
             )
@@ -839,19 +839,19 @@ class MainViewModelTest {
         viewModel.loadMoreSessions()
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(200) }
-        assertEquals(200, viewModel.state.value.loadedSessionLimit)
+        coVerify { repository.getSessions(800) }
+        assertEquals(800, viewModel.state.value.loadedSessionLimit)
         assertFalse(viewModel.state.value.hasMoreSessions)
-        assertEquals(150, viewModel.state.value.sessions.size)
+        assertEquals(450, viewModel.state.value.sessions.size)
         assertEquals("session-20", viewModel.state.value.currentSessionId)
     }
 
     @Test
     fun `loadMoreSessions ignores duplicate triggers while request is in flight`() = runTest {
-        val expanded = (1..150).map { index ->
+        val expanded = (1..450).map { index ->
             com.yage.opencode_client.data.model.Session(id = "session-$index", directory = "/tmp/$index")
         }
-        coEvery { repository.getSessions(200) } coAnswers {
+        coEvery { repository.getSessions(800) } coAnswers {
             kotlinx.coroutines.delay(100)
             Result.success(expanded)
         }
@@ -859,9 +859,9 @@ class MainViewModelTest {
         val viewModel = createViewModel()
         updateState(viewModel) {
             it.copy(
-                sessions = (1..100).map { index -> com.yage.opencode_client.data.model.Session(id = "session-$index", directory = "/tmp/$index") },
-                loadedSessionLimit = 100,
-                hasMoreSessions = true
+                loadedSessionLimit = 400,
+                hasMoreSessions = true,
+                sessions = (1..400).map { index -> com.yage.opencode_client.data.model.Session(id = "session-$index", directory = "/tmp/$index") }
             )
         }
 
@@ -869,8 +869,8 @@ class MainViewModelTest {
         viewModel.loadMoreSessions()
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { repository.getSessions(200) }
-        assertEquals(200, viewModel.state.value.loadedSessionLimit)
+        coVerify(exactly = 1) { repository.getSessions(800) }
+        assertEquals(800, viewModel.state.value.loadedSessionLimit)
     }
 
     @Test
@@ -1185,7 +1185,7 @@ class MainViewModelTest {
     fun `handleSSEEvent idle status clears streaming state and refreshes messages`() = runTest {
         val messages = listOf(MessageWithParts(info = Message(id = "a1", role = "assistant")))
         coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
-        coEvery { repository.getSessions(100) } returns Result.success(
+        coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
         val viewModel = createViewModel()
@@ -1511,7 +1511,7 @@ class MainViewModelTest {
     fun `handleSSEEvent message created refreshes messages for current session`() = runTest {
         val messages = listOf(MessageWithParts(info = Message(id = "m1", role = "assistant")))
         coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
-        coEvery { repository.getSessions(100) } returns Result.success(
+        coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
 
