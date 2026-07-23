@@ -7,6 +7,24 @@ data class SessionNode(
     val children: List<SessionNode>
 )
 
+fun attentionCountsBySession(
+    sessions: List<Session>,
+    attentionSessionIds: List<String>
+): Map<String, Int> {
+    val sessionsById = sessions.associateBy { it.id }
+    val counts = mutableMapOf<String, Int>()
+
+    attentionSessionIds.forEach { sourceSessionId ->
+        var sessionId: String? = sourceSessionId
+        val visited = mutableSetOf<String>()
+        while (sessionId != null && visited.add(sessionId)) {
+            counts[sessionId] = counts.getOrDefault(sessionId, 0) + 1
+            sessionId = sessionsById[sessionId]?.parentId
+        }
+    }
+    return counts
+}
+
 fun buildSessionTree(sessions: List<Session>): List<SessionNode> {
     val sessionIds = sessions.map { it.id }.toSet()
     val childrenMap = sessions.groupBy { it.parentId }
@@ -21,6 +39,16 @@ fun buildSessionTree(sessions: List<Session>): List<SessionNode> {
         .map { s -> SessionNode(session = s, children = buildNodes(s.id)) }
     return (roots + orphans).sortedByDescending { it.session.time?.updated ?: 0L }
 }
+
+fun prioritizeAttention(
+    nodes: List<SessionNode>,
+    attentionCounts: Map<String, Int>
+): List<SessionNode> = nodes
+    .map { node -> node.copy(children = prioritizeAttention(node.children, attentionCounts)) }
+    .sortedWith(
+        compareByDescending<SessionNode> { attentionCounts.getOrDefault(it.session.id, 0) > 0 }
+            .thenByDescending { it.session.time?.updated ?: 0L }
+    )
 
 fun flattenVisibleTree(
     nodes: List<SessionNode>,

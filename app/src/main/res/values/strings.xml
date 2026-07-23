@@ -65,6 +65,7 @@
     <string name="sessions_status_running">Running</string>
     <string name="sessions_status_retrying">Retrying</string>
     <string name="sessions_status_idle">Idle</string>
+    <string name="sessions_status_need_attention">Need attention</string>
     <string name="sessions_rename_title">Rename Session</string>
     <string name="sessions_title_label">Session title</string>
     <string name="sessions_rename_action">Rename</string>

@@ -498,6 +498,24 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `sendMessage ignores request while recording`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                inputText = "do not send yet",
+                isRecording = true
+            )
+        }
+
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any(), any()) }
+        assertEquals("do not send yet", viewModel.state.value.inputText)
+    }
+
+    @Test
     fun `sendMessage ignores blank input`() = runTest {
         val viewModel = createViewModel()
         viewModel.selectSession("session-1")
