@@ -217,4 +217,37 @@ class SessionListInstrumentedTest {
         composeRule.onNodeWithText("Idle Session").assertIsDisplayed()
         composeRule.onNodeWithText("Idle").assertIsDisplayed()
     }
+
+    @Test
+    fun sessionListRollsNeedAttentionUpToParentAndOverridesRunning() {
+        val parent = Session(
+            id = "parent",
+            directory = "/tmp/project",
+            title = "Parent"
+        )
+        val child = Session(
+            id = "child",
+            parentId = "parent",
+            directory = "/tmp/project",
+            title = "Child"
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                SessionList(
+                    sessions = listOf(parent, child),
+                    currentSessionId = "parent",
+                    sessionStatuses = mapOf("parent" to SessionStatus(type = "busy")),
+                    attentionSessionIds = listOf("child"),
+                    onSelectSession = {},
+                    onCreateSession = {},
+                    onDeleteSession = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Parent").assertIsDisplayed()
+        composeRule.onNodeWithText("Need attention").assertIsDisplayed()
+        composeRule.onNodeWithText("Running").assertDoesNotExist()
+    }
 }

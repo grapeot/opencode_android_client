@@ -82,7 +82,9 @@ private fun formatRelativeTime(updatedMs: Long): String = DateUtils.getRelativeT
 ).toString()
 
 @Composable
-private fun sessionStatusLabel(status: SessionStatus?): String? = when {
+private fun sessionStatusLabel(status: SessionStatus?, attentionCount: Int): String? = when {
+    attentionCount > 1 -> "${stringResource(R.string.sessions_status_need_attention)} · $attentionCount"
+    attentionCount == 1 -> stringResource(R.string.sessions_status_need_attention)
     status == null -> null
     status.isBusy -> stringResource(R.string.sessions_status_running)
     status.isRetry -> stringResource(R.string.sessions_status_retrying)
@@ -91,7 +93,8 @@ private fun sessionStatusLabel(status: SessionStatus?): String? = when {
 }
 
 @Composable
-private fun sessionStatusColor(status: SessionStatus?): Color = when {
+private fun sessionStatusColor(status: SessionStatus?, attentionCount: Int): Color = when {
+    attentionCount > 0 -> StopRed
     status?.isBusy == true -> MaterialTheme.colorScheme.primary
     status?.isRetry == true -> MaterialTheme.colorScheme.tertiary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -111,6 +114,7 @@ private fun SwipeRevealRow(
     displayName: String,
     updatedTime: Long? = null,
     status: SessionStatus? = null,
+    attentionCount: Int = 0,
     onSelect: () -> Unit,
     depth: Int = 0,
     hasChildren: Boolean = false,
@@ -189,7 +193,7 @@ private fun SwipeRevealRow(
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     color = titleColor
                 )
-                if (updatedTime != null || status != null) {
+                if (updatedTime != null || status != null || attentionCount > 0) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (updatedTime != null) {
                             Text(
@@ -198,14 +202,18 @@ private fun SwipeRevealRow(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (status != null && updatedTime != null) {
+                        if ((status != null || attentionCount > 0) && updatedTime != null) {
                             Text("  ", style = MaterialTheme.typography.bodySmall)
                         }
-                        if (status != null) {
+                        if (status != null || attentionCount > 0) {
                             Text(
-                                text = sessionStatusLabel(status) ?: "",
+                                text = sessionStatusLabel(status, attentionCount) ?: "",
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                color = if (isArchived) MaterialTheme.colorScheme.onSurfaceVariant else sessionStatusColor(status)
+                                color = if (isArchived && attentionCount == 0) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    sessionStatusColor(status, attentionCount)
+                                }
                             )
                         }
                     }
@@ -275,6 +283,7 @@ fun SessionList(
     sessions: List<Session>,
     currentSessionId: String?,
     sessionStatuses: Map<String, SessionStatus> = emptyMap(),
+    attentionSessionIds: List<String> = emptyList(),
     hasMoreSessions: Boolean = false,
     isLoadingMoreSessions: Boolean = false,
     isRefreshingSessions: Boolean = false,
@@ -290,10 +299,17 @@ fun SessionList(
     onOpenSettings: (() -> Unit)? = null,
     onCollapseSessions: (() -> Unit)? = null
 ) {
+    val attentionCounts = remember(sessions, attentionSessionIds) {
+        attentionCountsBySession(sessions, attentionSessionIds)
+    }
     val activeSessions = remember(sessions) { sessions.filter { !it.isArchived } }
     val archivedSessions = remember(sessions) { sessions.filter { it.isArchived } }
-    val activeTree = remember(activeSessions) { buildSessionTree(activeSessions) }
-    val archivedTree = remember(archivedSessions) { buildSessionTree(archivedSessions) }
+    val activeTree = remember(activeSessions, attentionCounts) {
+        prioritizeAttention(buildSessionTree(activeSessions), attentionCounts)
+    }
+    val archivedTree = remember(archivedSessions, attentionCounts) {
+        prioritizeAttention(buildSessionTree(archivedSessions), attentionCounts)
+    }
     val activeRows = remember(activeTree, expandedSessionIds) { flattenVisibleTree(activeTree, expandedSessionIds) }
     var archivedExpanded by remember { mutableStateOf(false) }
     val archivedRows = remember(archivedTree, expandedSessionIds, archivedExpanded) {
@@ -374,6 +390,7 @@ fun SessionList(
                         index = index,
                         currentSessionId = currentSessionId,
                         sessionStatuses = sessionStatuses,
+                        attentionCounts = attentionCounts,
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = false,
@@ -403,6 +420,7 @@ fun SessionList(
                         index = index,
                         currentSessionId = currentSessionId,
                         sessionStatuses = sessionStatuses,
+                        attentionCounts = attentionCounts,
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = true,
@@ -460,6 +478,7 @@ private fun SessionRowItem(
     index: Int,
     currentSessionId: String?,
     sessionStatuses: Map<String, SessionStatus>,
+    attentionCounts: Map<String, Int>,
     listIsScrolling: Boolean,
     expandedSessionIds: Set<String>,
     isArchived: Boolean,
@@ -499,6 +518,7 @@ private fun SessionRowItem(
             displayName = session.displayName,
             updatedTime = session.time?.updated,
             status = sessionStatuses[session.id],
+            attentionCount = attentionCounts.getOrDefault(session.id, 0),
             onSelect = { onSelectSession(session.id) },
             depth = depth,
             hasChildren = hasChildren,

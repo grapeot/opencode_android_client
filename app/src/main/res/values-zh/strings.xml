@@ -65,6 +65,7 @@
     <string name="sessions_status_running">运行中</string>
     <string name="sessions_status_retrying">重试中</string>
     <string name="sessions_status_idle">空闲</string>
+    <string name="sessions_status_need_attention">需要关注</string>
     <string name="sessions_rename_title">重命名会话</string>
     <string name="sessions_title_label">会话标题</string>
     <string name="sessions_rename_action">重命名</string>

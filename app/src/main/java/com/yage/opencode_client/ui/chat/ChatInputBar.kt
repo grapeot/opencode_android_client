@@ -102,7 +102,8 @@ internal fun ChatInputBar(
     onDiscardSpeech: () -> Unit,
     onToggleRecording: () -> Unit
 ) {
-    val canSend = (text.isNotBlank() || imageAttachments.isNotEmpty()) && !isTranscribing && !isRetryingSpeech
+    val canSend = (text.isNotBlank() || imageAttachments.isNotEmpty()) &&
+        !isRecording && !isTranscribing && !isRetryingSpeech
     val voiceStatus = when {
         isRecording -> stringResource(R.string.chat_listening)
         isTranscribing -> stringResource(R.string.chat_transcribing)

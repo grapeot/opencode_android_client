@@ -1,8 +1,10 @@
 package com.yage.opencode_client
 
 import com.yage.opencode_client.data.model.Session
+import com.yage.opencode_client.ui.session.attentionCountsBySession
 import com.yage.opencode_client.ui.session.buildSessionTree
 import com.yage.opencode_client.ui.session.flattenVisibleTree
+import com.yage.opencode_client.ui.session.prioritizeAttention
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -62,5 +64,36 @@ class SessionTreeTest {
         assertEquals(0, flat[0].second)
         assertEquals("child", flat[1].first.session.id)
         assertEquals(1, flat[1].second)
+    }
+
+    @Test
+    fun `attention counts roll up through all ancestors`() {
+        val sessions = listOf(
+            session("root"),
+            session("child", parentId = "root"),
+            session("grandchild", parentId = "child")
+        )
+
+        val counts = attentionCountsBySession(
+            sessions,
+            attentionSessionIds = listOf("grandchild", "grandchild")
+        )
+
+        assertEquals(2, counts["grandchild"])
+        assertEquals(2, counts["child"])
+        assertEquals(2, counts["root"])
+    }
+
+    @Test
+    fun `attention sessions sort ahead of newer sessions`() {
+        val sessions = listOf(
+            session("newer", updated = 200),
+            session("attention", updated = 100)
+        )
+        val tree = buildSessionTree(sessions)
+
+        val prioritized = prioritizeAttention(tree, mapOf("attention" to 1))
+
+        assertEquals(listOf("attention", "newer"), prioritized.map { it.session.id })
     }
 }

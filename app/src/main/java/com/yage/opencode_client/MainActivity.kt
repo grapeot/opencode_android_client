@@ -387,6 +387,7 @@ private fun TabletLayout(viewModel: MainViewModel) {
                         sessions = state.sessions,
                         currentSessionId = state.currentSessionId,
                         sessionStatuses = state.sessionStatuses,
+                        attentionSessionIds = state.attentionSessionIds,
                         hasMoreSessions = state.hasMoreSessions,
                         isLoadingMoreSessions = state.isLoadingMoreSessions,
                         isRefreshingSessions = state.isRefreshingSessions,

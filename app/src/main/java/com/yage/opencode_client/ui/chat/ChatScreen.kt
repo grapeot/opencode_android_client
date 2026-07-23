@@ -163,6 +163,7 @@ fun ChatScreen(
                 sessions = state.sessions,
                 currentSessionId = state.currentSessionId,
                 sessionStatuses = state.sessionStatuses,
+                attentionSessionIds = state.attentionSessionIds,
                 hasMoreSessions = state.hasMoreSessions,
                 isLoadingMoreSessions = state.isLoadingMoreSessions,
                 isRefreshingSessions = state.isRefreshingSessions,
@@ -335,7 +336,10 @@ fun ChatScreen(
             )
         }
 
-        state.pendingPermissions.firstOrNull()?.let { permission ->
+        state.pendingPermissions
+            .filter { it.sessionId == state.currentSessionId }
+            .firstOrNull()
+            ?.let { permission ->
             ChatPermissionCard(
                 permission = permission,
                 onRespond = { response ->
