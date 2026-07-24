@@ -173,11 +173,11 @@ private fun SwipeRevealRow(
                     }
                 )
                 .clickable(onClick = onSelect)
-                .padding(start = (12 + depth * 24).dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                .padding(start = (depth * 24).dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (hasChildren && onToggleCollapse != null) {
-                IconButton(onClick = onToggleCollapse, modifier = Modifier.size(24.dp)) {
+                IconButton(onClick = onToggleCollapse, modifier = Modifier.size(48.dp)) {
                     Icon(
                         if (isCollapsed) Icons.Default.ChevronRight else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (isCollapsed) "Expand" else "Collapse",
@@ -185,9 +185,9 @@ private fun SwipeRevealRow(
                     )
                 }
             } else {
-                Spacer(modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.size(48.dp))
             }
-            Column(modifier = Modifier.weight(1f, fill = false)) {
+            Column(modifier = Modifier.weight(1f, fill = false).offset(x = (-12).dp)) {
                 Text(
                     text = displayName,
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
