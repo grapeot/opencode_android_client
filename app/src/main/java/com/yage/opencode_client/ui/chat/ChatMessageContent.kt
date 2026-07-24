@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui.chat
 
+import android.content.ClipData
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
@@ -24,6 +25,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Schedule
@@ -58,11 +60,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -84,6 +89,7 @@ import com.yage.opencode_client.ui.util.HttpImageHolder
 import com.yage.opencode_client.ui.util.MarkdownImageResolver
 import com.yage.opencode_client.ui.files.WorkspaceLinkMarkdown
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun ChatMessageList(
@@ -240,6 +246,13 @@ internal fun ChatMessageList(
     }
 }
 
+internal fun copyableMessageText(parts: List<Part>): String = parts
+    .asSequence()
+    .filter { it.isText }
+    .mapNotNull { it.text }
+    .filter { it.isNotEmpty() }
+    .joinToString("\n\n")
+
 @Composable
 private fun MessageRow(
     message: MessageWithParts,
@@ -252,6 +265,9 @@ private fun MessageRow(
     onEditFromMessage: (String) -> Unit
 ) {
     val isUser = message.info.isUser
+    val clipboard = LocalClipboard.current
+    val coroutineScope = rememberCoroutineScope()
+    val copyableText = remember(message.parts) { copyableMessageText(message.parts) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         // No "OpenCode" speaker title — the user's blue left bar vs the
@@ -352,6 +368,24 @@ private fun MessageRow(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_copy_message)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = null
+                            )
+                        },
+                        enabled = copyableText.isNotEmpty(),
+                        onClick = {
+                            coroutineScope.launch {
+                                clipboard.setClipEntry(
+                                    ClipEntry(ClipData.newPlainText("message", copyableText))
+                                )
+                            }
+                            showMenu = false
+                        }
+                    )
                     if (isUser) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.chat_edit_from_here)) },
