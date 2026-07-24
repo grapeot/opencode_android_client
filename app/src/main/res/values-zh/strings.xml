@@ -126,6 +126,7 @@
     <string name="chat_agent_running">智能体运行中</string>
     <string name="chat_turn_completed">已完成</string>
     <string name="chat_more_options">更多操作</string>
+    <string name="chat_copy_message">复制整条消息</string>
     <string name="chat_edit_from_here">从这里编辑</string>
     <string name="chat_fork_from_here">从这里分叉</string>
     <string name="chat_select_or_create_session">选择或新建会话</string>

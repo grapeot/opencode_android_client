@@ -126,6 +126,7 @@
     <string name="chat_agent_running">Agent running</string>
     <string name="chat_turn_completed">Completed</string>
     <string name="chat_more_options">More options</string>
+    <string name="chat_copy_message">Copy message</string>
     <string name="chat_edit_from_here">Edit from here</string>
     <string name="chat_fork_from_here">Fork from here</string>
     <string name="chat_select_or_create_session">Select or create a session</string>
