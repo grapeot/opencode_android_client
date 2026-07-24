@@ -339,7 +339,7 @@ private fun MessageRow(
                 var showMenu by remember { mutableStateOf(false) }
                 IconButton(
                     onClick = { showMenu = true },
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
