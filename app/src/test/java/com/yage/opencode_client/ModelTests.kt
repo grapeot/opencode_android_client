@@ -324,8 +324,8 @@ class ModelTests {
     }
 
     @Test
-    fun `ModelOption shortName returns GPT for GPT models`() {
-        assertEquals("GPT", modelOption("GPT-4o").shortName)
+    fun `ModelOption shortName keeps version word for GPT models`() {
+        assertEquals("GPT-4o", modelOption("GPT-4o").shortName)
     }
 
     @Test
@@ -351,13 +351,19 @@ class ModelTests {
     }
 
     @Test
-    fun `ModelOption shortName returns OGLM-5_2 for Ollama GLM 5_2`() {
-        assertEquals("OGLM-5.2", modelOption("Ollama GLM 5.2").shortName)
+    fun `ModelOption shortName returns GLM for GLM models`() {
+        assertEquals("GLM", modelOption("Ollama GLM 5.2").shortName)
     }
 
     @Test
     fun `ModelOption shortName returns first word for unknown models`() {
-        assertEquals("DeepSeek", modelOption("DeepSeek V3").shortName)
+        assertEquals("Mistral", modelOption("Mistral Large").shortName)
+    }
+
+    @Test
+    fun `ModelOption shortName ignores provider suffix for dynamic labels`() {
+        assertEquals("Sonnet", modelOption("Claude Sonnet (anthropic)").shortName)
+        assertEquals("GPT-5", modelOption("GPT-5 (openai)").shortName)
     }
 
     @Test

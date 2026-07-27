@@ -1,8 +1,8 @@
 package com.yage.opencode_client.ui
 
 /**
- * Curated model presets for the model selector, matching iOS implementation.
- * Only these models are shown in the dropdown instead of the full API list.
+ * Legacy model presets used only to migrate pre-dynamic-selector saved indexes.
+ * The chat model selector is populated from the server provider list.
  */
 object ModelPresets {
     val list: List<AppState.ModelOption> = listOf(

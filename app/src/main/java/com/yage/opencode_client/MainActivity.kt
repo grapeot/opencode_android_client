@@ -365,11 +365,11 @@ private fun TabletLayout(viewModel: MainViewModel) {
     val filesWeight = if (sessionsPaneCollapsed) 0.5f else 0.375f
     val chatWeight = if (sessionsPaneCollapsed) 0.5f else 0.375f
 
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
-        ) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
+    ) {
         // Left panel: Session list or Settings — 25% when expanded.
         if (!sessionsPaneCollapsed) {
             Column(
@@ -447,9 +447,9 @@ private fun TabletLayout(viewModel: MainViewModel) {
                                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = stringResource(R.string.sessions_show)
                                 )
-            }
-        }
-    }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -6,6 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -74,29 +75,28 @@ class SettingsManager @Inject constructor(
         set(value) = encryptedPrefs.edit().putString(KEY_SESSION_ID, value).apply()
 
     var selectedModelIndex: Int
-        get() = encryptedPrefs.getInt(KEY_MODEL_INDEX, 1)
+        get() = encryptedPrefs.getInt(KEY_MODEL_INDEX, -1)
         set(value) = encryptedPrefs.edit().putInt(KEY_MODEL_INDEX, value).apply()
 
-    fun migrateRemovedGpt56SolProModelIndices() {
-        if (encryptedPrefs.getInt(KEY_MODEL_PRESET_SCHEMA_VERSION, 0) >= MODEL_PRESET_SCHEMA_VERSION) return
+    var selectedModelProviderId: String?
+        get() = encryptedPrefs.getString(KEY_MODEL_PROVIDER_ID, null)
+        set(value) = encryptedPrefs.edit().putString(KEY_MODEL_PROVIDER_ID, value).apply()
 
-        val sessionModels = encryptedPrefs.getString(KEY_SESSION_MODELS, null)?.let { encoded ->
-            try {
-                Json.decodeFromString<Map<String, String>>(encoded).mapValues { (_, value) ->
-                    value.toIntOrNull()?.let(::migrateLegacyModelIndex)?.toString() ?: value
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
+    var selectedModelId: String?
+        get() = encryptedPrefs.getString(KEY_MODEL_ID, null)
+        set(value) = encryptedPrefs.edit().putString(KEY_MODEL_ID, value).apply()
 
-        encryptedPrefs.edit().apply {
-            if (encryptedPrefs.contains(KEY_MODEL_INDEX)) {
-                putInt(KEY_MODEL_INDEX, migrateLegacyModelIndex(encryptedPrefs.getInt(KEY_MODEL_INDEX, 1)))
-            }
-            if (sessionModels != null) putString(KEY_SESSION_MODELS, Json.encodeToString(sessionModels))
-            putInt(KEY_MODEL_PRESET_SCHEMA_VERSION, MODEL_PRESET_SCHEMA_VERSION)
-        }.apply()
+    fun selectedModelSelection(): Pair<String, String>? {
+        val providerId = selectedModelProviderId?.takeIf { it.isNotBlank() } ?: return null
+        val modelId = selectedModelId?.takeIf { it.isNotBlank() } ?: return null
+        return providerId to modelId
+    }
+
+    fun setSelectedModel(providerId: String, modelId: String) {
+        encryptedPrefs.edit()
+            .putString(KEY_MODEL_PROVIDER_ID, providerId)
+            .putString(KEY_MODEL_ID, modelId)
+            .apply()
     }
 
     var selectedAgentName: String?
@@ -195,6 +195,31 @@ class SettingsManager @Inject constructor(
         encryptedPrefs.edit().putString(KEY_SESSION_MODELS, Json.encodeToString(map)).apply()
     }
 
+    fun getModelSelectionForSession(sessionId: String): Pair<String, String>? {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODEL_SELECTIONS, null) ?: return null
+        return try {
+            val selection = Json.decodeFromString<Map<String, StoredModelSelection>>(json)[sessionId]
+            if (selection != null && selection.providerId.isNotBlank() && selection.modelId.isNotBlank()) {
+                selection.providerId to selection.modelId
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun setModelForSession(sessionId: String, providerId: String, modelId: String) {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODEL_SELECTIONS, null)
+        val map: MutableMap<String, StoredModelSelection> = try {
+            json?.let { Json.decodeFromString<Map<String, StoredModelSelection>>(it).toMutableMap() } ?: mutableMapOf()
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+        map[sessionId] = StoredModelSelection(providerId, modelId)
+        encryptedPrefs.edit().putString(KEY_SESSION_MODEL_SELECTIONS, Json.encodeToString(map)).apply()
+    }
+
     fun getAgentForSession(sessionId: String): String? {
         val json = encryptedPrefs.getString(KEY_SESSION_AGENTS, null) ?: return null
         return try {
@@ -233,7 +258,8 @@ class SettingsManager @Inject constructor(
         private const val KEY_KNOWN_HOSTS = "ssh_known_hosts_json"
         private const val KEY_SESSION_ID = "session_id"
         private const val KEY_MODEL_INDEX = "model_index"
-        private const val KEY_MODEL_PRESET_SCHEMA_VERSION = "model_preset_schema_version"
+        private const val KEY_MODEL_PROVIDER_ID = "model_provider_id"
+        private const val KEY_MODEL_ID = "model_id"
         private const val KEY_AGENT_NAME = "agent_name"
         private const val KEY_THEME = "theme"
         private const val KEY_LANGUAGE = "language"
@@ -246,6 +272,7 @@ class SettingsManager @Inject constructor(
         private const val KEY_AI_USAGE_DASHBOARD_URL = "ai_usage_dashboard_url"
         private const val KEY_SESSION_DRAFTS = "session_drafts"
         private const val KEY_SESSION_MODELS = "session_models"
+        private const val KEY_SESSION_MODEL_SELECTIONS = "session_model_selections"
         private const val KEY_SESSION_AGENTS = "session_agents"
         private const val KEY_NFC_ENABLED = "nfc_enabled"
         private const val KEY_NFC_PROMPT = "nfc_prompt"
@@ -255,6 +282,12 @@ class SettingsManager @Inject constructor(
 
         private fun basicAuthPasswordKey(passwordId: String): String = "basic_auth_password_$passwordId"
     }
+
+    @Serializable
+    private data class StoredModelSelection(
+        val providerId: String,
+        val modelId: String
+    )
 }
 
 internal fun migrateLegacyModelIndex(index: Int): Int = when (index) {
