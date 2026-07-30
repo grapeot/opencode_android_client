@@ -1,5 +1,12 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-07-30 — Dual recording strategies (open PR, do not merge)
+
+- 分支 `feat/dual-recording-strategies`：Settings 增加 OpenAI Realtime / Grok Batch picker；Chat 录音 Start 时 snapshot strategy。
+- Grok 路径不创建 realtime session，Stop 后 multipart 上传；OpenAI 路径保持现有 WS + heartbeat。
+- VoiceFlowKit 依赖 pin 到 dual-strategy commit `0fbc2d5cde`；本地存在 `../brainwave_mobile/brainwave_public_android` 时 `includeBuild` 替换为源码。
+- 验证：`./gradlew :app:testDebugUnitTest` 通过。PR 保持 Open，等 voiceflow-android merge/tag 后再改 exact `0.3.0` 并 merge。
+
 ## 2026-07-15 — Session Deep Link
 
 - 分支：`feat/session-deep-links`，基于 `github/master`；本地 `master` 的独立 commit `18f4a30` 保持不动，不混入本 PR。
