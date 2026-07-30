@@ -20,6 +20,7 @@ import com.yage.voiceflowkit.VoiceFlowClient
 import com.yage.voiceflowkit.VoiceFlowConfig
 import com.yage.voiceflowkit.VoiceFlowMicrophone
 import com.yage.voiceflowkit.VoiceFlowPreservedAudio
+import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
 import com.yage.voiceflowkit.VoiceFlowSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +43,8 @@ data class AIBuilderSettings(
     val baseURL: String,
     val token: String,
     val customPrompt: String,
-    val terminology: String
+    val terminology: String,
+    val recordingStrategy: String = "OPENAI_REALTIME",
 )
 
 data class AIUsageSettings(val dashboardUrl: String)
@@ -403,6 +405,8 @@ class MainViewModel @Inject constructor(
     private var speechAudioLevelJob: Job? = null
     private var speechSession: VoiceFlowSession? = null
     private var speechExistingInput: String = ""
+    private var activeSpeechStrategy: VoiceFlowRecordingStrategy =
+        VoiceFlowRecordingStrategy.OPENAI_REALTIME
     private var preservedSpeechAudio: VoiceFlowPreservedAudio? = null
     private var preservedSpeechExistingInput: String = ""
     private var lastHealthCheckTime = 0L
@@ -545,7 +549,8 @@ class MainViewModel @Inject constructor(
         baseURL = settingsManager.aiBuilderBaseURL,
         token = settingsManager.aiBuilderToken,
         customPrompt = settingsManager.aiBuilderCustomPrompt,
-        terminology = settingsManager.aiBuilderTerminology
+        terminology = settingsManager.aiBuilderTerminology,
+        recordingStrategy = settingsManager.aiBuilderRecordingStrategy,
     )
 
     fun saveAIBuilderSettings(settings: AIBuilderSettings) {
@@ -553,6 +558,7 @@ class MainViewModel @Inject constructor(
         settingsManager.aiBuilderToken = settings.token
         settingsManager.aiBuilderCustomPrompt = settings.customPrompt
         settingsManager.aiBuilderTerminology = settings.terminology
+        settingsManager.aiBuilderRecordingStrategy = settings.recordingStrategy
         _state.update { it.copy(aiBuilderConnectionOK = false, aiBuilderConnectionError = null) }
         settingsManager.aiBuilderLastOKSignature = null
     }
@@ -635,27 +641,65 @@ class MainViewModel @Inject constructor(
         }
         if (currentState.isRecording) {
             val session = speechSession
-            // Stop PCM capture first so no further chunks race the commit.
-            viewModelScope.launch { microphone.stop() }
+            val strategy = activeSpeechStrategy
             stopSpeechAudioLevelConsumer()
             speechHeartbeatJob?.cancel()
             speechHeartbeatJob = null
             _state.update { it.copy(isRecording = false, isTranscribing = true) }
-            if (session == null) {
-                Log.e(TAG, "Realtime speech session is missing on stop")
-                _state.update { it.copy(isTranscribing = false, speechError = "Recording failed: realtime session missing") }
-                return
-            }
-            launchRealtimeSpeechStop(
-                scope = viewModelScope,
-                state = _state,
-                session = session,
-                existingInput = speechExistingInput,
-                tag = TAG,
-                shouldApply = { speechSession === session },
-                terminateSession = ::terminateSpeechSession,
-            ) {
-                speechSession = null
+            viewModelScope.launch {
+                val audioFile = runCatching { microphone.stop() }.getOrNull()
+                if (strategy.usesRealtimeTransport) {
+                    if (session == null) {
+                        Log.e(TAG, "Realtime speech session is missing on stop")
+                        _state.update {
+                            it.copy(
+                                isTranscribing = false,
+                                speechError = "Recording failed: realtime session missing",
+                            )
+                        }
+                        return@launch
+                    }
+                    launchRealtimeSpeechStop(
+                        scope = viewModelScope,
+                        state = _state,
+                        session = session,
+                        existingInput = speechExistingInput,
+                        tag = TAG,
+                        shouldApply = { speechSession === session },
+                        terminateSession = ::terminateSpeechSession,
+                    ) {
+                        speechSession = null
+                    }
+                } else {
+                    try {
+                        if (audioFile == null || !audioFile.exists() || audioFile.length() == 0L) {
+                            throw IllegalStateException("Empty Grok recording")
+                        }
+                        val result = voiceFlowClient.transcribe(
+                            audioFile = audioFile,
+                            strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                        )
+                        val cleaned = result.text.trim()
+                        Log.d(TAG, "Grok batch transcription success: chars=${cleaned.length}")
+                        _state.update {
+                            it.copy(
+                                inputText = mergedSpeechInput(speechExistingInput, cleaned),
+                                isTranscribing = false,
+                            )
+                        }
+                    } catch (error: Exception) {
+                        Log.e(TAG, "Grok batch speech processing failed", error)
+                        _state.update {
+                            it.copy(
+                                isTranscribing = false,
+                                speechError = errorMessageOrFallback(error, "Transcription failed"),
+                            )
+                        }
+                    } finally {
+                        speechSession = null
+                        audioFile?.delete()
+                    }
+                }
             }
         } else {
             if (speechConfig.token.isEmpty()) {
@@ -673,10 +717,11 @@ class MainViewModel @Inject constructor(
                 return
             }
             speechExistingInput = currentState.inputText
+            activeSpeechStrategy = speechConfig.recordingStrategy
             viewModelScope.launch {
                 try {
                     // Refresh the library config with the latest endpoint/token/prompt/
-                    // terms before opening the session, then start the realtime session.
+                    // terms before opening the session.
                     voiceFlowClient.updateConfig(
                         VoiceFlowConfig(
                             endpoint = speechConfig.baseURL.ifEmpty { VoiceFlowConfig.DEFAULT_ENDPOINT },
@@ -686,24 +731,28 @@ class MainViewModel @Inject constructor(
                         )
                     )
                     clearPreservedSpeechAudio()
-                    val session = voiceFlowClient.startSession()
-                    speechSession = session
-                    startSpeechAudioLevelConsumer()
-
-                    // Stream PCM16/24kHz/mono chunks from the mic into the session. The
-                    // library owns cache replay + WS recovery internally.
-                    microphone.start { chunk ->
-                        viewModelScope.launch { session.sendAudioChunk(chunk) }
-                    }
-
-                    speechHeartbeatJob?.cancel()
-                    speechHeartbeatJob = viewModelScope.launch {
-                        while (true) {
-                            delay(SPEECH_HEARTBEAT_INTERVAL_SECONDS * 1000L)
-                            session.ping()
+                    val strategy = activeSpeechStrategy
+                    if (strategy.usesRealtimeTransport) {
+                        val session = voiceFlowClient.startSession()
+                        speechSession = session
+                        startSpeechAudioLevelConsumer()
+                        microphone.start(strategy = strategy) { chunk ->
+                            viewModelScope.launch { session.sendAudioChunk(chunk) }
                         }
+                        speechHeartbeatJob?.cancel()
+                        speechHeartbeatJob = viewModelScope.launch {
+                            while (true) {
+                                delay(SPEECH_HEARTBEAT_INTERVAL_SECONDS * 1000L)
+                                session.ping()
+                            }
+                        }
+                        Log.d(TAG, "Realtime recording started")
+                    } else {
+                        speechSession = null
+                        startSpeechAudioLevelConsumer()
+                        microphone.start(strategy = strategy, onPCMChunk = null)
+                        Log.d(TAG, "Grok batch recording started")
                     }
-                    Log.d(TAG, "Realtime recording started")
                     _state.update { it.copy(isRecording = true) }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to start recording", e)

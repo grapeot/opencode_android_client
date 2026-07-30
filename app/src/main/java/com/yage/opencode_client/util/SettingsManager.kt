@@ -127,6 +127,12 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getString(KEY_AI_BUILDER_TERMINOLOGY, DEFAULT_AI_BUILDER_TERMINOLOGY) ?: DEFAULT_AI_BUILDER_TERMINOLOGY
         set(value) = encryptedPrefs.edit().putString(KEY_AI_BUILDER_TERMINOLOGY, value).apply()
 
+    /** OPENAI_REALTIME or GROK_BATCH. Unknown values fall back at call sites. */
+    var aiBuilderRecordingStrategy: String
+        get() = encryptedPrefs.getString(KEY_AI_BUILDER_RECORDING_STRATEGY, "OPENAI_REALTIME")
+            ?: "OPENAI_REALTIME"
+        set(value) = encryptedPrefs.edit().putString(KEY_AI_BUILDER_RECORDING_STRATEGY, value).apply()
+
     var aiBuilderLastOKSignature: String?
         get() = encryptedPrefs.getString(KEY_AI_BUILDER_LAST_OK_SIG, null)
         set(value) = encryptedPrefs.edit().putString(KEY_AI_BUILDER_LAST_OK_SIG, value).apply()
@@ -241,6 +247,7 @@ class SettingsManager @Inject constructor(
         private const val KEY_AI_BUILDER_TOKEN = "ai_builder_token"
         private const val KEY_AI_BUILDER_CUSTOM_PROMPT = "ai_builder_custom_prompt"
         private const val KEY_AI_BUILDER_TERMINOLOGY = "ai_builder_terminology"
+        private const val KEY_AI_BUILDER_RECORDING_STRATEGY = "ai_builder_recording_strategy"
         private const val KEY_AI_BUILDER_LAST_OK_SIG = "ai_builder_last_ok_sig"
         private const val KEY_AI_BUILDER_LAST_OK_TESTED = "ai_builder_last_ok_tested"
         private const val KEY_AI_USAGE_DASHBOARD_URL = "ai_usage_dashboard_url"

@@ -2,6 +2,7 @@ package com.yage.opencode_client.ui
 
 import android.util.Log
 import com.yage.opencode_client.util.SettingsManager
+import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
 import com.yage.voiceflowkit.VoiceFlowSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +14,7 @@ internal data class SpeechInputConfig(
     val baseURL: String,
     val prompt: String,
     val terminology: String,
+    val recordingStrategy: VoiceFlowRecordingStrategy = VoiceFlowRecordingStrategy.OPENAI_REALTIME,
 ) {
     /** Comma-separated terminology split into the VoiceFlowKit `terms` list. */
     val terms: List<String>
@@ -28,6 +30,7 @@ internal fun currentSpeechInputConfig(settingsManager: SettingsManager): SpeechI
         baseURL = settingsManager.aiBuilderBaseURL.trim(),
         prompt = settingsManager.aiBuilderCustomPrompt.trim(),
         terminology = settingsManager.aiBuilderTerminology.trim(),
+        recordingStrategy = VoiceFlowRecordingStrategy.fromRaw(settingsManager.aiBuilderRecordingStrategy),
     )
 }
 

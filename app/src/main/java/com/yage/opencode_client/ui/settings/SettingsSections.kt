@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.yage.opencode_client.R
 import com.yage.opencode_client.ui.AIBuilderSettings
+import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
@@ -370,12 +371,14 @@ internal fun SpeechRecognitionSection(
     aiBuilderToken: String,
     aiBuilderCustomPrompt: String,
     aiBuilderTerminology: String,
+    aiBuilderRecordingStrategy: String,
     showAIBuilderToken: Boolean,
     saveMessage: String? = null,
     onBaseUrlChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
     onPromptChange: (String) -> Unit,
     onTerminologyChange: (String) -> Unit,
+    onRecordingStrategyChange: (String) -> Unit,
     onToggleTokenVisibility: () -> Unit,
     onTestConnection: () -> Unit,
     onSave: () -> Unit
@@ -413,14 +416,47 @@ internal fun SpeechRecognitionSection(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    OutlinedTextField(
-        value = aiBuilderCustomPrompt,
-        onValueChange = onPromptChange,
-        label = { Text(stringResource(R.string.settings_custom_prompt)) },
-        modifier = Modifier.fillMaxWidth(),
-        minLines = 3,
-        maxLines = 6
+    Text(
+        text = stringResource(R.string.settings_recording_strategy),
+        style = MaterialTheme.typography.labelLarge,
     )
+    Spacer(modifier = Modifier.height(8.dp))
+    val strategies = listOf(
+        VoiceFlowRecordingStrategy.OPENAI_REALTIME to R.string.settings_recording_strategy_openai,
+        VoiceFlowRecordingStrategy.GROK_BATCH to R.string.settings_recording_strategy_grok,
+    )
+    val selected = VoiceFlowRecordingStrategy.fromRaw(aiBuilderRecordingStrategy)
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        strategies.forEachIndexed { index, (strategy, labelRes) ->
+            SegmentedButton(
+                selected = selected == strategy,
+                onClick = { onRecordingStrategyChange(strategy.name) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = strategies.size),
+            ) {
+                Text(stringResource(labelRes))
+            }
+        }
+    }
+    if (selected == VoiceFlowRecordingStrategy.GROK_BATCH) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.settings_recording_strategy_grok_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (selected == VoiceFlowRecordingStrategy.OPENAI_REALTIME) {
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+            value = aiBuilderCustomPrompt,
+            onValueChange = onPromptChange,
+            label = { Text(stringResource(R.string.settings_custom_prompt)) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 6
+        )
+    }
 
     Spacer(modifier = Modifier.height(12.dp))
 
@@ -658,12 +694,14 @@ internal fun buildAIBuilderSettings(
     baseURL: String,
     token: String,
     customPrompt: String,
-    terminology: String
+    terminology: String,
+    recordingStrategy: String = VoiceFlowRecordingStrategy.OPENAI_REALTIME.name,
 ): AIBuilderSettings {
     return AIBuilderSettings(
         baseURL = baseURL,
         token = token,
         customPrompt = customPrompt,
-        terminology = terminology
+        terminology = terminology,
+        recordingStrategy = recordingStrategy,
     )
 }
