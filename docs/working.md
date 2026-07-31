@@ -620,3 +620,14 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 - **send/stop 顺序**：send 始终在**上**、stop 仅 busy 时叠在**下**（修掉了曾经 busy 时渲染两个 stop 的 bug）。send 始终可发——无需先终止再发送。
 - **stop 红定版**：Material 默认 error 红 `#B3261E` 又深又闷，改 `StopRed #E5484D`（提亮、纯度略降，近 iOS 系统红），录音态 mic 也用此红。
 - **测试环境**：API 36 模拟器上 espresso `3.6.1` 触发 `InputManager.getInstance` `NoSuchMethodException`（旧版 espresso 与 Android 16 注入不兼容）。升级 `espressoCore 3.6.1 → 3.7.0` 修复。**全部 15 个 instrumented test 在 emulator-5554 通过**（`am instrument` 限定设备，不装真机以免破坏 credential）；单元测试 + `assembleDebug` 通过。
+
+## 2026-07-31: GPT Live host lifecycle race closure
+
+- 语音 attempt 现在同时 snapshot Chat session ID、原 composer prefix 和 strategy。Realtime final、Grok upload final、preserved retry final 只更新来源 session；若用户已切到另一 Chat，则把完整结果写回来源 session draft，不覆盖当前 composer。切换 session 时会停止仍在录音/启动中的 attempt，并让 preserved artifact 保留来源 session ownership。
+- 新增 attempt-scoped speech typewriter。partial snapshot 在实际写入时再次检查 attempt 与来源 session；切 session、新 attempt、final/error 都会关闭旧 writer，已排队的旧 partial 不能盖掉新 partial/final。
+- Grok background cleanup 先把 WAV ownership 交给 cleanup，再 `cancelAndJoin` 原 upload job，最后才 preserve/delete。`SpeechRecordingFileOwner` 保证 attempt 与 cleanup 只有一方能取得文件，避免 cancellation `finally` 先删 WAV。
+- PCM sender callback 改为 bounded nonblocking `trySend`，不再在 AudioRecord callback 上等待 Kit。buffer full 或 drain timeout 会停止 sender、保留完整 WAV，并显示明确的 saved-for-retry 错误；正常 Stop 仍在 commit 前按序 drain。
+- Host `SpeechSessionOwner` 继续用 mutex memoize 单次 terminal result，与当前 Kit 的 atomic `AudioDisposition` terminate 行为叠加后，background/finally/abort 的重复 termination 不会重复 cancel/preserve。
+- 验证：`testDebugUnitTest` 308 tests 全部通过；新增 session switch、stale typewriter、Grok cancel-and-join、active retry discard join、PCM saturation tests。VoiceFlowKit JitPack 已 pin 到 feature commit `54141fbb46ae495c6787a5de9800a30cae085f3d`，Kit 发布后、合并前替换为 exact `0.4.0`。
+- `compileDebugKotlin`、`compileDebugUnitTestKotlin`、`assembleDebug` 通过。`compileDebugAndroidTestKotlin` 仍被既有 `ReadToolCardIntegrationTest.kt:151` 阻塞：调用缺少 `completedTurnActivities` 和 `onMarkdownLinkClick`；该错误与 speech 改动无关，本轮未扩大 scope 修复。
+- 本地 composite sibling `:voiceflowkit:testDebugUnitTest` 全部通过，确认 host mutex memoization 与 Kit 当前 atomic `AudioDisposition` termination contract 兼容。

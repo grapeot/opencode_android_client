@@ -27,6 +27,10 @@ import com.yage.opencode_client.util.SettingsManager
 import com.yage.opencode_client.util.ThemeMode
 import com.yage.voiceflowkit.VoiceFlowClient
 import com.yage.voiceflowkit.VoiceFlowMicrophone
+import com.yage.voiceflowkit.VoiceFlowPreservedAudio
+import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
+import com.yage.voiceflowkit.VoiceFlowSession
+import com.yage.voiceflowkit.TranscriptionResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
@@ -38,13 +42,20 @@ import io.mockk.runs
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -55,6 +66,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.io.File
 import java.security.MessageDigest
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -145,6 +157,15 @@ class MainViewModelTest {
         @Suppress("UNCHECKED_CAST")
         val flow = field.get(viewModel) as MutableStateFlow<AppState>
         flow.value = transform(flow.value)
+    }
+
+    private suspend fun awaitSpeechWork(viewModel: MainViewModel) {
+        val field = MainViewModel::class.java.getDeclaredField("speechTranscriptionJob")
+        field.isAccessible = true
+        repeat(3) {
+            val job = field.get(viewModel) as? Job ?: return
+            job.join()
+        }
     }
 
     private fun handleSse(viewModel: MainViewModel, event: SSEEvent) {
@@ -1018,6 +1039,485 @@ class MainViewModelTest {
         assertFalse(viewModel.state.value.isTranscribing)
         assertEquals("Recording failed: realtime session missing", viewModel.state.value.speechError)
         assertEquals("draft", viewModel.state.value.inputText)
+    }
+
+    @Test
+    fun `GPT Live start uses snapshotted strategy`() = runTest {
+        val session = mockk<VoiceFlowSession>(relaxed = true)
+        val realtimeWav = File.createTempFile("opencode-realtime-success", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GPT_LIVE_TRANSCRIBE"
+        coEvery { voiceFlowClient.startSession(VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE) } returns session
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+                persist = any(),
+                onPCMChunk = any(),
+            )
+        } just runs
+        coEvery { microphone.stop() } returns realtimeWav
+        coEvery { session.commitAndStop(any()) } returns "live words"
+        coEvery { session.abortPreservingAudio() } returns null
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(aiBuilderConnectionOK = true, inputText = "prefix") }
+
+        viewModel.toggleRecording()
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        runCurrent()
+
+        assertTrue(viewModel.state.value.isRecording)
+        coVerify(exactly = 1) {
+            voiceFlowClient.startSession(VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE)
+        }
+        coVerify(exactly = 1) {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+                persist = any(),
+                onPCMChunk = any(),
+            )
+        }
+        viewModel.toggleRecording()
+        awaitSpeechWork(viewModel)
+        withTimeout(5_000) {
+            viewModel.state.first { it.inputText == "prefix live words" }
+        }
+        assertEquals("prefix live words", viewModel.state.value.inputText)
+        assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
+        assertFalse(realtimeWav.exists())
+    }
+
+    @Test
+    fun `GPT Live finalize failure preserves originating audio for retry`() = runTest {
+        val session = mockk<VoiceFlowSession>(relaxed = true)
+        val preserved = mockk<VoiceFlowPreservedAudio>(relaxed = true)
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GPT_LIVE_TRANSCRIBE"
+        coEvery { voiceFlowClient.startSession(VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE) } returns session
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+                persist = any(),
+                onPCMChunk = any(),
+            )
+        } just runs
+        coEvery { microphone.stop() } returns null
+        coEvery { session.commitAndStop(any()) } throws IllegalStateException("timeout")
+        coEvery { session.abortPreservingAudio() } returns preserved
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(aiBuilderConnectionOK = true, inputText = "prefix") }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        awaitSpeechWork(viewModel)
+
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertEquals("prefix", viewModel.state.value.inputText)
+        assertEquals("timeout", viewModel.state.value.speechError)
+
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        coEvery { voiceFlowClient.transcribe(preserved, any()) } returns
+            TranscriptionResult(text = "recovered", requestId = "retry-1")
+        viewModel.retryPreservedSpeechAudio()
+        advanceUntilIdle()
+
+        assertEquals("prefix recovered", viewModel.state.value.inputText)
+        assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
+        coVerify(exactly = 1) { voiceFlowClient.transcribe(preserved, any()) }
+    }
+
+    @Test
+    fun `Grok failure preserves file and originating strategy for retry`() = runTest {
+        val grokFile = File.createTempFile("opencode-grok-failure", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } throws IllegalStateException("upload failed")
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(aiBuilderConnectionOK = true, inputText = "prefix") }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+
+        assertTrue(grokFile.exists())
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertEquals("upload failed", viewModel.state.value.speechError)
+
+        every { settingsManager.aiBuilderRecordingStrategy } returns "OPENAI_REALTIME"
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns TranscriptionResult(text = "recovered", requestId = "grok-retry")
+        viewModel.retryPreservedSpeechAudio()
+        advanceUntilIdle()
+
+        assertEquals("prefix recovered", viewModel.state.value.inputText)
+        assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
+        assertFalse(grokFile.exists())
+        coVerify(exactly = 2) {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        }
+    }
+
+    @Test
+    fun `background cancellation leaves failed Grok retry available`() = runTest {
+        val grokFile = File.createTempFile("opencode-grok-cancel", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } throws IllegalStateException("upload failed")
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(aiBuilderConnectionOK = true) }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } coAnswers { awaitCancellation() }
+
+        viewModel.retryPreservedSpeechAudio()
+        runCurrent()
+        assertTrue(viewModel.state.value.isRetryingSpeech)
+        viewModel.stopSpeechForBackground()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isRetryingSpeech)
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertTrue(grokFile.exists())
+        viewModel.discardPreservedSpeechAudio()
+        assertFalse(grokFile.exists())
+    }
+
+    @Test
+    fun `discard joins active retry before deleting preserved file`() = runTest {
+        val grokFile = File.createTempFile("opencode-grok-discard-join", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val retryStarted = CompletableDeferred<Unit>()
+        val cancellationObserved = CompletableDeferred<Unit>()
+        val releaseCancellation = CompletableDeferred<Unit>()
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } throws IllegalStateException("upload failed")
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "source", aiBuilderConnectionOK = true) }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } coAnswers {
+            retryStarted.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    cancellationObserved.complete(Unit)
+                    releaseCancellation.await()
+                }
+            }
+        }
+
+        viewModel.retryPreservedSpeechAudio()
+        retryStarted.await()
+        viewModel.discardPreservedSpeechAudio()
+        cancellationObserved.await()
+
+        assertTrue(grokFile.exists())
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+
+        releaseCancellation.complete(Unit)
+        advanceUntilIdle()
+
+        assertFalse(grokFile.exists())
+        assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
+    }
+
+    @Test
+    fun `switching sessions stops Grok recording and retry writes source draft only`() = runTest {
+        val grokFile = File.createTempFile("opencode-grok-session-switch", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns TranscriptionResult(text = "source words", requestId = "switch-retry")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "source",
+                inputText = "source prefix",
+                aiBuilderConnectionOK = true,
+            )
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.selectSession("destination")
+        advanceUntilIdle()
+
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertTrue(grokFile.exists())
+        coVerify(exactly = 0) {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        }
+
+        viewModel.retryPreservedSpeechAudio()
+        advanceUntilIdle()
+
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        verify { settingsManager.setDraftText("source", "source prefix source words") }
+        assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
+        assertFalse(grokFile.exists())
+    }
+
+    @Test
+    fun `Grok completion after session switch writes source draft only`() = runTest {
+        val grokFile = File.createTempFile("opencode-grok-owned-completion", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val uploadStarted = CompletableDeferred<Unit>()
+        val uploadResult = CompletableDeferred<TranscriptionResult>()
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } coAnswers {
+            uploadStarted.complete(Unit)
+            uploadResult.await()
+        }
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentSessionId = "source", inputText = "source prefix", aiBuilderConnectionOK = true)
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        uploadStarted.await()
+        viewModel.selectSession("destination")
+        uploadResult.complete(TranscriptionResult(text = "finished", requestId = "owned-grok"))
+        advanceUntilIdle()
+
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        verify { settingsManager.setDraftText("source", "source prefix finished") }
+        assertFalse(grokFile.exists())
+    }
+
+    @Test
+    fun `realtime partial and final after session switch cannot overwrite destination`() = runTest {
+        val session = mockk<VoiceFlowSession>(relaxed = true)
+        val realtimeWav = File.createTempFile("opencode-realtime-owned-completion", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val commitStarted = CompletableDeferred<Unit>()
+        val commitResult = CompletableDeferred<String>()
+        lateinit var sendPartial: (String) -> Unit
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GPT_LIVE_TRANSCRIBE"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery { voiceFlowClient.startSession(VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE) } returns session
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+                persist = any(),
+                onPCMChunk = any(),
+            )
+        } just runs
+        coEvery { microphone.stop() } returns realtimeWav
+        coEvery { session.commitAndStop(any()) } coAnswers {
+            sendPartial = firstArg<((String) -> Unit)?>()!!
+            commitStarted.complete(Unit)
+            commitResult.await()
+        }
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentSessionId = "source", inputText = "source prefix", aiBuilderConnectionOK = true)
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        runCurrent()
+        withTimeout(5_000) { commitStarted.await() }
+        viewModel.selectSession("destination")
+        sendPartial("stale partial")
+        runCurrent()
+        assertEquals("destination draft", viewModel.state.value.inputText)
+
+        commitResult.complete("finished")
+        runCurrent()
+
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        verify { settingsManager.setDraftText("source", "source prefix finished") }
+        assertFalse(realtimeWav.exists())
+        viewModel.stopSpeechForBackground()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `realtime sender saturation preserves complete WAV for explicit retry`() = runTest {
+        val session = mockk<VoiceFlowSession>(relaxed = true)
+        val realtimeWav = File.createTempFile("opencode-realtime-backpressure", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val sendStarted = CompletableDeferred<Unit>()
+        lateinit var sendPcm: (ByteArray) -> Unit
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GPT_LIVE_TRANSCRIBE"
+        coEvery { voiceFlowClient.startSession(VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE) } returns session
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+                persist = any(),
+                onPCMChunk = any(),
+            )
+        } coAnswers {
+            sendPcm = arg<(ByteArray) -> Unit>(2)
+        }
+        coEvery { microphone.stop() } returns realtimeWav
+        coEvery { session.sendAudioChunk(any()) } coAnswers {
+            sendStarted.complete(Unit)
+            awaitCancellation()
+        }
+        coEvery { session.abortPreservingAudio() } returns null
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentSessionId = "source", inputText = "prefix", aiBuilderConnectionOK = true)
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        sendPcm(byteArrayOf(1))
+        sendStarted.await()
+        repeat(9) { sendPcm(byteArrayOf((it + 2).toByte())) }
+
+        assertEquals(
+            "Live audio buffer saturated; the complete recording was saved for retry.",
+            viewModel.state.value.speechError,
+        )
+
+        viewModel.toggleRecording()
+        awaitSpeechWork(viewModel)
+
+        assertTrue(realtimeWav.exists())
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertEquals(
+            "Live audio buffer saturated; the complete recording was saved for retry.",
+            viewModel.state.value.speechError,
+        )
+    }
+
+    @Test
+    fun `background joins initial Grok upload before preserving owned WAV`() = runTest {
+        val grokFile = File.createTempFile("opencode-grok-background-join", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val uploadStarted = CompletableDeferred<Unit>()
+        val cancellationObserved = CompletableDeferred<Unit>()
+        val releaseCancellation = CompletableDeferred<Unit>()
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } coAnswers {
+            uploadStarted.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    cancellationObserved.complete(Unit)
+                    releaseCancellation.await()
+                }
+            }
+        }
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentSessionId = "source", inputText = "prefix", aiBuilderConnectionOK = true)
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.toggleRecording()
+        uploadStarted.await()
+        viewModel.stopSpeechForBackground()
+        cancellationObserved.await()
+
+        assertTrue(grokFile.exists())
+        assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
+
+        releaseCancellation.complete(Unit)
+        advanceUntilIdle()
+
+        assertTrue(grokFile.exists())
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
     }
 
     @Test

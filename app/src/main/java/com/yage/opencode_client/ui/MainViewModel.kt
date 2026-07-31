@@ -19,18 +19,21 @@ import com.yage.opencode_client.util.ThemeMode
 import com.yage.voiceflowkit.VoiceFlowClient
 import com.yage.voiceflowkit.VoiceFlowConfig
 import com.yage.voiceflowkit.VoiceFlowMicrophone
-import com.yage.voiceflowkit.VoiceFlowPreservedAudio
 import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
-import com.yage.voiceflowkit.VoiceFlowSession
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import retrofit2.HttpException
+import java.io.File
 import javax.inject.Inject
 
 data class ConnectionFormSettings(
@@ -403,12 +406,20 @@ class MainViewModel @Inject constructor(
     private var pollJob: Job? = null
     private var speechHeartbeatJob: Job? = null
     private var speechAudioLevelJob: Job? = null
-    private var speechSession: VoiceFlowSession? = null
+    private var speechTranscriptionJob: Job? = null
+    private var speechSessionOwner: SpeechSessionOwner? = null
+    private var speechPcmSender: OrderedSpeechPcmSender? = null
+    private var speechTypewriter: AttemptScopedSpeechTypewriter? = null
+    private var speechCleanupJob: Job? = null
+    private var activeSpeechFile: File? = null
+    private var activeSpeechFileOwner: SpeechRecordingFileOwner? = null
     private var speechExistingInput: String = ""
+    private var speechSourceSessionId: String? = null
     private var activeSpeechStrategy: VoiceFlowRecordingStrategy =
         VoiceFlowRecordingStrategy.OPENAI_REALTIME
-    private var preservedSpeechAudio: VoiceFlowPreservedAudio? = null
-    private var preservedSpeechExistingInput: String = ""
+    private var speechAttemptId = 0L
+    private var activeSpeechAttemptId = 0L
+    private var preservedSpeechRecording: PreservedSpeechRecording? = null
     private var lastHealthCheckTime = 0L
     private var deepLinkRouteGeneration = 0L
     private var deepLinkJob: Job? = null
@@ -634,6 +645,14 @@ class MainViewModel @Inject constructor(
             TAG,
             "toggleRecording clicked: recording=${currentState.isRecording}, transcribing=${currentState.isTranscribing}, aiBuilderOK=${currentState.aiBuilderConnectionOK}, tokenSet=${speechConfig.token.isNotEmpty()}"
         )
+        if (!currentState.isRecording && !currentState.isTranscribing && !currentState.isRetryingSpeech &&
+            (speechTranscriptionJob?.isActive == true || speechCleanupJob?.isActive == true)
+        ) {
+            _state.update {
+                it.copy(speechError = "Still finishing the previous recording, please wait.")
+            }
+            return
+        }
         if (currentState.isTranscribing) {
             Log.w(TAG, "Ignoring toggle while transcription is in progress")
             _state.update {
@@ -641,65 +660,168 @@ class MainViewModel @Inject constructor(
             }
             return
         }
+        if (currentState.isRetryingSpeech) {
+            Log.w(TAG, "Ignoring toggle while preserved audio retry is in progress")
+            return
+        }
         if (currentState.isRecording) {
-            val session = speechSession
+            val owner = speechSessionOwner
+            val sender = speechPcmSender
             val strategy = activeSpeechStrategy
+            val attemptId = activeSpeechAttemptId
+            val target = SpeechDraftTarget(speechSourceSessionId, speechExistingInput)
+            val fileOwner = activeSpeechFileOwner ?: SpeechRecordingFileOwner().also {
+                activeSpeechFileOwner = it
+            }
+            val typewriter = speechTypewriter
             stopSpeechAudioLevelConsumer()
             speechHeartbeatJob?.cancel()
             speechHeartbeatJob = null
             _state.update { it.copy(isRecording = false, isTranscribing = true) }
-            viewModelScope.launch {
-                val audioFile = runCatching { microphone.stop() }.getOrNull()
+            speechTranscriptionJob = viewModelScope.launch {
+                val audioFile = fileOwner.record(runCatching { microphone.stop() }.getOrNull())
+                activeSpeechFile = audioFile
+                if (!isCurrentSpeechAttempt(attemptId)) {
+                    sender?.cancel()
+                    fileOwner.claimForAttempt(audioFile)?.let(::deleteSpeechFileUnlessPreserved)
+                    return@launch
+                }
                 if (strategy.usesRealtimeTransport) {
-                    if (session == null) {
+                    if (owner == null) {
                         Log.e(TAG, "Realtime speech session is missing on stop")
+                        preserveSpeechFile(
+                            fileOwner.claimForAttempt(audioFile),
+                            strategy,
+                            target,
+                            attemptId,
+                        )
                         _state.update {
                             it.copy(
                                 isTranscribing = false,
                                 speechError = "Recording failed: realtime session missing",
                             )
                         }
+                        speechTranscriptionJob = null
                         return@launch
                     }
-                    launchRealtimeSpeechStop(
+                    try {
+                        sender?.closeAndDrain()
+                    } catch (error: Exception) {
+                        Log.e(TAG, "Failed to drain realtime PCM before commit", error)
+                        finishRealtimeSession(
+                            owner,
+                            true,
+                            fileOwner.claimForAttempt(audioFile),
+                            target,
+                            attemptId,
+                            preferFallbackFile = true,
+                        )
+                        if (isCurrentSpeechAttempt(attemptId)) {
+                            _state.update {
+                                it.copy(
+                                    isTranscribing = false,
+                                    speechError = errorMessageOrFallback(error, "Failed to send recorded audio"),
+                                )
+                            }
+                            speechSessionOwner = null
+                            speechTranscriptionJob = null
+                        }
+                        return@launch
+                    } finally {
+                        if (speechPcmSender === sender) speechPcmSender = null
+                    }
+                    speechTranscriptionJob = launchRealtimeSpeechStop(
                         scope = viewModelScope,
                         state = _state,
-                        session = session,
-                        existingInput = speechExistingInput,
+                        session = owner.session,
+                        existingInput = target.existingInput,
                         tag = TAG,
-                        shouldApply = { speechSession === session },
-                        terminateSession = ::terminateSpeechSession,
+                        shouldApply = {
+                            isCurrentSpeechAttempt(attemptId) &&
+                                speechSessionOwner === owner
+                        },
+                        shouldPreserve = { isCurrentSpeechAttempt(attemptId) },
+                        onPartialTranscript = { partial ->
+                            typewriter?.submit(partial)
+                        },
+                        onFinalTranscript = { transcript ->
+                            typewriter?.cancel()
+                            if (speechTypewriter === typewriter) speechTypewriter = null
+                            acceptSpeechDraft(target, transcript)
+                        },
+                        onFailure = { error ->
+                            typewriter?.cancel()
+                            if (speechTypewriter === typewriter) speechTypewriter = null
+                            reportSpeechFailure(target, error)
+                        },
+                        onCommitted = {
+                            owner.markCommitted()
+                            val ownedFile = fileOwner.claimForAttempt(audioFile)
+                            if (isCurrentSpeechAttempt(attemptId) && speechSessionOwner === owner) {
+                                deleteSpeechFileUnlessPreserved(ownedFile)
+                            } else {
+                                preserveSpeechFile(ownedFile, owner.session.strategy, target, attemptId)
+                            }
+                            if (activeSpeechFile === audioFile) activeSpeechFile = null
+                        },
+                        terminateSession = { preserve ->
+                            finishRealtimeSession(
+                                owner,
+                                preserve,
+                                fileOwner.claimForAttempt(audioFile),
+                                target,
+                                attemptId,
+                            )
+                        },
                     ) {
-                        speechSession = null
+                        if (speechSessionOwner === owner) speechSessionOwner = null
+                        if (activeSpeechFileOwner === fileOwner && fileOwner.current() == null) {
+                            activeSpeechFileOwner = null
+                        }
+                        speechTranscriptionJob = null
                     }
                 } else {
+                    var succeeded = false
                     try {
                         if (audioFile == null || !audioFile.exists() || audioFile.length() == 0L) {
                             throw IllegalStateException("Empty Grok recording")
                         }
                         val result = voiceFlowClient.transcribe(
                             audioFile = audioFile,
-                            strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                            strategy = strategy,
                         )
                         val cleaned = result.text.trim()
+                        if (!isCurrentSpeechAttempt(attemptId)) return@launch
+                        succeeded = true
                         Log.d(TAG, "Grok batch transcription success: chars=${cleaned.length}")
-                        _state.update {
-                            it.copy(
-                                inputText = mergedSpeechInput(speechExistingInput, cleaned),
-                                isTranscribing = false,
-                            )
-                        }
+                        acceptSpeechDraft(target, cleaned)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (error: Exception) {
+                        if (!isCurrentSpeechAttempt(attemptId)) return@launch
                         Log.e(TAG, "Grok batch speech processing failed", error)
-                        _state.update {
-                            it.copy(
-                                isTranscribing = false,
-                                speechError = errorMessageOrFallback(error, "Transcription failed"),
-                            )
-                        }
+                        reportSpeechFailure(target, error)
                     } finally {
-                        speechSession = null
-                        audioFile?.delete()
+                        withContext(NonCancellable) {
+                            val ownedFile = fileOwner.claimForAttempt(audioFile)
+                            if (ownedFile != null) {
+                                if (succeeded) {
+                                    deleteSpeechFileUnlessPreserved(ownedFile)
+                                } else if (isCurrentSpeechAttempt(attemptId)) {
+                                    preserveSpeechFile(ownedFile, strategy, target, attemptId)
+                                } else {
+                                    deleteSpeechFileUnlessPreserved(ownedFile)
+                                }
+                            }
+                            if (activeSpeechFile === audioFile) activeSpeechFile = null
+                            if (activeSpeechFileOwner === fileOwner && fileOwner.current() == null) {
+                                activeSpeechFileOwner = null
+                            }
+                            if (isCurrentSpeechAttempt(attemptId)) {
+                                _state.update { it.copy(isTranscribing = false) }
+                                speechTranscriptionJob = null
+                            }
+                        }
                     }
                 }
             }
@@ -718,9 +840,19 @@ class MainViewModel @Inject constructor(
                 }
                 return
             }
-            speechExistingInput = currentState.inputText
-            activeSpeechStrategy = speechConfig.recordingStrategy
-            viewModelScope.launch {
+            val strategy = speechConfig.recordingStrategy
+            val target = SpeechDraftTarget(currentState.currentSessionId, currentState.inputText)
+            val attemptId = beginSpeechAttempt()
+            val fileOwner = SpeechRecordingFileOwner()
+            speechExistingInput = target.existingInput
+            speechSourceSessionId = target.sessionId
+            activeSpeechStrategy = strategy
+            activeSpeechAttemptId = attemptId
+            activeSpeechFile = null
+            activeSpeechFileOwner = fileOwner
+            speechTranscriptionJob = viewModelScope.launch {
+                var owner: SpeechSessionOwner? = null
+                var sender: OrderedSpeechPcmSender? = null
                 try {
                     // Refresh the library config with the latest endpoint/token/prompt/
                     // terms before opening the session.
@@ -732,38 +864,101 @@ class MainViewModel @Inject constructor(
                             terms = speechConfig.terms,
                         )
                     )
+                    if (!isCurrentSpeechAttempt(attemptId)) return@launch
                     clearPreservedSpeechAudio()
-                    val strategy = activeSpeechStrategy
                     if (strategy.usesRealtimeTransport) {
-                        val session = voiceFlowClient.startSession()
-                        speechSession = session
+                        val session = voiceFlowClient.startSession(strategy)
+                        owner = SpeechSessionOwner(session)
+                        speechSessionOwner = owner
+                        if (!isCurrentSpeechAttempt(attemptId)) {
+                            owner.discard()
+                            return@launch
+                        }
+                        sender = OrderedSpeechPcmSender(viewModelScope) { chunk ->
+                            session.sendAudioChunk(chunk)
+                        }
+                        speechPcmSender = sender
                         startSpeechAudioLevelConsumer()
                         microphone.start(strategy = strategy) { chunk ->
-                            viewModelScope.launch { session.sendAudioChunk(chunk) }
+                            if (isCurrentSpeechAttempt(attemptId) && speechSessionOwner === owner) {
+                                if (!sender.trySend(chunk) && _state.value.currentSessionId == target.sessionId) {
+                                    _state.update {
+                                        it.copy(speechError = OrderedSpeechPcmSender.BUFFER_FULL_MESSAGE)
+                                    }
+                                }
+                            }
                         }
                         speechHeartbeatJob?.cancel()
                         speechHeartbeatJob = viewModelScope.launch {
                             while (true) {
                                 delay(SPEECH_HEARTBEAT_INTERVAL_SECONDS * 1000L)
-                                session.ping()
+                                if (isCurrentSpeechAttempt(attemptId) && speechSessionOwner === owner) {
+                                    session.ping()
+                                }
                             }
                         }
                         Log.d(TAG, "Realtime recording started")
                     } else {
-                        speechSession = null
+                        speechSessionOwner = null
                         startSpeechAudioLevelConsumer()
                         microphone.start(strategy = strategy, onPCMChunk = null)
                         Log.d(TAG, "Grok batch recording started")
                     }
-                    _state.update { it.copy(isRecording = true) }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start recording", e)
-                    runCatching { microphone.stop() }
-                    stopSpeechAudioLevelConsumer()
-                    speechSession?.let { session ->
-                        runCatching { terminateSpeechSession(session) }
+                    if (isCurrentSpeechAttempt(attemptId)) {
+                        _state.update { it.copy(isRecording = true, speechError = null) }
+                        speechTypewriter = AttemptScopedSpeechTypewriter(
+                            scope = viewModelScope,
+                            shouldApply = {
+                                isCurrentSpeechAttempt(attemptId) &&
+                                    _state.value.currentSessionId == target.sessionId
+                            },
+                        ) { partial ->
+                            _state.update {
+                                it.copy(inputText = mergedSpeechInput(target.existingInput, partial))
+                            }
+                        }
+                        speechTranscriptionJob = null
                     }
-                    speechSession = null
+                } catch (cancelled: CancellationException) {
+                    val audioFile = fileOwner.record(runCatching { microphone.stop() }.getOrNull())
+                    activeSpeechFile = audioFile
+                    sender?.cancel()
+                    if (!fileOwner.isCleanupOwner()) {
+                        runCatching { owner?.discard() }
+                        fileOwner.claimForAttempt(audioFile)?.let(::deleteSpeechFileUnlessPreserved)
+                    }
+                    throw cancelled
+                } catch (e: Exception) {
+                    val audioFile = fileOwner.record(runCatching { microphone.stop() }.getOrNull())
+                    activeSpeechFile = audioFile
+                    runCatching { sender?.closeAndDrain() }
+                    if (!isCurrentSpeechAttempt(attemptId)) {
+                        owner?.discard()
+                        fileOwner.claimForAttempt(audioFile)?.let(::deleteSpeechFileUnlessPreserved)
+                        return@launch
+                    }
+                    Log.e(TAG, "Failed to start recording", e)
+                    stopSpeechAudioLevelConsumer()
+                    if (owner != null) {
+                        finishRealtimeSession(
+                            owner,
+                            true,
+                            fileOwner.claimForAttempt(audioFile),
+                            target,
+                            attemptId,
+                        )
+                    } else {
+                        preserveSpeechFile(
+                            fileOwner.claimForAttempt(audioFile),
+                            strategy,
+                            target,
+                            attemptId,
+                        )
+                    }
+                    speechSessionOwner = null
+                    speechPcmSender = null
+                    activeSpeechFile = null
+                    if (activeSpeechFileOwner === fileOwner) activeSpeechFileOwner = null
                     speechHeartbeatJob?.cancel()
                     speechHeartbeatJob = null
                     _state.update {
@@ -777,26 +972,211 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private suspend fun terminateSpeechSession(session: VoiceFlowSession) {
-        try {
-            session.abortPreservingAudio()?.let { voiceFlowClient.discardPreservedAudio(it) }
-        } catch (error: Exception) {
-            Log.e(TAG, "Failed to terminate speech session", error)
+    private fun beginSpeechAttempt(): Long {
+        speechTranscriptionJob?.cancel()
+        speechTranscriptionJob = null
+        speechPcmSender?.cancel()
+        speechPcmSender = null
+        speechTypewriter?.cancel()
+        speechTypewriter = null
+        speechAttemptId += 1
+        return speechAttemptId
+    }
+
+    private fun isCurrentSpeechAttempt(attemptId: Long): Boolean = speechAttemptId == attemptId
+
+    private fun acceptSpeechDraft(target: SpeechDraftTarget, transcript: String) {
+        val merged = mergedSpeechInput(target.existingInput, transcript.trim())
+        if (_state.value.currentSessionId == target.sessionId) {
+            _state.update {
+                it.copy(
+                    inputText = merged,
+                    isTranscribing = false,
+                    isRetryingSpeech = false,
+                    speechError = null,
+                )
+            }
+        }
+        target.sessionId?.let { settingsManager.setDraftText(it, merged) }
+    }
+
+    private fun reportSpeechFailure(target: SpeechDraftTarget, error: Throwable) {
+        if (_state.value.currentSessionId != target.sessionId) return
+        _state.update {
+            it.copy(
+                inputText = speechFailureInput(target.existingInput, it.inputText),
+                isTranscribing = false,
+                isRetryingSpeech = false,
+                speechError = errorMessageOrFallback(error, "Transcription failed"),
+            )
         }
     }
 
+    private suspend fun finishRealtimeSession(
+        owner: SpeechSessionOwner,
+        preserveAudio: Boolean,
+        fallbackFile: File?,
+        target: SpeechDraftTarget,
+        attemptId: Long,
+        preferFallbackFile: Boolean = false,
+    ) {
+        if (!preserveAudio) {
+            runCatching { owner.discard() }
+                .onFailure { Log.e(TAG, "Failed to discard speech session", it) }
+            deleteSpeechFileUnlessPreserved(fallbackFile)
+            return
+        }
+
+        val preserved = try {
+            owner.preserve()
+        } catch (error: Exception) {
+            Log.e(TAG, "Failed to preserve speech session", error)
+            null
+        }
+        val recording = when {
+            preferFallbackFile && fallbackFile.isUsableSpeechFile() ->
+                PreservedSpeechRecording.FileRecording(fallbackFile!!, owner.session.strategy, target)
+            preserved != null -> PreservedSpeechRecording.Realtime(preserved, target)
+            fallbackFile.isUsableSpeechFile() ->
+                PreservedSpeechRecording.FileRecording(fallbackFile!!, owner.session.strategy, target)
+            else -> null
+        }
+        if (recording is PreservedSpeechRecording.Realtime) {
+            deleteSpeechFileUnlessPreserved(fallbackFile)
+        } else if (preserved != null) {
+            voiceFlowClient.discardPreservedAudio(preserved)
+        }
+
+        if (recording != null && isCurrentSpeechAttempt(attemptId)) {
+            installPreservedSpeechRecording(recording)
+        } else if (recording != null) {
+            discardSpeechRecordingUnlessCurrent(recording)
+        } else {
+            deleteSpeechFileUnlessPreserved(fallbackFile)
+        }
+        if (activeSpeechFile === fallbackFile) activeSpeechFile = null
+    }
+
+    private fun preserveSpeechFile(
+        file: File?,
+        strategy: VoiceFlowRecordingStrategy,
+        target: SpeechDraftTarget,
+        attemptId: Long,
+    ) {
+        if (!file.isUsableSpeechFile()) return
+        val recording = PreservedSpeechRecording.FileRecording(file!!, strategy, target)
+        if (isCurrentSpeechAttempt(attemptId)) {
+            installPreservedSpeechRecording(recording)
+        } else {
+            discardSpeechRecordingUnlessCurrent(recording)
+        }
+    }
+
+    private fun installPreservedSpeechRecording(
+        recording: PreservedSpeechRecording,
+    ) {
+        val previous = preservedSpeechRecording
+        if (previous != null && !previous.hasSameBacking(recording)) {
+            discardSpeechRecording(previous)
+        }
+        preservedSpeechRecording = recording
+        _state.update { it.copy(hasPreservedSpeechAudio = true) }
+    }
+
+    private fun discardSpeechRecordingUnlessCurrent(recording: PreservedSpeechRecording) {
+        if (preservedSpeechRecording?.hasSameBacking(recording) != true) {
+            discardSpeechRecording(recording)
+        }
+    }
+
+    private fun discardSpeechRecording(recording: PreservedSpeechRecording) {
+        when (recording) {
+            is PreservedSpeechRecording.Realtime -> voiceFlowClient.discardPreservedAudio(recording.audio)
+            is PreservedSpeechRecording.FileRecording -> recording.file.delete()
+        }
+    }
+
+    private fun PreservedSpeechRecording.hasSameBacking(other: PreservedSpeechRecording): Boolean =
+        when {
+            this is PreservedSpeechRecording.Realtime && other is PreservedSpeechRecording.Realtime ->
+                audio === other.audio || audio.id == other.audio.id
+            this is PreservedSpeechRecording.FileRecording && other is PreservedSpeechRecording.FileRecording ->
+                file.absolutePath == other.file.absolutePath
+            else -> false
+        }
+
+    private fun File?.isUsableSpeechFile(): Boolean =
+        this != null && exists() && length() > 0L
+
+    private fun deleteSpeechFileUnlessPreserved(file: File?) {
+        if (file == null) return
+        val preservedFile = (preservedSpeechRecording as? PreservedSpeechRecording.FileRecording)?.file
+        if (preservedFile?.absolutePath != file.absolutePath) file.delete()
+    }
+
     fun stopSpeechForBackground() {
-        val session = speechSession
+        scheduleSpeechCleanup()
+    }
+
+    private fun scheduleSpeechCleanup() {
+        if (speechCleanupJob?.isActive == true) return
+        val owner = speechSessionOwner
+        val sender = speechPcmSender
+        val fileOwner = activeSpeechFileOwner
+        val file = activeSpeechFile
+        val strategy = activeSpeechStrategy
+        val target = SpeechDraftTarget(speechSourceSessionId, speechExistingInput)
+        val originalJob = speechTranscriptionJob
+        val shouldStopMicrophone = _state.value.isRecording || fileOwner != null || owner != null || sender != null
+        fileOwner?.handoffToCleanup()
+        val cleanupAttemptId = if (owner == null) {
+            speechAttemptId += 1
+            speechAttemptId
+        } else {
+            activeSpeechAttemptId
+        }
+        speechTranscriptionJob = null
         speechHeartbeatJob?.cancel()
         speechHeartbeatJob = null
+        speechTypewriter?.cancel()
+        speechTypewriter = null
         stopSpeechAudioLevelConsumer()
-        speechSession = null
-        _state.update { it.copy(isRecording = false, isTranscribing = false, speechAudioLevel = 0f) }
-        viewModelScope.launch {
-            runCatching { microphone.stop() }
-            if (session != null) {
-                terminateSpeechSession(session)
+        speechSessionOwner = null
+        speechPcmSender = null
+        _state.update {
+            it.copy(
+                isRecording = false,
+                isTranscribing = false,
+                isRetryingSpeech = false,
+                speechAudioLevel = 0f,
+            )
+        }
+        speechCleanupJob = viewModelScope.launch {
+            originalJob?.cancelAndJoin()
+            val stoppedFile = if (shouldStopMicrophone) {
+                fileOwner?.record(runCatching { microphone.stop() }.getOrNull())
+                    ?: runCatching { microphone.stop() }.getOrNull()
+                    ?: file
+            } else {
+                file
             }
+            val ownedFile = fileOwner?.claimForCleanup(stoppedFile) ?: stoppedFile
+            val senderFailure = runCatching { sender?.closeAndDrain() }.exceptionOrNull()
+            if (owner != null) {
+                finishRealtimeSession(
+                    owner,
+                    true,
+                    ownedFile,
+                    target,
+                    cleanupAttemptId,
+                    preferFallbackFile = senderFailure != null,
+                )
+            } else if (fileOwner != null) {
+                preserveSpeechFile(ownedFile, strategy, target, cleanupAttemptId)
+            }
+            if (activeSpeechFile === stoppedFile || activeSpeechFile === file) activeSpeechFile = null
+            if (activeSpeechFileOwner === fileOwner) activeSpeechFileOwner = null
+            speechCleanupJob = null
         }
     }
 
@@ -805,67 +1185,85 @@ class MainViewModel @Inject constructor(
     }
 
     fun abortSpeechRecognition() {
-        val session = speechSession ?: return
-        val prefix = speechExistingInput
-        speechHeartbeatJob?.cancel()
-        speechHeartbeatJob = null
-        stopSpeechAudioLevelConsumer()
-        speechSession = null
-        _state.update { it.copy(isRecording = false, isTranscribing = false, speechAudioLevel = 0f) }
-        viewModelScope.launch {
-            runCatching { microphone.stop() }
-            try {
-                val preserved = session.abortPreservingAudio()
-                clearPreservedSpeechAudio()
-                if (preserved != null) {
-                    preservedSpeechAudio = preserved
-                    preservedSpeechExistingInput = prefix
-                    _state.update { it.copy(hasPreservedSpeechAudio = true) }
-                }
-            } catch (error: Exception) {
-                Log.e(TAG, "Failed to abort speech recognition", error)
-                _state.update { it.copy(speechError = errorMessageOrFallback(error, "Failed to abort speech recognition")) }
-            }
-        }
+        if (speechSessionOwner == null && activeSpeechFileOwner == null &&
+            !_state.value.isRecording && !_state.value.isTranscribing && !_state.value.isRetryingSpeech
+        ) return
+        scheduleSpeechCleanup()
     }
 
     fun retryPreservedSpeechAudio() {
-        val preserved = preservedSpeechAudio ?: return
-        val prefix = preservedSpeechExistingInput
+        val preserved = preservedSpeechRecording ?: return
+        val target = preserved.target
+        val attemptId = beginSpeechAttempt()
+        val typewriter = AttemptScopedSpeechTypewriter(
+            scope = viewModelScope,
+            shouldApply = {
+                isCurrentSpeechAttempt(attemptId) &&
+                    preservedSpeechRecording === preserved &&
+                    _state.value.currentSessionId == target.sessionId
+            },
+        ) { partial ->
+            _state.update {
+                it.copy(inputText = mergedSpeechInput(target.existingInput, partial))
+            }
+        }
+        speechTypewriter = typewriter
         _state.update { it.copy(isRetryingSpeech = true) }
-        viewModelScope.launch {
+        speechTranscriptionJob = viewModelScope.launch {
             try {
-                val result = voiceFlowClient.transcribe(preserved) { partial ->
-                    _state.update { it.copy(inputText = mergedSpeechInput(prefix, partial)) }
+                val onPartial: (String) -> Unit = { partial ->
+                    if (isCurrentSpeechAttempt(attemptId) && preservedSpeechRecording === preserved) {
+                        typewriter.submit(partial)
+                    }
                 }
-                _state.update {
-                    it.copy(
-                        inputText = mergedSpeechInput(prefix, result.text),
-                        isRetryingSpeech = false,
-                    )
+                val result = when (preserved) {
+                    is PreservedSpeechRecording.Realtime ->
+                        voiceFlowClient.transcribe(preserved.audio, onPartial)
+                    is PreservedSpeechRecording.FileRecording ->
+                        voiceFlowClient.transcribe(preserved.file, preserved.strategy, onPartial)
                 }
+                if (!isCurrentSpeechAttempt(attemptId) || preservedSpeechRecording !== preserved) return@launch
+                typewriter.cancel()
+                acceptSpeechDraft(target, result.text)
                 clearPreservedSpeechAudio()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
+                if (!isCurrentSpeechAttempt(attemptId)) return@launch
                 Log.e(TAG, "Failed to retry preserved speech audio", error)
-                _state.update {
-                    it.copy(
-                        isRetryingSpeech = false,
-                        speechError = errorMessageOrFallback(error, "Transcription failed"),
-                    )
+                typewriter.cancel()
+                reportSpeechFailure(target, error)
+            } finally {
+                typewriter.cancel()
+                if (speechTypewriter === typewriter) speechTypewriter = null
+                if (isCurrentSpeechAttempt(attemptId)) {
+                    _state.update { it.copy(isRetryingSpeech = false) }
+                    speechTranscriptionJob = null
                 }
             }
         }
     }
 
     private fun clearPreservedSpeechAudio() {
-        preservedSpeechAudio?.let { voiceFlowClient.discardPreservedAudio(it) }
-        preservedSpeechAudio = null
-        preservedSpeechExistingInput = ""
+        preservedSpeechRecording?.let(::discardSpeechRecording)
+        preservedSpeechRecording = null
         _state.update { it.copy(hasPreservedSpeechAudio = false) }
     }
 
     fun discardPreservedSpeechAudio() {
-        clearPreservedSpeechAudio()
+        val retryJob = speechTranscriptionJob
+        val preserved = preservedSpeechRecording
+        beginSpeechAttempt()
+        _state.update { it.copy(isRetryingSpeech = false) }
+        if (retryJob != null && !retryJob.isCompleted) {
+            speechCleanupJob = viewModelScope.launch {
+                retryJob.cancelAndJoin()
+                if (preservedSpeechRecording === preserved) clearPreservedSpeechAudio()
+                speechCleanupJob = null
+            }
+        } else {
+            clearPreservedSpeechAudio()
+        }
     }
 
     private fun startSpeechAudioLevelConsumer() {
@@ -959,7 +1357,26 @@ class MainViewModel @Inject constructor(
     }
 
     fun selectSession(sessionId: String) {
+        if (_state.value.currentSessionId != sessionId) {
+            if (_state.value.isRecording ||
+                (activeSpeechFileOwner != null && !_state.value.isTranscribing && !_state.value.isRetryingSpeech)
+            ) {
+                scheduleSpeechCleanup()
+            } else {
+                speechTypewriter?.cancel()
+                speechTypewriter = null
+            }
+        }
         selectSessionState(_state, settingsManager, sessionId)
+        _state.update {
+            it.copy(
+                isRecording = false,
+                isTranscribing = false,
+                isRetryingSpeech = false,
+                speechAudioLevel = 0f,
+                speechError = null,
+            )
+        }
         loadMessages(sessionId)
         loadSessionStatus()
     }
@@ -1440,9 +1857,24 @@ class MainViewModel @Inject constructor(
         sseJob?.cancel()
         pollJob?.cancel()
         speechHeartbeatJob?.cancel()
+        speechTranscriptionJob?.cancel()
+        speechCleanupJob?.cancel()
+        speechPcmSender?.cancel()
+        speechTypewriter?.cancel()
         microphone.discard()
-        runBlocking { speechSession?.let { terminateSpeechSession(it) } }
-        speechSession = null
+        runBlocking {
+            runCatching { speechSessionOwner?.discard() }
+        }
+        speechSessionOwner = null
+        speechPcmSender = null
+        val ownedFile = activeSpeechFileOwner?.let {
+            it.claimForCleanup() ?: it.claimForAttempt() ?: it.current()
+        } ?: activeSpeechFile
+        deleteSpeechFileUnlessPreserved(ownedFile)
+        activeSpeechFile = null
+        activeSpeechFileOwner = null
+        preservedSpeechRecording?.let(::discardSpeechRecording)
+        preservedSpeechRecording = null
         super.onCleared()
     }
 
