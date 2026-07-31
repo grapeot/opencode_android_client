@@ -2,8 +2,9 @@
 
 ## 2026-07-31 — GPT Live default
 
-- New installations now default to GPT Live Transcribe while preserving valid saved choices. VoiceFlowKit advances to `f9afba988c2a14af5b599397d2fea4664b826670`, which includes recording-time accumulated transcript snapshots.
+- New installations now default to GPT Live Transcribe while preserving valid saved choices. VoiceFlowKit is pinned to exact JitPack release `0.4.0`, which includes recording-time accumulated transcript snapshots.
 - Verification: all 309 unit tests and `assembleDebug` passed. The active in-flight strategy keeps its neutral pre-recording sentinel; Start always snapshots the persisted GPT Live default.
+- Exact-pin verification: clean remote dependency resolution, all unit tests, and `assembleDebug` passed outside the local composite build.
 
 ## 2026-07-30 — Dual recording strategies + Save auto-test (open PR, do not merge)
 
