@@ -5,6 +5,7 @@
 - New installations now default to GPT Live Transcribe while preserving valid saved choices. VoiceFlowKit is pinned to exact JitPack release `0.4.0`, which includes recording-time accumulated transcript snapshots.
 - Verification: all 309 unit tests and `assembleDebug` passed. The active in-flight strategy keeps its neutral pre-recording sentinel; Start always snapshots the persisted GPT Live default.
 - Exact-pin verification: clean remote dependency resolution, all unit tests, and `assembleDebug` passed outside the local composite build.
+- CI follow-up: the realtime session-switch test now waits for the observable recording state before requesting Stop, removing a scheduler-speed race seen on clean GitHub runners.
 
 ## 2026-07-30 — Dual recording strategies + Save auto-test (open PR, do not merge)
 
