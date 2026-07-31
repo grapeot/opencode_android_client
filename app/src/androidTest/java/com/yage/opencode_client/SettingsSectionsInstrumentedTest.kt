@@ -80,6 +80,35 @@ class SettingsSectionsInstrumentedTest {
     }
 
     @Test
+    fun speechSectionShowsThreeStrategiesAndPromptForGptLive() {
+        composeRule.setContent {
+            MaterialTheme {
+                SpeechRecognitionSection(
+                    state = AppState(),
+                    aiBuilderBaseURL = "https://builder.example.com",
+                    aiBuilderToken = "token",
+                    aiBuilderCustomPrompt = "Keep names exact",
+                    aiBuilderTerminology = "OpenCode",
+                    aiBuilderRecordingStrategy = "GPT_LIVE_TRANSCRIBE",
+                    showAIBuilderToken = false,
+                    onBaseUrlChange = {},
+                    onTokenChange = {},
+                    onPromptChange = {},
+                    onTerminologyChange = {},
+                    onRecordingStrategyChange = {},
+                    onToggleTokenVisibility = {},
+                    onSave = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("GPT Realtime").assertIsDisplayed()
+        composeRule.onNodeWithText("GPT Live").assertIsDisplayed()
+        composeRule.onNodeWithText("Grok STT").assertIsDisplayed()
+        composeRule.onNodeWithText("Custom Prompt").assertIsDisplayed()
+    }
+
+    @Test
     fun connectionProfileSectionShowsCurrentSshProfileSummary() {
         val profile = HostProfile(
             id = "ssh-1",

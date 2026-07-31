@@ -1,9 +1,11 @@
 package com.yage.opencode_client
 
+import com.yage.opencode_client.ui.AIBuilderSettings
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.mergedSpeechInput
 import com.yage.opencode_client.ui.sanitizeBearerToken
 import com.yage.opencode_client.ui.speechFailureInput
+import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -14,6 +16,38 @@ import org.junit.Test
  * (token sanitizing + transcript merging + AppState defaults) is exercised here.
  */
 class SpeechRecognitionTest {
+
+    @Test
+    fun `recording strategy raw values preserve all supported strategies`() {
+        assertEquals(
+            VoiceFlowRecordingStrategy.OPENAI_REALTIME,
+            VoiceFlowRecordingStrategy.fromRaw("OPENAI_REALTIME"),
+        )
+        assertEquals(
+            VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+            VoiceFlowRecordingStrategy.fromRaw("GPT_LIVE_TRANSCRIBE"),
+        )
+        assertEquals(
+            VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+            VoiceFlowRecordingStrategy.fromRaw("gptLiveTranscribe"),
+        )
+        assertEquals(
+            VoiceFlowRecordingStrategy.GROK_BATCH,
+            VoiceFlowRecordingStrategy.fromRaw("GROK_BATCH"),
+        )
+    }
+
+    @Test
+    fun `unknown recording strategy falls back to GPT Realtime`() {
+        assertEquals(
+            VoiceFlowRecordingStrategy.OPENAI_REALTIME,
+            VoiceFlowRecordingStrategy.fromRaw("future-strategy"),
+        )
+        assertEquals(
+            VoiceFlowRecordingStrategy.OPENAI_REALTIME,
+            VoiceFlowRecordingStrategy.fromRaw(null),
+        )
+    }
 
     // ─── sanitizeBearerToken ─────────────────────────────────────────
 
@@ -85,6 +119,12 @@ class SpeechRecognitionTest {
         assertFalse(state.aiBuilderConnectionOK)
         assertNull(state.aiBuilderConnectionError)
         assertFalse(state.isTestingAIBuilderConnection)
+    }
+
+    @Test
+    fun `AI Builder settings default to GPT Live Transcribe`() {
+        val settings = AIBuilderSettings("", "", "", "")
+        assertEquals("GPT_LIVE_TRANSCRIBE", settings.recordingStrategy)
     }
 
     @Test

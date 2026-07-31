@@ -426,6 +426,7 @@ internal fun SpeechRecognitionSection(
     Spacer(modifier = Modifier.height(8.dp))
     val strategies = listOf(
         VoiceFlowRecordingStrategy.OPENAI_REALTIME to R.string.settings_recording_strategy_openai,
+        VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE to R.string.settings_recording_strategy_gpt_live,
         VoiceFlowRecordingStrategy.GROK_BATCH to R.string.settings_recording_strategy_grok,
     )
     val selected = VoiceFlowRecordingStrategy.fromRaw(aiBuilderRecordingStrategy)
@@ -480,7 +481,7 @@ internal fun SpeechRecognitionSection(
             },
         )
     }
-    if (selected == VoiceFlowRecordingStrategy.OPENAI_REALTIME) {
+    if (selected.usesRealtimeTransport) {
         Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(
             value = aiBuilderCustomPrompt,
@@ -724,7 +725,7 @@ internal fun buildAIBuilderSettings(
     token: String,
     customPrompt: String,
     terminology: String,
-    recordingStrategy: String = VoiceFlowRecordingStrategy.OPENAI_REALTIME.name,
+    recordingStrategy: String = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE.name,
 ): AIBuilderSettings {
     return AIBuilderSettings(
         baseURL = baseURL,
