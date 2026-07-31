@@ -36,19 +36,19 @@ class SettingsSectionsInstrumentedTest {
                     aiBuilderToken = "",
                     aiBuilderCustomPrompt = "",
                     aiBuilderTerminology = "",
+                    aiBuilderRecordingStrategy = "OPENAI_REALTIME",
                     showAIBuilderToken = false,
                     onBaseUrlChange = {},
                     onTokenChange = {},
                     onPromptChange = {},
                     onTerminologyChange = {},
+                    onRecordingStrategyChange = {},
                     onToggleTokenVisibility = {},
-                    onTestConnection = {},
                     onSave = {}
                 )
             }
         }
 
-        composeRule.onNodeWithText("Test Connection").assertIsNotEnabled()
         composeRule.onNodeWithText("Save").assertIsNotEnabled()
     }
 
@@ -62,19 +62,19 @@ class SettingsSectionsInstrumentedTest {
                     aiBuilderToken = "token",
                     aiBuilderCustomPrompt = "",
                     aiBuilderTerminology = "",
+                    aiBuilderRecordingStrategy = "OPENAI_REALTIME",
                     showAIBuilderToken = false,
                     onBaseUrlChange = {},
                     onTokenChange = {},
                     onPromptChange = {},
                     onTerminologyChange = {},
+                    onRecordingStrategyChange = {},
                     onToggleTokenVisibility = {},
-                    onTestConnection = {},
                     onSave = {}
                 )
             }
         }
 
-        composeRule.onNodeWithText("Test Connection").assertIsEnabled()
         composeRule.onNodeWithText("Save").assertIsEnabled()
         composeRule.onNodeWithText("Connected successfully").assertIsDisplayed()
     }

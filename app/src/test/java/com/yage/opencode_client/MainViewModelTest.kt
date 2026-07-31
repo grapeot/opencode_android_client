@@ -102,6 +102,7 @@ class MainViewModelTest {
         every { settingsManager.aiBuilderToken } returns ""
         every { settingsManager.aiBuilderCustomPrompt } returns ""
         every { settingsManager.aiBuilderTerminology } returns ""
+        every { settingsManager.aiBuilderRecordingStrategy } returns "OPENAI_REALTIME"
         every { settingsManager.aiBuilderLastOKSignature } returns null
         every { settingsManager.aiBuilderLastOKTestedAt } returns 0L
 
@@ -116,6 +117,7 @@ class MainViewModelTest {
         every { settingsManager.aiBuilderToken = any() } just runs
         every { settingsManager.aiBuilderCustomPrompt = any() } just runs
         every { settingsManager.aiBuilderTerminology = any() } just runs
+        every { settingsManager.aiBuilderRecordingStrategy = any() } just runs
         every { settingsManager.aiBuilderLastOKSignature = any() } just runs
         every { settingsManager.aiBuilderLastOKTestedAt = any() } just runs
 
@@ -1005,10 +1007,12 @@ class MainViewModelTest {
     @Test
     fun `toggleRecording handles missing realtime session when stopping recording`() = runTest {
         every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "OPENAI_REALTIME"
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(isRecording = true, aiBuilderConnectionOK = true, inputText = "draft") }
 
         viewModel.toggleRecording()
+        advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isRecording)
         assertFalse(viewModel.state.value.isTranscribing)

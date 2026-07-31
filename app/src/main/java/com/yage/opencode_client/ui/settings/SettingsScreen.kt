@@ -73,6 +73,7 @@ fun SettingsScreen(
     var aiBuilderToken by remember { mutableStateOf(savedAIBuilder.token) }
     var aiBuilderCustomPrompt by remember { mutableStateOf(savedAIBuilder.customPrompt) }
     var aiBuilderTerminology by remember { mutableStateOf(savedAIBuilder.terminology) }
+    var aiBuilderRecordingStrategy by remember { mutableStateOf(savedAIBuilder.recordingStrategy) }
     var showAIBuilderToken by remember { mutableStateOf(false) }
     // Independent "Settings saved" notice for the Speech section, so it shows in
     // its own section rather than reusing the server section's testResult.
@@ -197,6 +198,7 @@ fun SettingsScreen(
                 aiBuilderToken = aiBuilderToken,
                 aiBuilderCustomPrompt = aiBuilderCustomPrompt,
                 aiBuilderTerminology = aiBuilderTerminology,
+                aiBuilderRecordingStrategy = aiBuilderRecordingStrategy,
                 showAIBuilderToken = showAIBuilderToken,
                 saveMessage = aiBuilderSaveMessage,
                 onBaseUrlChange = {
@@ -215,28 +217,24 @@ fun SettingsScreen(
                     aiBuilderTerminology = it
                     aiBuilderSaveMessage = null
                 },
+                onRecordingStrategyChange = {
+                    aiBuilderRecordingStrategy = it
+                    aiBuilderSaveMessage = null
+                },
                 onToggleTokenVisibility = { showAIBuilderToken = !showAIBuilderToken },
-                onTestConnection = {
+                onSave = {
                     aiBuilderSaveMessage = null
                     viewModel.saveAIBuilderSettings(
                         buildAIBuilderSettings(
                             baseURL = aiBuilderBaseURL,
                             token = aiBuilderToken,
                             customPrompt = aiBuilderCustomPrompt,
-                            terminology = aiBuilderTerminology
+                            terminology = aiBuilderTerminology,
+                            recordingStrategy = aiBuilderRecordingStrategy,
                         )
                     )
+                    // Save auto-tests; the result card shows success/failure.
                     viewModel.testAIBuilderConnection()
-                },
-                onSave = {
-                    viewModel.saveAIBuilderSettings(
-                        buildAIBuilderSettings(
-                            baseURL = aiBuilderBaseURL,
-                            token = aiBuilderToken,
-                            customPrompt = aiBuilderCustomPrompt,
-                            terminology = aiBuilderTerminology
-                        )
-                    )
                     aiBuilderSaveMessage = "Settings saved"
                 }
             )

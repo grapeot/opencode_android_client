@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="ok">OK</string>
     <string name="app_name">OpenCode Client</string>
     <string name="nav_chat">Chat</string>
     <string name="nav_files">Files</string>
@@ -18,6 +19,7 @@
     <string name="settings_test_connection">Test Connection</string>
     <string name="settings_manage_profiles">Manage Profiles</string>
     <string name="settings_save">Save</string>
+    <string name="settings_save_testing">Save &amp; test…</string>
     <string name="settings_saved">Settings saved</string>
     <string name="settings_connection_profile">Connection Profile</string>
     <string name="settings_server_connection">Server Connection</string>
@@ -27,6 +29,12 @@
     <string name="settings_show_password">Show password</string>
     <string name="settings_hide_password">Hide password</string>
     <string name="settings_speech_recognition">Speech Recognition</string>
+    <string name="settings_recording_strategy">Transcription model</string>
+    <string name="settings_recording_strategy_openai">OpenAI Realtime</string>
+    <string name="settings_recording_strategy_grok">Grok STT</string>
+    <string name="settings_recording_strategy_help">OpenAI Realtime: better formatting and accuracy. Grok STT: ~10x cheaper, slightly lower accuracy, no live transcript. Both use your AI Builder token.</string>
+    <string name="settings_recording_strategy_dialog_title">Which strategy should I use?</string>
+    <string name="settings_recording_strategy_dialog_body">OpenAI Realtime (GPT Realtime) — better formatting, punctuation, and accuracy. Shows a live transcript while you speak.\n\nGrok STT — about 10x cheaper, slightly lower accuracy, no live transcript. Records locally and uploads after Stop.\n\nRecommendation: For content a human will read (notes, messages, articles), prefer OpenAI Realtime. For content an AI agent will process (commands, prompts, logs), Grok STT is usually good enough — AI tolerates typos and messy formatting far better than people do.</string>
     <string name="settings_ai_builder_base_url">AI Builder Base URL</string>
     <string name="settings_ai_builder_token">AI Builder Token</string>
     <string name="settings_custom_prompt">Custom Prompt</string>

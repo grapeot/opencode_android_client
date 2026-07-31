@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="ok">确定</string>
     <string name="app_name">OpenCode Client</string>
     <string name="nav_chat">聊天</string>
     <string name="nav_files">文件</string>
@@ -18,6 +19,7 @@
     <string name="settings_test_connection">测试连接</string>
     <string name="settings_manage_profiles">管理连接配置</string>
     <string name="settings_save">保存</string>
+    <string name="settings_save_testing">保存并测试…</string>
     <string name="settings_saved">设置已保存</string>
     <string name="settings_connection_profile">连接配置</string>
     <string name="settings_server_connection">服务器连接</string>
@@ -27,6 +29,12 @@
     <string name="settings_show_password">显示密码</string>
     <string name="settings_hide_password">隐藏密码</string>
     <string name="settings_speech_recognition">语音识别</string>
+    <string name="settings_recording_strategy">录音模型</string>
+    <string name="settings_recording_strategy_openai">OpenAI Realtime</string>
+    <string name="settings_recording_strategy_grok">Grok STT</string>
+    <string name="settings_recording_strategy_help">OpenAI Realtime：排版与准确率更好。Grok STT：价格约为前者的 1/10，准确率略低，无实时字幕。两者都走你的 AI Builder 令牌。</string>
+    <string name="settings_recording_strategy_dialog_title">该选哪个？</string>
+    <string name="settings_recording_strategy_dialog_body">OpenAI Realtime（GPT Realtime）——排版、标点和准确率更好，说话时能看到实时字幕。\n\nGrok STT——价格约为前者的 1/10，准确率略低，无实时字幕；本地录音，停止后上传。\n\n建议：给人看的内容（笔记、消息、文章）用 OpenAI Realtime；给 AI 处理的内容（指令、prompt、日志）用 Grok STT 就够——AI 对错别字和排版的包容度比人高得多。</string>
     <string name="settings_ai_builder_base_url">AI Builder 基础地址</string>
     <string name="settings_ai_builder_token">AI Builder 访问令牌</string>
     <string name="settings_custom_prompt">自定义提示词</string>

@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,11 +15,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,6 +38,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +53,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.yage.opencode_client.R
 import com.yage.opencode_client.ui.AIBuilderSettings
+import com.yage.voiceflowkit.VoiceFlowRecordingStrategy
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
@@ -370,14 +375,15 @@ internal fun SpeechRecognitionSection(
     aiBuilderToken: String,
     aiBuilderCustomPrompt: String,
     aiBuilderTerminology: String,
+    aiBuilderRecordingStrategy: String,
     showAIBuilderToken: Boolean,
     saveMessage: String? = null,
     onBaseUrlChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
     onPromptChange: (String) -> Unit,
     onTerminologyChange: (String) -> Unit,
+    onRecordingStrategyChange: (String) -> Unit,
     onToggleTokenVisibility: () -> Unit,
-    onTestConnection: () -> Unit,
     onSave: () -> Unit
 ) {
     SectionHeader(title = stringResource(R.string.settings_speech_recognition))
@@ -413,14 +419,78 @@ internal fun SpeechRecognitionSection(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    OutlinedTextField(
-        value = aiBuilderCustomPrompt,
-        onValueChange = onPromptChange,
-        label = { Text(stringResource(R.string.settings_custom_prompt)) },
-        modifier = Modifier.fillMaxWidth(),
-        minLines = 3,
-        maxLines = 6
+    Text(
+        text = stringResource(R.string.settings_recording_strategy),
+        style = MaterialTheme.typography.labelLarge,
     )
+    Spacer(modifier = Modifier.height(8.dp))
+    val strategies = listOf(
+        VoiceFlowRecordingStrategy.OPENAI_REALTIME to R.string.settings_recording_strategy_openai,
+        VoiceFlowRecordingStrategy.GROK_BATCH to R.string.settings_recording_strategy_grok,
+    )
+    val selected = VoiceFlowRecordingStrategy.fromRaw(aiBuilderRecordingStrategy)
+    var showStrategyHelp by remember { mutableStateOf(false) }
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        strategies.forEachIndexed { index, (strategy, labelRes) ->
+            SegmentedButton(
+                selected = selected == strategy,
+                onClick = { onRecordingStrategyChange(strategy.name) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = strategies.size),
+            ) {
+                Text(stringResource(labelRes))
+            }
+        }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.Info,
+            contentDescription = stringResource(R.string.settings_recording_strategy_dialog_title),
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .size(18.dp)
+                .clickable { showStrategyHelp = true },
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.settings_recording_strategy_help),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable { showStrategyHelp = true },
+        )
+    }
+    if (showStrategyHelp) {
+        AlertDialog(
+            onDismissRequest = { showStrategyHelp = false },
+            title = { Text(stringResource(R.string.settings_recording_strategy_dialog_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.settings_recording_strategy_dialog_body),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showStrategyHelp = false }) {
+                    Text(stringResource(R.string.ok))
+                }
+            },
+        )
+    }
+    if (selected == VoiceFlowRecordingStrategy.OPENAI_REALTIME) {
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+            value = aiBuilderCustomPrompt,
+            onValueChange = onPromptChange,
+            label = { Text(stringResource(R.string.settings_custom_prompt)) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 6
+        )
+    }
 
     Spacer(modifier = Modifier.height(12.dp))
 
@@ -435,28 +505,23 @@ internal fun SpeechRecognitionSection(
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    // Save auto-tests the connection; no separate Test button. The result card
+    // below shows success/failure from the live probe, so users never have to
+    // remember to "test after save" — and never lose a prior "connected" state
+    // by merely saving unchanged credentials.
+    Button(
+        onClick = onSave,
+        enabled = aiBuilderBaseURL.isNotBlank() && !state.isTestingAIBuilderConnection,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Button(
-            onClick = onTestConnection,
-            enabled = aiBuilderBaseURL.isNotBlank() && !state.isTestingAIBuilderConnection
-        ) {
-            if (state.isTestingAIBuilderConnection) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Text(stringResource(R.string.settings_test_connection))
-        }
-
-        OutlinedButton(
-            onClick = onSave,
-            enabled = aiBuilderBaseURL.isNotBlank()
-        ) {
+        if (state.isTestingAIBuilderConnection) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(stringResource(R.string.settings_save_testing))
+        } else {
             Text(stringResource(R.string.settings_save))
         }
     }
@@ -658,12 +723,14 @@ internal fun buildAIBuilderSettings(
     baseURL: String,
     token: String,
     customPrompt: String,
-    terminology: String
+    terminology: String,
+    recordingStrategy: String = VoiceFlowRecordingStrategy.OPENAI_REALTIME.name,
 ): AIBuilderSettings {
     return AIBuilderSettings(
         baseURL = baseURL,
         token = token,
         customPrompt = customPrompt,
-        terminology = terminology
+        terminology = terminology,
+        recordingStrategy = recordingStrategy,
     )
 }

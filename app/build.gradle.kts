@@ -86,7 +86,10 @@ dependencies {
     
     // VoiceFlowKit: realtime speech transcription pipeline, consumed remotely from
     // grapeot/voiceflow-android via JitPack (com.github.<user>:<repo>:<tag>).
-    implementation("com.github.grapeot:voiceflow-android:0.3.1")
+    // Dual-strategy VoiceFlowKit. Prefer exact SemVer after voiceflow-android
+    // merges/tags 0.3.0; until then pin the dual-strategy PR commit (full SHA;
+    // short hashes can cold-start JitPack past CI timeouts).
+    implementation("com.github.grapeot:voiceflow-android:0fbc2d5cdeeb2335671726044f7fb105314671f1")
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
