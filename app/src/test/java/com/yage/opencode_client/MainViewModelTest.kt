@@ -1395,7 +1395,7 @@ class MainViewModelTest {
         }
 
         viewModel.toggleRecording()
-        runCurrent()
+        withTimeout(5_000) { viewModel.state.first { it.isRecording } }
         viewModel.toggleRecording()
         runCurrent()
         withTimeout(5_000) { commitStarted.await() }
