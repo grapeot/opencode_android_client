@@ -436,6 +436,12 @@ internal fun SpeechRecognitionSection(
             }
         }
     }
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.settings_recording_strategy_help),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     if (selected == VoiceFlowRecordingStrategy.GROK_BATCH) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(

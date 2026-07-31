@@ -31,7 +31,7 @@
     <string name="settings_recording_strategy">Recording strategy</string>
     <string name="settings_recording_strategy_openai">OpenAI Realtime</string>
     <string name="settings_recording_strategy_grok">Grok STT</string>
-    <string name="settings_recording_strategy_grok_hint">Grok STT records locally and uploads after Stop. Context prompt is not sent; terms still apply.</string>
+    <string name="settings_recording_strategy_help">OpenAI Realtime: better formatting and accuracy. Grok STT: ~10x cheaper, slightly lower accuracy, no live transcript. Both use your AI Builder token.</string>
     <string name="settings_ai_builder_base_url">AI Builder Base URL</string>
     <string name="settings_ai_builder_token">AI Builder Token</string>
     <string name="settings_custom_prompt">Custom Prompt</string>
