@@ -1,5 +1,9 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-07-31 — v0.1.20260731 release prep
+
+- Bumped the App to `versionName` `0.1.20260731` and `versionCode` 17 for the GPT Live Transcribe release. VoiceFlowKit remains pinned to exact `0.4.0`.
+
 ## 2026-07-31 — GPT Live default
 
 - New installations now default to GPT Live Transcribe while preserving valid saved choices. VoiceFlowKit is pinned to exact JitPack release `0.4.0`, which includes recording-time accumulated transcript snapshots.
