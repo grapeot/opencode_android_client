@@ -450,7 +450,7 @@ internal fun SpeechRecognitionSection(
         Icon(
             Icons.Default.Info,
             contentDescription = stringResource(R.string.settings_recording_strategy_dialog_title),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier
                 .size(18.dp)
                 .clickable { showStrategyHelp = true },
@@ -459,7 +459,8 @@ internal fun SpeechRecognitionSection(
         Text(
             text = stringResource(R.string.settings_recording_strategy_help),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable { showStrategyHelp = true },
         )
     }
     if (showStrategyHelp) {
@@ -479,15 +480,6 @@ internal fun SpeechRecognitionSection(
             },
         )
     }
-    if (selected == VoiceFlowRecordingStrategy.GROK_BATCH) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.settings_recording_strategy_grok_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
     if (selected == VoiceFlowRecordingStrategy.OPENAI_REALTIME) {
         Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(

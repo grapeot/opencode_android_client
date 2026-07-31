@@ -29,10 +29,9 @@
     <string name="settings_show_password">Show password</string>
     <string name="settings_hide_password">Hide password</string>
     <string name="settings_speech_recognition">Speech Recognition</string>
-    <string name="settings_recording_strategy">Recording strategy</string>
+    <string name="settings_recording_strategy">Transcription model</string>
     <string name="settings_recording_strategy_openai">OpenAI Realtime</string>
     <string name="settings_recording_strategy_grok">Grok STT</string>
-    <string name="settings_recording_strategy_grok_hint">Grok STT records locally and uploads after Stop. Context prompt is not sent; terms still apply.</string>
     <string name="settings_recording_strategy_help">OpenAI Realtime: better formatting and accuracy. Grok STT: ~10x cheaper, slightly lower accuracy, no live transcript. Both use your AI Builder token.</string>
     <string name="settings_recording_strategy_dialog_title">Which strategy should I use?</string>
     <string name="settings_recording_strategy_dialog_body">OpenAI Realtime (GPT Realtime) — better formatting, punctuation, and accuracy. Shows a live transcript while you speak.\n\nGrok STT — about 10x cheaper, slightly lower accuracy, no live transcript. Records locally and uploads after Stop.\n\nRecommendation: For content a human will read (notes, messages, articles), prefer OpenAI Realtime. For content an AI agent will process (commands, prompts, logs), Grok STT is usually good enough — AI tolerates typos and messy formatting far better than people do.</string>
