@@ -725,7 +725,7 @@ internal fun buildAIBuilderSettings(
     token: String,
     customPrompt: String,
     terminology: String,
-    recordingStrategy: String = VoiceFlowRecordingStrategy.OPENAI_REALTIME.name,
+    recordingStrategy: String = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE.name,
 ): AIBuilderSettings {
     return AIBuilderSettings(
         baseURL = baseURL,

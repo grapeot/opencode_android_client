@@ -129,8 +129,8 @@ class SettingsManager @Inject constructor(
 
     /** OPENAI_REALTIME, GPT_LIVE_TRANSCRIBE, or GROK_BATCH. Unknown values fall back at call sites. */
     var aiBuilderRecordingStrategy: String
-        get() = encryptedPrefs.getString(KEY_AI_BUILDER_RECORDING_STRATEGY, "OPENAI_REALTIME")
-            ?: "OPENAI_REALTIME"
+        get() = encryptedPrefs.getString(KEY_AI_BUILDER_RECORDING_STRATEGY, "GPT_LIVE_TRANSCRIBE")
+            ?: "GPT_LIVE_TRANSCRIBE"
         set(value) = encryptedPrefs.edit().putString(KEY_AI_BUILDER_RECORDING_STRATEGY, value).apply()
 
     var aiBuilderLastOKSignature: String?

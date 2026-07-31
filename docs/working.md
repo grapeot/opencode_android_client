@@ -1,5 +1,10 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-07-31 — GPT Live default
+
+- New installations now default to GPT Live Transcribe while preserving valid saved choices. VoiceFlowKit advances to `f9afba988c2a14af5b599397d2fea4664b826670`, which includes recording-time accumulated transcript snapshots.
+- Verification: all 309 unit tests and `assembleDebug` passed. The active in-flight strategy keeps its neutral pre-recording sentinel; Start always snapshots the persisted GPT Live default.
+
 ## 2026-07-30 — Dual recording strategies + Save auto-test (open PR, do not merge)
 
 - 分支 `feat/dual-recording-strategies`：Settings 增加 OpenAI Realtime / Grok STT picker；Chat 录音 Start 时 snapshot strategy。

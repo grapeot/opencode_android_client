@@ -28,7 +28,7 @@ internal data class SpeechInputConfig(
     val baseURL: String,
     val prompt: String,
     val terminology: String,
-    val recordingStrategy: VoiceFlowRecordingStrategy = VoiceFlowRecordingStrategy.OPENAI_REALTIME,
+    val recordingStrategy: VoiceFlowRecordingStrategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
 ) {
     /** Comma-separated terminology split into the VoiceFlowKit `terms` list. */
     val terms: List<String>

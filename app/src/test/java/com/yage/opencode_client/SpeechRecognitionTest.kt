@@ -1,5 +1,6 @@
 package com.yage.opencode_client
 
+import com.yage.opencode_client.ui.AIBuilderSettings
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.mergedSpeechInput
 import com.yage.opencode_client.ui.sanitizeBearerToken
@@ -118,6 +119,12 @@ class SpeechRecognitionTest {
         assertFalse(state.aiBuilderConnectionOK)
         assertNull(state.aiBuilderConnectionError)
         assertFalse(state.isTestingAIBuilderConnection)
+    }
+
+    @Test
+    fun `AI Builder settings default to GPT Live Transcribe`() {
+        val settings = AIBuilderSettings("", "", "", "")
+        assertEquals("GPT_LIVE_TRANSCRIBE", settings.recordingStrategy)
     }
 
     @Test

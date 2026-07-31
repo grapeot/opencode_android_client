@@ -87,7 +87,7 @@ dependencies {
     // VoiceFlowKit: realtime speech transcription pipeline, consumed remotely from
     // grapeot/voiceflow-android via JitPack (com.github.<user>:<repo>:<tag>).
     // GPT Live feature commit. Replace with exact 0.4.0 before merge.
-    implementation("com.github.grapeot:voiceflow-android:54141fbb46ae495c6787a5de9800a30cae085f3d")
+    implementation("com.github.grapeot:voiceflow-android:f9afba988c2a14af5b599397d2fea4664b826670")
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)

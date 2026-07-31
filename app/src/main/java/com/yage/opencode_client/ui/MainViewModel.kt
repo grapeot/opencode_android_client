@@ -47,7 +47,7 @@ data class AIBuilderSettings(
     val token: String,
     val customPrompt: String,
     val terminology: String,
-    val recordingStrategy: String = "OPENAI_REALTIME",
+    val recordingStrategy: String = "GPT_LIVE_TRANSCRIBE",
 )
 
 data class AIUsageSettings(val dashboardUrl: String)
