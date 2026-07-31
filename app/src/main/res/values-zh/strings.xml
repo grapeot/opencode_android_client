@@ -18,6 +18,7 @@
     <string name="settings_test_connection">测试连接</string>
     <string name="settings_manage_profiles">管理连接配置</string>
     <string name="settings_save">保存</string>
+    <string name="settings_save_testing">保存并测试…</string>
     <string name="settings_saved">设置已保存</string>
     <string name="settings_connection_profile">连接配置</string>
     <string name="settings_server_connection">服务器连接</string>
@@ -29,8 +30,8 @@
     <string name="settings_speech_recognition">语音识别</string>
     <string name="settings_recording_strategy">录音策略</string>
     <string name="settings_recording_strategy_openai">OpenAI Realtime</string>
-    <string name="settings_recording_strategy_grok">Grok Batch</string>
-    <string name="settings_recording_strategy_grok_hint">Grok 仅在本地录音，停止后才上传。上下文提示不会发送；术语字典仍然生效。</string>
+    <string name="settings_recording_strategy_grok">Grok STT</string>
+    <string name="settings_recording_strategy_grok_hint">Grok STT 仅在本地录音，停止后才上传。上下文提示不会发送；术语字典仍然生效。</string>
     <string name="settings_ai_builder_base_url">AI Builder 基础地址</string>
     <string name="settings_ai_builder_token">AI Builder 访问令牌</string>
     <string name="settings_custom_prompt">自定义提示词</string>

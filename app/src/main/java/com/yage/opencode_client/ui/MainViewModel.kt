@@ -559,8 +559,10 @@ class MainViewModel @Inject constructor(
         settingsManager.aiBuilderCustomPrompt = settings.customPrompt
         settingsManager.aiBuilderTerminology = settings.terminology
         settingsManager.aiBuilderRecordingStrategy = settings.recordingStrategy
-        _state.update { it.copy(aiBuilderConnectionOK = false, aiBuilderConnectionError = null) }
-        settingsManager.aiBuilderLastOKSignature = null
+        // Do not wipe the connection-OK state here. Save now auto-tests, which
+        // sets the OK/error state from the live probe. Wiping unconditionally
+        // forced users to re-test after every Save even when credentials were
+        // unchanged.
     }
 
     fun testAIBuilderConnection() {

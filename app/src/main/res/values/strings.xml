@@ -18,6 +18,7 @@
     <string name="settings_test_connection">Test Connection</string>
     <string name="settings_manage_profiles">Manage Profiles</string>
     <string name="settings_save">Save</string>
+    <string name="settings_save_testing">Save &amp; test…</string>
     <string name="settings_saved">Settings saved</string>
     <string name="settings_connection_profile">Connection Profile</string>
     <string name="settings_server_connection">Server Connection</string>
@@ -29,8 +30,8 @@
     <string name="settings_speech_recognition">Speech Recognition</string>
     <string name="settings_recording_strategy">Recording strategy</string>
     <string name="settings_recording_strategy_openai">OpenAI Realtime</string>
-    <string name="settings_recording_strategy_grok">Grok Batch</string>
-    <string name="settings_recording_strategy_grok_hint">Grok records locally and uploads after Stop. Context prompt is not sent; terms still apply.</string>
+    <string name="settings_recording_strategy_grok">Grok STT</string>
+    <string name="settings_recording_strategy_grok_hint">Grok STT records locally and uploads after Stop. Context prompt is not sent; terms still apply.</string>
     <string name="settings_ai_builder_base_url">AI Builder Base URL</string>
     <string name="settings_ai_builder_token">AI Builder Token</string>
     <string name="settings_custom_prompt">Custom Prompt</string>

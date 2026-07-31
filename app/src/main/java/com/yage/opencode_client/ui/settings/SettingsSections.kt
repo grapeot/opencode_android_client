@@ -380,7 +380,6 @@ internal fun SpeechRecognitionSection(
     onTerminologyChange: (String) -> Unit,
     onRecordingStrategyChange: (String) -> Unit,
     onToggleTokenVisibility: () -> Unit,
-    onTestConnection: () -> Unit,
     onSave: () -> Unit
 ) {
     SectionHeader(title = stringResource(R.string.settings_speech_recognition))
@@ -471,28 +470,23 @@ internal fun SpeechRecognitionSection(
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    // Save auto-tests the connection; no separate Test button. The result card
+    // below shows success/failure from the live probe, so users never have to
+    // remember to "test after save" — and never lose a prior "connected" state
+    // by merely saving unchanged credentials.
+    Button(
+        onClick = onSave,
+        enabled = aiBuilderBaseURL.isNotBlank() && !state.isTestingAIBuilderConnection,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Button(
-            onClick = onTestConnection,
-            enabled = aiBuilderBaseURL.isNotBlank() && !state.isTestingAIBuilderConnection
-        ) {
-            if (state.isTestingAIBuilderConnection) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Text(stringResource(R.string.settings_test_connection))
-        }
-
-        OutlinedButton(
-            onClick = onSave,
-            enabled = aiBuilderBaseURL.isNotBlank()
-        ) {
+        if (state.isTestingAIBuilderConnection) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(stringResource(R.string.settings_save_testing))
+        } else {
             Text(stringResource(R.string.settings_save))
         }
     }

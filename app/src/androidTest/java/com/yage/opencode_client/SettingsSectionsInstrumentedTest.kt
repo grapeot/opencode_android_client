@@ -44,13 +44,11 @@ class SettingsSectionsInstrumentedTest {
                     onTerminologyChange = {},
                     onRecordingStrategyChange = {},
                     onToggleTokenVisibility = {},
-                    onTestConnection = {},
                     onSave = {}
                 )
             }
         }
 
-        composeRule.onNodeWithText("Test Connection").assertIsNotEnabled()
         composeRule.onNodeWithText("Save").assertIsNotEnabled()
     }
 
@@ -72,13 +70,11 @@ class SettingsSectionsInstrumentedTest {
                     onTerminologyChange = {},
                     onRecordingStrategyChange = {},
                     onToggleTokenVisibility = {},
-                    onTestConnection = {},
                     onSave = {}
                 )
             }
         }
 
-        composeRule.onNodeWithText("Test Connection").assertIsEnabled()
         composeRule.onNodeWithText("Save").assertIsEnabled()
         composeRule.onNodeWithText("Connected successfully").assertIsDisplayed()
     }
