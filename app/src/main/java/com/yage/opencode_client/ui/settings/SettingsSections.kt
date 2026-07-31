@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,11 +15,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,6 +38,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -425,7 +429,10 @@ internal fun SpeechRecognitionSection(
         VoiceFlowRecordingStrategy.GROK_BATCH to R.string.settings_recording_strategy_grok,
     )
     val selected = VoiceFlowRecordingStrategy.fromRaw(aiBuilderRecordingStrategy)
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    var showStrategyHelp by remember { mutableStateOf(false) }
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         strategies.forEachIndexed { index, (strategy, labelRes) ->
             SegmentedButton(
                 selected = selected == strategy,
@@ -436,12 +443,42 @@ internal fun SpeechRecognitionSection(
             }
         }
     }
-    Spacer(modifier = Modifier.height(8.dp))
-    Text(
-        text = stringResource(R.string.settings_recording_strategy_help),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.Info,
+            contentDescription = stringResource(R.string.settings_recording_strategy_dialog_title),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(18.dp)
+                .clickable { showStrategyHelp = true },
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.settings_recording_strategy_help),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (showStrategyHelp) {
+        AlertDialog(
+            onDismissRequest = { showStrategyHelp = false },
+            title = { Text(stringResource(R.string.settings_recording_strategy_dialog_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.settings_recording_strategy_dialog_body),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showStrategyHelp = false }) {
+                    Text(stringResource(R.string.ok))
+                }
+            },
+        )
+    }
     if (selected == VoiceFlowRecordingStrategy.GROK_BATCH) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
