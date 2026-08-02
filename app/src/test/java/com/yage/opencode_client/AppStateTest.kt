@@ -172,6 +172,8 @@ class AppStateTest {
         assertTrue(models.any {
             it.displayName == "GPT-5.6 Terra Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-terra-fast"
         })
+        assertEquals("DeepSeek V4 Flash 0731", models.last().displayName)
+        assertEquals("deepseek-v4-flash:0731", models.last().modelId)
     }
 
     @Test
