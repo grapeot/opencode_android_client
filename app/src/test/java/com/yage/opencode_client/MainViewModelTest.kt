@@ -1395,10 +1395,19 @@ class MainViewModelTest {
         }
 
         viewModel.toggleRecording()
-        withTimeout(5_000) { viewModel.state.first { it.isRecording } }
-        viewModel.toggleRecording()
         runCurrent()
-        withTimeout(5_000) { commitStarted.await() }
+        assertTrue(viewModel.state.value.isRecording)
+        viewModel.toggleRecording()
+        // Stop path runs closeAndDrain on Dispatchers.IO (real threads), so we
+        // must yield to let it complete before commitAndStop fires. Poll with
+        // small sleeps + runCurrent until commitStarted completes.
+        var waited = 0L
+        while (!commitStarted.isCompleted && waited < 5_000) {
+            Thread.sleep(20)
+            waited += 20
+            runCurrent()
+        }
+        assertTrue(commitStarted.isCompleted)
         viewModel.selectSession("destination")
         sendPartial("stale partial")
         runCurrent()

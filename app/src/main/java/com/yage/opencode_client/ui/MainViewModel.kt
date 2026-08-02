@@ -120,10 +120,9 @@ data class AppState(
             get() = when {
                 displayName == "DeepSeek V4 Flash" -> "DS-Flash"
                 displayName == "DeepSeek Local" -> "DS-L"
-                displayName == "DeepSeek V4 Pro" -> "DS-Pro"
                 displayName == "Ollama GLM 5.2" -> "OGLM-5.2"
-                displayName == "GPT-5.6 Sol Fast" -> "GPT-F"
                 displayName == "GPT-5.6 Terra Fast" -> "GPT-TF"
+                displayName == "GPT-5.6 Luna" -> "GPT-L"
                 "Haiku" in displayName -> "Haiku"
                 "Gemini" in displayName -> "Gemini"
                 "GPT" in displayName -> "GPT"

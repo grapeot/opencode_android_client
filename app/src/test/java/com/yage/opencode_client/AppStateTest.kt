@@ -166,12 +166,15 @@ class AppStateTest {
         assertEquals("openai", models[1].providerId)
         assertEquals("gpt-5.6-sol", models[1].modelId)
         assertFalse(models.any { it.providerId == "openai" && it.modelId == "gpt-5.6-sol-pro" })
-        assertTrue(models.any {
-            it.displayName == "GPT-5.6 Sol Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-sol-fast"
-        })
+        assertFalse(models.any { it.providerId == "openai" && it.modelId == "gpt-5.6-sol-fast" })
         assertTrue(models.any {
             it.displayName == "GPT-5.6 Terra Fast" && it.providerId == "openai" && it.modelId == "gpt-5.6-terra-fast"
         })
+        assertTrue(models.any {
+            it.displayName == "GPT-5.6 Luna" && it.providerId == "openai" && it.modelId == "gpt-5.6-luna"
+        })
+        assertFalse(models.any { it.modelId == "deepseek-v4-flash:0731" })
+        assertFalse(models.any { it.providerId == "deepseek" && it.modelId == "deepseek-v4-pro" })
     }
 
     @Test
