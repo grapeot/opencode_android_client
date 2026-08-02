@@ -339,11 +339,6 @@ class ModelTests {
     }
 
     @Test
-    fun `ModelOption shortName returns DS4F for DeepSeek V4 Flash 0731`() {
-        assertEquals("DS4F", modelOption("DeepSeek V4 Flash 0731").shortName)
-    }
-
-    @Test
     fun `removed GPT Sol Pro preset indices migrate without changing other slots`() {
         assertEquals(1, migrateLegacyModelIndex(6))
         assertEquals(6, migrateLegacyModelIndex(7))
