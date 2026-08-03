@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -113,6 +114,15 @@ class MainActivity : AppCompatActivity() {
                 mainViewModel.receiveDeepLink(rawUrl)
             }
             val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner, mainViewModel) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_STOP) {
+                        mainViewModel.stopSpeechForBackground()
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
             LaunchedEffect(lifecycleOwner) {
                 // Debug-only credential injection: if the launch Intent carries
                 // test credentials (passed via `am start --es test_server_url ...`),
