@@ -1,5 +1,13 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-08-14 — GLM 5.3 + Gemini 3.7 Flash model preset upgrade
+
+- 模型列表顶部 `zai-coding-plan` 的 GLM 从 `GLM-5.2` / `glm-5.2` 升级为 `GLM-5.3` / `glm-5.3`，与 iOS 客户端对齐。`models.dev` 上 `zai-coding-plan` 已列出 `glm-5.3`。
+- `ollama-cloud` 那行 `Ollama GLM 5.2` 保持不变，因为 `ollama-cloud` 上游暂未提供 `glm-5.3`。
+- 默认模型 `Gemini 3.6 Flash` / `google/gemini-3.6-flash` 升级为 `Gemini 3.7 Flash` / `gemini-3.7-flash`（`models.dev` 已列出）。`shortName` 的 `Gemini` contains 分支不受影响。
+- 模型列表末尾新增 `Grok 4.6` / `xai/grok-4.6`，与 iOS 的 Grok 4.6 preset 对齐（Android 此前没有 Grok preset）。`ModelOption.shortName` 的 `Grok` contains 分支自动生效。
+- `GPT-5.6 Sol Fast` 本来就不在 Android preset 列表中（历史已移除），iOS 同步移除后两边一致。
+
 ## 2026-07-31 — v0.1.20260731 release prep
 
 - Bumped the App to `versionName` `0.1.20260731` and `versionCode` 17 for the GPT Live Transcribe release. VoiceFlowKit remains pinned to exact `0.4.0`.
