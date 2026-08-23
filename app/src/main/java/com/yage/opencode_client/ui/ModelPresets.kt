@@ -14,5 +14,6 @@ object ModelPresets {
         AppState.ModelOption("GPT-5.6 Terra Fast", "openai", "gpt-5.6-terra-fast"),
         AppState.ModelOption("GPT-5.6 Luna", "openai", "gpt-5.6-luna"),
         AppState.ModelOption("Grok 4.6", "xai", "grok-4.6"),
+        AppState.ModelOption("Qwen 3.8 27B", "qwen38", "qwen3.8-27b"),
     )
 }
