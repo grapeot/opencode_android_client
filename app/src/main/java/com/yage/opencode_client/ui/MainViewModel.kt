@@ -127,6 +127,7 @@ data class AppState(
                 "Gemini" in displayName -> "Gemini"
                 "GPT" in displayName -> "GPT"
                 "Grok" in displayName -> "Grok"
+                "Qwen" in displayName -> "Qwen"
                 else -> displayName.split(" ").firstOrNull() ?: displayName
             }
     }
