@@ -30,7 +30,7 @@ include(":app")
 // Local dual-strategy development: when the sibling monorepo is present, compile
 // against it instead of waiting for JitPack. CI / clean checkouts fall back to
 // the JitPack pin in app/build.gradle.kts.
-val localVoiceflowAndroid = file("../brainwave_mobile/brainwave_public_android")
+val localVoiceflowAndroid = file("../brainwave_mobile/voiceflow_android")
 if (localVoiceflowAndroid.resolve("settings.gradle.kts").isFile) {
     includeBuild(localVoiceflowAndroid) {
         dependencySubstitution {
