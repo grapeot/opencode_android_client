@@ -488,12 +488,14 @@ internal fun launchSendMessage(
             .onFailure { error ->
                 // The optimistic row was inserted before dispatch. On failure, drop it
                 // and hand the text/attachments back to the composer so the user can retry.
+                // Only restore the composer if the user is still on the session that sent
+                // this message; otherwise we'd clobber another session's draft.
                 state.update {
                     it.copy(
                         messages = it.messages.filter { m -> m.info.id != messageId },
                         pendingOptimisticMessageIds = it.pendingOptimisticMessageIds - messageId,
-                        inputText = text,
-                        imageAttachments = attachments,
+                        inputText = if (it.currentSessionId == sessionId) text else it.inputText,
+                        imageAttachments = if (it.currentSessionId == sessionId) attachments else it.imageAttachments,
                         error = errorMessageOrFallback(error, "Failed to send message")
                     )
                 }

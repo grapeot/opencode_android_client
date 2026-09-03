@@ -184,5 +184,34 @@ internal fun handleIncomingSseEvent(
             }
             state.update { it.copy(sessionTodos = it.sessionTodos + (sessionId to todos)) }
         }
+        "session.error" -> {
+            val sessionId = event.payload.getString("sessionID")
+            if (sessionId != null && sessionId == state.value.currentSessionId) {
+                // prompt_async acknowledges with 204 before the turn runs, so a failure
+                // that happens before the user message is persisted only surfaces here.
+                // The server will never echo our id, so drop the pending optimistic rows
+                // and hand their text back to the composer so the user can retry.
+                val reason = parseSessionErrorReason(event)
+                state.update { state ->
+                    if (state.pendingOptimisticMessageIds.isEmpty()) {
+                        state.copy(error = "Send failed: $reason")
+                    } else {
+                        val pendingIds = state.pendingOptimisticMessageIds
+                        val recoveredText = state.messages
+                            .filter { m -> m.info.id in pendingIds }
+                            .mapNotNull { row -> row.parts.firstOrNull { p -> p.isText }?.text }
+                            .filter { text -> text.isNotBlank() }
+                            .joinToString("\n")
+                        state.copy(
+                            messages = state.messages.filter { m -> m.info.id !in pendingIds },
+                            pendingOptimisticMessageIds = emptySet(),
+                            inputText = recoveredText.ifBlank { state.inputText },
+                            error = "Send failed: $reason"
+                        )
+                    }
+                }
+                onRefreshMessages(sessionId, false)
+            }
+        }
     }
 }

@@ -1503,6 +1503,7 @@ class MainViewModel @Inject constructor(
                 sessionTodos = emptyMap(),
                 sendingSessionIds = emptySet(),
                 sessionSendTimestamps = emptyMap(),
+                pendingOptimisticMessageIds = emptySet(),
                 agents = emptyList(),
                 providers = null,
                 filePathToShowInFiles = null,
