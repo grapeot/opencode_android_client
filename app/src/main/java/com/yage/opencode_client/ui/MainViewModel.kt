@@ -99,6 +99,7 @@ data class AppState(
     val sessionTodos: Map<String, List<TodoItem>> = emptyMap(),
     val sendingSessionIds: Set<String> = emptySet(),
     val sessionSendTimestamps: Map<String, Long> = emptyMap(),
+    val pendingOptimisticMessageIds: Set<String> = emptySet(),
     val imageAttachments: List<ComposerImageAttachment> = emptyList(),
     val hostProfiles: List<HostProfile> = emptyList(),
     val currentHostProfileId: String? = null,
@@ -1584,8 +1585,24 @@ class MainViewModel @Inject constructor(
         val attachments = _state.value.imageAttachments
         if (text.isEmpty() && attachments.isEmpty()) return
 
+        // Insert the optimistic user row immediately so the send feels instant, then
+        // clear the composer. The row carries the same deterministic msg_ id we send
+        // to the server, so reconciliation in loadMessages is pure id membership.
+        val messageId = makeServerId("msg")
+        val optimistic = buildOptimisticMessage(
+            sessionId = sessionId,
+            text = text,
+            attachments = attachments,
+            messageId = messageId,
+            parentMessageId = _state.value.messages.lastOrNull()?.info?.id
+        )
+
         _state.update { state ->
             state.copy(
+                messages = state.messages + optimistic,
+                pendingOptimisticMessageIds = state.pendingOptimisticMessageIds + messageId,
+                inputText = "",
+                imageAttachments = emptyList(),
                 sendingSessionIds = state.sendingSessionIds + sessionId,
                 sessionSendTimestamps = state.sessionSendTimestamps + (sessionId to System.currentTimeMillis())
             )
@@ -1605,11 +1622,11 @@ class MainViewModel @Inject constructor(
                 attachments = attachments,
                 agent = agent,
                 model = model,
+                messageId = messageId,
                 onRefreshMessages = ::loadMessagesWithRetry,
                 onRefreshSessions = ::loadSessions,
                 onSuccess = {
                     settingsManager.setDraftText(sessionId, "")
-                    _state.update { it.copy(imageAttachments = emptyList()) }
                 },
                 onComplete = {
                     _state.update { state ->
@@ -1632,7 +1649,18 @@ class MainViewModel @Inject constructor(
                         dispatchSend()
                     }
                     .onFailure { error ->
-                        _state.update { it.copy(error = "Failed to restore session: ${errorMessageOrFallback(error, "unknown error")}") }
+                        // Restoring the archived session failed; roll back the optimistic row.
+                        _state.update { state ->
+                            state.copy(
+                                messages = state.messages.filter { m -> m.info.id != messageId },
+                                pendingOptimisticMessageIds = state.pendingOptimisticMessageIds - messageId,
+                                inputText = text,
+                                imageAttachments = attachments,
+                                sendingSessionIds = state.sendingSessionIds - sessionId,
+                                sessionSendTimestamps = state.sessionSendTimestamps - sessionId,
+                                error = "Failed to restore session: ${errorMessageOrFallback(error, "unknown error")}"
+                            )
+                        }
                     }
             }
             return
