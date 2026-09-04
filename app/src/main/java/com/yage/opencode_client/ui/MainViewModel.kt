@@ -1787,8 +1787,20 @@ class MainViewModel @Inject constructor(
         val next = removeShortlistItem(current, id)
         if (next == current) return
         settingsManager.modelShortlistJson = encodeShortlist(next)
+        // If the removed model was the current selection, fall back to the first
+        // remaining model (or none) and persist that to both the global selection
+        // and the current session, so a restart doesn't re-read the deleted ID.
+        val wasSelected = _state.value.selectedModelId == id
+        val selectedId = if (wasSelected) next.firstOrNull()?.id else _state.value.selectedModelId
+        if (wasSelected) {
+            settingsManager.selectedModelId = next.firstOrNull()?.id
+            _state.value.currentSessionId?.let { sessionId ->
+                val fallbackId = next.firstOrNull()?.id
+                if (fallbackId != null) settingsManager.setModelIdForSession(sessionId, fallbackId)
+                else settingsManager.removeModelIdForSession(sessionId)
+            }
+        }
         _state.update {
-            val selectedId = if (it.selectedModelId == id) null else it.selectedModelId
             it.copy(
                 modelShortlist = next,
                 selectedModelId = selectedId,

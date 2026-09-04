@@ -86,7 +86,9 @@ class SettingsManager @Inject constructor(
     /** Stable "providerId/modelId" of the currently selected model. */
     var selectedModelId: String?
         get() = encryptedPrefs.getString(KEY_SELECTED_MODEL_ID, null)
-        set(value) = encryptedPrefs.edit().putString(KEY_SELECTED_MODEL_ID, value).apply()
+        set(value) = encryptedPrefs.edit().apply {
+            if (value == null) remove(KEY_SELECTED_MODEL_ID) else putString(KEY_SELECTED_MODEL_ID, value)
+        }.apply()
 
     var modelShortlistSchemaVersion: Int
         get() = encryptedPrefs.getInt(KEY_MODEL_SHORTLIST_SCHEMA_VERSION, 0)
@@ -224,6 +226,19 @@ class SettingsManager @Inject constructor(
         }
         map[sessionId] = modelId
         encryptedPrefs.edit().putString(KEY_SESSION_MODEL_IDS, Json.encodeToString(map)).apply()
+    }
+
+    /** Removes a single session's saved model ID (e.g. when its model is deleted). */
+    fun removeModelIdForSession(sessionId: String) {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODEL_IDS, null) ?: return
+        val map: MutableMap<String, String> = try {
+            Json.decodeFromString<Map<String, String>>(json).toMutableMap()
+        } catch (e: Exception) {
+            return
+        }
+        if (map.remove(sessionId) != null) {
+            encryptedPrefs.edit().putString(KEY_SESSION_MODEL_IDS, Json.encodeToString(map)).apply()
+        }
     }
 
     /** Bulk-replaces the "sessionId -> modelId" map (used by the one-time ID migration). */

@@ -681,4 +681,20 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 **验证**
 - `compileDebugKotlin`、`compileDebugUnitTestKotlin` 通过。
 - `testDebugUnitTest` 348 tests 全部通过（新增 `ModelShortlistTest` 16 个纯函数测试；更新 `AppStateTest`/`MainViewModelTest`/`ForkSessionTest`/`NfcQuickPromptTest` 的 stub 与模型选择测试为 ID 版）。
-- `lintDebug`：本 feature 0 新增 error（16 个 `MissingTranslation` 已补中文）；剩余 3 个 error 为 master 既有（`MainViewModelSupport.kt` 的 SuspiciousIndentation / LocalContextGetResourceValueCall / ByteOrderMark），不在本分支 diff 内。
+- `lintDebug`：本 feature 0 新增 error（16 个 `MissingTranslation` 已补中文）；剩余 3 个 error 为 master 既有（`SuspiciousIndentation`@MainActivity、`LocalContextGetResourceValueCall`@ChatScreen、`ByteOrderMark`@MainViewModelSupport），不在本分支 diff 内。
+
+**Subagent review（reasoning_gpt）+ 修复（同日）**
+
+开 PR #107 后跑了一个 `reasoning_gpt` 全量代码审查（diff `master..feat/model-shortlist`），逐条核对后确认 2 个 P0、6 个 P1 为真实 bug，全部修复：
+
+- **P0 迁移重复 remap**：`applySavedSettings` 先跑 `migrateRemovedGpt56SolProModelIndices()`（把 index 归一化到当前 preset 顺序并落盘），`migrateToIdBasedModelSelection` 又对已归一化的 index 再套一次 `migrateLegacyModelIndex`，导致 index 6/7 迁到错误 ID（如 Grok→Luna）。修复：`indexToId` 直接 `seed.getOrNull(index)`，不再二次 remap。
+- **P0 播种覆盖坏数据**：`decodeShortlist` 对"key 不存在"和"JSON 解码失败"都返回 null，迁移把两者都当"无短名单"用默认 9 项覆盖并封存 schema 2。修复：只在 key 真不存在时播种；存在但解码失败则保留磁盘原值、内存回落到 seed、不覆盖。
+- **P1 saved ID 不在短名单不自动加入**：`launchLoadMessages` 只自动加入消息历史推断的模型，saved ID 缺失时 reanchor 回落到 0 而 `selectedModelId` 仍指向缺失 ID，发送路径按 index 取到另一个模型（ID/index 分裂）。修复：统一按 session 的有效模型（saved 优先，否则推断）补加入短名单再 reanchor。
+- **P1 删除当前选中不落盘**：`removeModelShortlistItem` 只改内存，未更新全局 `selected_model_id` 与当前 session map，重启会重新读到已删 ID。修复：删除当前选中时回落到新首项并同步写全局 + 当前 session；`selectedModelId` setter 改为 null 时 `remove` key（原 `putString(null)` 是 no-op），新增 `removeModelIdForSession`。
+- **P1 双端点失败清空 catalog**：`resolveModelCatalog` 在 `/provider` 与 `config/providers` 都失败时返回空并覆盖旧 catalog。修复：改为返回 nullable，双失败返回 null、调用方保留旧 catalog。
+- **P1 迁移写入非法 session 值**：旧 map 的非数字/越界值用 `?: raw` 原样写进 ID map。修复：改 `mapNotNull`，只迁移能解析且在 seed 范围内的值，非法项丢弃。
+- **P1 catalog picker 跨搜索多选丢失**：确认按钮只提交当前过滤结果。修复：用完整 `catalog` 过滤、按钮显示选中数、空选禁用。
+- **P1 tablet 折叠时深链失效**：折叠 Sessions 左栏时"管理模型"只置 `selectedTab=1`，左栏不 composition、pending 不消费。修复：`onOpenSettings` 同时展开左栏。
+- **P2**：短名单行副行改为稳定的 `provider / modelId`（原只显示 shortName，同名模型无法区分）；`buildCatalog` 对空白 model name 回落 modelId；RFC/PRD 去掉"高亮"措辞（深链直接落到子页，无需高亮）。
+
+**复验**：`testDebugUnitTest` 351 tests 全部通过（新增 3 个回归测试：删除当前选中回落落盘、saved ID 缺失自动加入、blank model name 回落）；`lintDebug` 仍 0 新增 error。

@@ -62,12 +62,21 @@ internal fun applySavedSettings(
  */
 internal fun migrateModelSelectionToIds(settingsManager: SettingsManager) {
     if (settingsManager.modelShortlistSchemaVersion >= SettingsManager.MODEL_SHORTLIST_SCHEMA_VERSION) return
+    val rawShortlistJson = settingsManager.modelShortlistJson
+    // Seed only when the shortlist key is genuinely absent. When the key is
+    // present but undecodable, keep the on-disk value untouched (don't clobber a
+    // user's list with the defaults) and fall back to the seed in-memory.
+    val existingShortlist = rawShortlistJson?.let { decodeShortlist(it) }
     val migration = migrateToIdBasedModelSelection(
-        existingShortlist = decodeShortlist(settingsManager.modelShortlistJson),
+        existingShortlist = existingShortlist,
         legacySelectedIndex = settingsManager.selectedModelIndex,
         legacySessionModels = settingsManager.getLegacySessionModels()
     )
-    settingsManager.modelShortlistJson = encodeShortlist(migration.shortlist)
+    // Persist the resolved shortlist only when we have a real one (absent -> seed,
+    // present -> kept). A present-but-malformed list is left on disk as-is.
+    if (rawShortlistJson == null || existingShortlist != null) {
+        settingsManager.modelShortlistJson = encodeShortlist(migration.shortlist)
+    }
     migration.selectedModelId?.let { settingsManager.selectedModelId = it }
     settingsManager.setSessionModelIds(migration.sessionModelIds)
     settingsManager.modelShortlistSchemaVersion = SettingsManager.MODEL_SHORTLIST_SCHEMA_VERSION

@@ -95,6 +95,7 @@ fun ModelShortlistScreen(
                 state.modelShortlist.forEachIndexed { index, item ->
                     ModelShortlistRow(
                         item = item,
+                        providerSubtitle = "${state.providerDisplayNames[item.providerId] ?: item.providerId} / ${item.modelId}",
                         isFirst = index == 0,
                         isLast = index == state.modelShortlist.size - 1,
                         onMoveUp = { viewModel.moveModelShortlist(index, index - 1) },
@@ -157,6 +158,7 @@ fun ModelShortlistScreen(
 @Composable
 private fun ModelShortlistRow(
     item: ModelShortlistItem,
+    providerSubtitle: String,
     isFirst: Boolean,
     isLast: Boolean,
     onMoveUp: () -> Unit,
@@ -179,7 +181,7 @@ private fun ModelShortlistRow(
             Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(item.displayName, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    item.shortName,
+                    providerSubtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -284,8 +286,11 @@ private fun AddModelCatalogDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(filtered.filter { it.id in selected }) }) {
-                Text(stringResource(R.string.model_shortlist_add_confirm))
+            Button(
+                onClick = { onConfirm(catalog.filter { it.id in selected }) },
+                enabled = selected.isNotEmpty()
+            ) {
+                Text(stringResource(R.string.model_shortlist_add_confirm, selected.size))
             }
         },
         dismissButton = {

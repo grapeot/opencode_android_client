@@ -70,7 +70,7 @@
     <string name="model_shortlist_search">搜索模型</string>
     <string name="model_shortlist_no_models">未找到模型</string>
     <string name="model_shortlist_already_added">已添加</string>
-    <string name="model_shortlist_add_confirm">添加</string>
+    <string name="model_shortlist_add_confirm">添加 (%1$d)</string>
     <string name="model_shortlist_current">当前：%1$s</string>
     <string name="model_shortlist_count">%1$d 个模型</string>
     <string name="model_shortlist_manage">管理模型</string>

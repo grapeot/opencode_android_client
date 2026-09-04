@@ -209,26 +209,37 @@ internal fun launchLoadMessages(
                     val lastAssistant = messages.lastOrNull { it.info.isAssistant }
                     val inferredModel = lastAssistant?.info?.resolvedModel
                     val inferredAgentName = lastAssistant?.info?.agent
-                    val targetModelId = settingsManager?.getModelIdForSession(sessionId)
-                        ?: inferredModel?.let { "${it.providerId}/${it.modelId}" }
+                    val savedModelId = settingsManager?.getModelIdForSession(sessionId)
+                    val inferredModelId = inferredModel?.let { "${it.providerId}/${it.modelId}" }
+                    val sessionModelId = savedModelId ?: inferredModelId
                     val agentName = settingsManager?.getAgentForSession(sessionId) ?: inferredAgentName
 
-                    // Surface the session's actual model in the shortlist when it's
-                    // missing (provider disconnected, or a dynamic model), mirroring iOS.
+                    // Ensure the session's effective model (saved, or inferred from
+                    // history) is present in the shortlist. The saved ID may be
+                    // missing (the user removed it, or it predates the shortlist);
+                    // the inferred model may be a dynamic/ad-hoc one. Without this,
+                    // a saved ID absent from the shortlist would reanchor to index 0
+                    // while selectedModelId still points elsewhere, so the send path
+                    // would use a different model than the state claims. Mirrors iOS
+                    // applySavedModelForCurrentSession + syncModelFromMessageHistory.
                     var nextShortlist = state.value.modelShortlist
-                    if (inferredModel != null) {
-                        val fullId = "${inferredModel.providerId}/${inferredModel.modelId}"
-                        val displayName = buildProviderModelsIndex(state.value.providers)[fullId]?.name
-                            ?: inferredModel.modelId
-                        val (added, changed) = addModelToShortlist(
-                            nextShortlist, inferredModel.providerId, inferredModel.modelId, displayName
-                        )
-                        if (changed) {
-                            nextShortlist = added
-                            settingsManager?.modelShortlistJson = encodeShortlist(nextShortlist)
+                    if (sessionModelId != null) {
+                        val slash = sessionModelId.indexOf('/')
+                        if (slash > 0) {
+                            val providerId = sessionModelId.substring(0, slash)
+                            val modelId = sessionModelId.substring(slash + 1)
+                            val displayName = buildProviderModelsIndex(state.value.providers)[sessionModelId]?.name
+                                ?: modelId
+                            val (added, changed) = addModelToShortlist(
+                                nextShortlist, providerId, modelId, displayName
+                            )
+                            if (changed) {
+                                nextShortlist = added
+                                settingsManager?.modelShortlistJson = encodeShortlist(nextShortlist)
+                            }
                         }
                     }
-                    val effectiveModelId = targetModelId ?: state.value.selectedModelId
+                    val effectiveModelId = sessionModelId ?: state.value.selectedModelId
                     val modelIndex = reanchorSelectedModelIndex(nextShortlist, effectiveModelId)
 
                     state.update {
@@ -338,20 +349,22 @@ internal fun launchLoadProviders(
 
         // Build the model catalog from /provider (connected-scoped), falling back
         // to config/providers (unscoped) when the registry is unavailable (D4).
-        val (catalogModels, providerDisplayNames) = resolveModelCatalog(repository, providersResult)
-
-        // Refresh shortlist display names from the catalog; short names are kept (D6).
-        val refreshed = refreshShortlistDisplayNames(state.value.modelShortlist, catalogModels)
-        if (refreshed != state.value.modelShortlist) {
-            settingsManager?.modelShortlistJson = encodeShortlist(refreshed)
-        }
-        state.update {
-            it.copy(
-                catalogModels = catalogModels,
-                providerDisplayNames = providerDisplayNames,
-                modelShortlist = refreshed,
-                selectedModelIndex = reanchorSelectedModelIndex(refreshed, it.selectedModelId)
-            )
+        // When both endpoints fail, keep the previously loaded catalog (D4).
+        val resolvedCatalog = resolveModelCatalog(repository, providersResult)
+        if (resolvedCatalog != null) {
+            // Refresh shortlist display names from the catalog; short names are kept (D6).
+            val refreshed = refreshShortlistDisplayNames(state.value.modelShortlist, resolvedCatalog.models)
+            if (refreshed != state.value.modelShortlist) {
+                settingsManager?.modelShortlistJson = encodeShortlist(refreshed)
+            }
+            state.update {
+                it.copy(
+                    catalogModels = resolvedCatalog.models,
+                    providerDisplayNames = resolvedCatalog.providerDisplayNames,
+                    modelShortlist = refreshed,
+                    selectedModelIndex = reanchorSelectedModelIndex(refreshed, it.selectedModelId)
+                )
+            }
         }
     }
 }
@@ -359,19 +372,18 @@ internal fun launchLoadProviders(
 private suspend fun resolveModelCatalog(
     repository: OpenCodeRepository,
     providersResult: Result<ProvidersResponse>
-): Pair<List<CatalogModel>, Map<String, String>> {
+): CatalogBuildResult? {
     val registryResult = repository.getProviderRegistry()
     if (registryResult.isSuccess) {
         val registry = registryResult.getOrThrow()
-        val built = buildCatalog(registry.all, registry.connectedProviderIds)
-        return built.models to built.providerDisplayNames
+        return buildCatalog(registry.all, registry.connectedProviderIds)
     }
     val providers = providersResult.getOrNull()
     if (providers != null) {
-        val built = buildCatalog(providers.providers, null)
-        return built.models to built.providerDisplayNames
+        return buildCatalog(providers.providers, null)
     }
-    return emptyList<CatalogModel>() to emptyMap()
+    // Both endpoints failed: return null so the caller keeps the existing catalog.
+    return null
 }
 
 internal fun launchCreateSession(

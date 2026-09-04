@@ -70,7 +70,7 @@
     <string name="model_shortlist_search">Search models</string>
     <string name="model_shortlist_no_models">No models found</string>
     <string name="model_shortlist_already_added">Added</string>
-    <string name="model_shortlist_add_confirm">Add</string>
+    <string name="model_shortlist_add_confirm">Add (%1$d)</string>
     <string name="model_shortlist_current">Current: %1$s</string>
     <string name="model_shortlist_count">%1$d models</string>
     <string name="model_shortlist_manage">Manage models</string>

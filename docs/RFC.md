@@ -1138,7 +1138,7 @@ Chat Markdown 在 `WorkspaceMarkdownLinkResolver` 之前拦截 `opencode` scheme
 - **短名单页**（新 `ui/settings/ModelShortlistScreen.kt`）：TopAppBar 标题 "模型列表"，actions 里 "+" → catalog picker。行对齐 `HostProfileRow` 视觉语言（卡片 + 右侧 MoreVert 菜单）：主行 displayName，副行 `providerDisplayNames[providerId] ?: providerId / modelId`。重排用 MoreVert 菜单里的"上移/下移"（决策 D3，不做拖拽）；MoreVert 还有"编辑短名 / 删除"（删除直接执行，空短名单是合法状态）。点行主体 → 编辑短名 dialog（`AlertDialog` + `OutlinedTextField`）。空态：提示文案 + 醒目"添加模型"按钮。
 - **Catalog picker**（同文件 `AddModelCatalogDialog`）：搜索框（displayName/modelId/providerId 三字段过滤）+ 多选 checkbox（排除已在短名单的）+ 底部"添加所选 (n)"（0 选禁用）。catalog 为空时显示"未获取到模型目录"。
 - **聊天 picker**（`ChatTopBar.kt`）：DropdownMenu 底部加 "Manage models" 跳转行（`onManageModels` → `requestModelShortlistFocus()` + 跳设置）；`availableModels.isEmpty()` 时显示"去设置添加模型"跳转行。
-- **深链**：`pendingModelShortlistFocus` state + `SettingsScreen` 的 `LaunchedEffect` 自动打开短名单页并高亮，聊天 picker 的跳转行能直接落到短名单页。
+- **深链**：`pendingModelShortlistFocus` state + `SettingsScreen` 的 `LaunchedEffect` 一次性打开短名单子页（跳转即直接落到目标页，无需额外高亮；消费后清除，不重复触发）。tablet 折叠 Sessions 左栏时，设置跳转同时展开左栏，否则 `SettingsScreen` 不会 composition、pending 无法消费。
 - **文案**：`values/strings.xml` + `values-zh/strings.xml` 各新增 17 条（`settings_model_shortlist`、`model_shortlist_*` 等）。
 
 ---

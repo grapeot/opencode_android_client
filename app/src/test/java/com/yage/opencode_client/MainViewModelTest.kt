@@ -2079,6 +2079,27 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `removeModelShortlistItem of current selection falls back and persists`() = runTest {
+        val viewModel = createViewModel()
+        val before = viewModel.state.value.modelShortlist
+        val targetId = before[0].id
+        // Make the first model the active selection on a live session.
+        updateState(viewModel) { it.copy(currentSessionId = "s1", selectedModelId = targetId, selectedModelIndex = 0) }
+
+        viewModel.removeModelShortlistItem(targetId)
+
+        val after = viewModel.state.value.modelShortlist
+        assertEquals(before.size - 1, after.size)
+        // Selection falls back to the new first item and is persisted globally and
+        // per-session, so a restart doesn't re-read the deleted id.
+        val fallbackId = after.first().id
+        assertEquals(fallbackId, viewModel.state.value.selectedModelId)
+        assertEquals(0, viewModel.state.value.selectedModelIndex)
+        verify { settingsManager.selectedModelId = fallbackId }
+        verify { settingsManager.setModelIdForSession("s1", fallbackId) }
+    }
+
+    @Test
     fun `updateModelShortlistShortName edits the short name`() = runTest {
         val viewModel = createViewModel()
         val targetId = viewModel.state.value.modelShortlist[0].id
@@ -2152,6 +2173,26 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         assertEquals(3, viewModel.state.value.selectedModelIndex)
+    }
+
+    @Test
+    fun `loadMessages auto-adds a saved model missing from the shortlist`() = runTest {
+        // A saved model that is NOT in the seeded shortlist (e.g. the user removed
+        // it, or it predates the shortlist). Loading the session must re-add it so
+        // the selected id and index stay consistent (no ID/index split).
+        val savedId = "anthropic/claude-x"
+        every { settingsManager.getModelIdForSession("session-1") } returns savedId
+
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        viewModel.loadMessages("session-1")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.modelShortlist.any { it.id == savedId })
+        assertEquals(savedId, viewModel.state.value.selectedModelId)
+        val idx = viewModel.state.value.modelShortlist.indexOfFirst { it.id == savedId }
+        assertEquals(idx, viewModel.state.value.selectedModelIndex)
     }
 
     @Test

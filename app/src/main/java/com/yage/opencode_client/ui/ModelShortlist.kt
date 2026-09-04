@@ -4,7 +4,6 @@ import com.yage.opencode_client.data.model.ConfigProvider
 import com.yage.opencode_client.data.model.ModelShortlistItem
 import com.yage.opencode_client.data.model.ProviderModel
 import com.yage.opencode_client.data.model.ProvidersResponse
-import com.yage.opencode_client.util.migrateLegacyModelIndex
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -98,7 +97,7 @@ fun buildCatalog(
         provider.name?.takeIf { it.isNotEmpty() }?.let { names[provider.id] = it }
         for ((modelId, model) in provider.models.toSortedMap()) {
             if (!(model.capabilities?.isChatCapable ?: true)) continue
-            val displayName = model.name ?: modelId
+            val displayName = model.name?.takeIf { it.isNotBlank() } ?: modelId
             models.add(CatalogModel(provider.id, modelId, displayName, suggestedShortName(displayName)))
         }
     }
@@ -205,12 +204,21 @@ fun migrateToIdBasedModelSelection(
     val seed = seedShortlistFromPresets()
     val shortlist = existingShortlist ?: seed
 
-    fun indexToId(index: Int): String? =
-        seed.getOrNull(migrateLegacyModelIndex(index))?.id
+    // The legacy index is already normalized to the current ModelPresets.list
+    // order by migrateRemovedGpt56SolProModelIndices() before this runs, so map
+    // it straight onto the seed. Re-applying the legacy remap here would shift an
+    // already-migrated index one slot further (e.g. 7 -> 6 -> 1).
+    fun indexToId(index: Int): String? = seed.getOrNull(index)?.id
 
     val selectedModelId = indexToId(legacySelectedIndex) ?: seed.firstOrNull()?.id
-    val sessionModelIds = legacySessionModels.mapValues { (_, raw) ->
-        raw.toIntOrNull()?.let { indexToId(it) } ?: raw
-    }
+    // Only migrate per-session entries that parse to an in-range index. A
+    // malformed or out-of-range legacy value is dropped so it can't become a
+    // permanent invalid selection; message history / the global selection take
+    // over for that session instead.
+    val sessionModelIds = legacySessionModels.entries
+        .mapNotNull { (sessionId, raw) ->
+            raw.toIntOrNull()?.let { indexToId(it) }?.let { id -> sessionId to id }
+        }
+        .toMap()
     return ModelShortlistMigration(shortlist, selectedModelId, sessionModelIds)
 }

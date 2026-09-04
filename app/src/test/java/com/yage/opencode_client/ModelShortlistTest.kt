@@ -111,6 +111,24 @@ class ModelShortlistTest {
     }
 
     @Test
+    fun `buildCatalog falls back to model id when the name is blank or null`() {
+        val providers = listOf(
+            ConfigProvider(
+                id = "openai",
+                models = mapOf(
+                    "blank-name" to ProviderModel(id = "blank-name", name = "   "),
+                    "null-name" to ProviderModel(id = "null-name", name = null)
+                )
+            )
+        )
+        val result = buildCatalog(providers, connectedProviderIds = setOf("openai"))
+        val byId = result.models.associateBy { it.id }
+        assertEquals("blank-name", byId["openai/blank-name"]?.displayName)
+        assertEquals("null-name", byId["openai/null-name"]?.displayName)
+        assertTrue(result.models.all { it.shortName.isNotEmpty() })
+    }
+
+    @Test
     fun `addModelToShortlist appends new model and skips duplicates`() {
         val shortlist = listOf(item())
         val (added, changed) = addModelToShortlist(shortlist, "google", "gemini-3.7-flash", "Gemini 3.7 Flash")
@@ -180,11 +198,13 @@ class ModelShortlistTest {
         val migration = migrateToIdBasedModelSelection(
             existingShortlist = null,
             legacySelectedIndex = 2,
-            legacySessionModels = mapOf("s1" to "1", "s2" to "not-a-number")
+            legacySessionModels = mapOf("s1" to "1", "s2" to "not-a-number", "s3" to "999")
         )
         assertEquals(9, migration.shortlist.size)
         assertEquals("google/gemini-3.7-flash", migration.selectedModelId)
-        assertEquals(mapOf("s1" to "openai/gpt-5.6-sol", "s2" to "not-a-number"), migration.sessionModelIds)
+        // Only in-range numeric legacy indices migrate; malformed / out-of-range
+        // values are dropped so they can't become permanent invalid selections.
+        assertEquals(mapOf("s1" to "openai/gpt-5.6-sol"), migration.sessionModelIds)
     }
 
     @Test
@@ -196,10 +216,14 @@ class ModelShortlistTest {
     }
 
     @Test
-    fun `migrate applies legacy index remapping`() {
-        // Legacy index 6 used to be GPT-5.6 Sol Pro; it now maps to index 1 (GPT-5.6 Sol).
-        val migration = migrateToIdBasedModelSelection(null, 6, emptyMap())
-        assertEquals("openai/gpt-5.6-sol", migration.selectedModelId)
+    fun `migrate maps an already-normalized index straight to the seed`() {
+        // By the time this runs, migrateRemovedGpt56SolProModelIndices() has already
+        // normalized the stored index to the current ModelPresets.list order, so the
+        // index maps straight onto the seed (a second remap would shift it further).
+        val luna = migrateToIdBasedModelSelection(null, 6, emptyMap())
+        assertEquals("openai/gpt-5.6-luna", luna.selectedModelId)
+        val grok = migrateToIdBasedModelSelection(null, 7, emptyMap())
+        assertEquals("xai/grok-4.6", grok.selectedModelId)
     }
 
     @Test
