@@ -14,6 +14,10 @@ import com.yage.opencode_client.data.model.SSEPayload
 import com.yage.opencode_client.data.model.HealthResponse
 import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
+import com.yage.opencode_client.data.model.ConfigProvider
+import com.yage.opencode_client.data.model.ModelShortlistItem
+import com.yage.opencode_client.data.model.ProviderRegistryResponse
+import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ssh.SSHKeyManager
@@ -22,6 +26,8 @@ import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.ModelPresets
+import com.yage.opencode_client.ui.encodeShortlist
+import com.yage.opencode_client.ui.seedShortlistFromPresets
 import com.yage.opencode_client.ui.session.buildSessionTree
 import com.yage.opencode_client.util.SettingsManager
 import com.yage.opencode_client.util.ThemeMode
@@ -136,8 +142,8 @@ class MainViewModelTest {
 
         every { settingsManager.getDraftText(any()) } returns ""
         every { settingsManager.setDraftText(any(), any()) } just runs
-        every { settingsManager.getModelForSession(any()) } returns null
-        every { settingsManager.setModelForSession(any(), any()) } just runs
+        every { settingsManager.getModelIdForSession(any()) } returns null
+        every { settingsManager.getLegacySessionModels() } returns emptyMap()
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
@@ -146,6 +152,8 @@ class MainViewModelTest {
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         coEvery { repository.getPendingPermissions() } returns Result.success(emptyList())
+        coEvery { repository.getProviders() } returns Result.success(ProvidersResponse())
+        coEvery { repository.getProviderRegistry() } returns Result.success(ProviderRegistryResponse())
     }
 
     private fun createViewModel(): MainViewModel {
@@ -352,13 +360,13 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `init clamps saved model index and configures repository`() = runTest {
+    fun `init seeds model shortlist and configures repository`() = runTest {
         every { settingsManager.selectedModelIndex } returns 999
 
         val viewModel = createViewModel()
 
-        assertEquals(ModelPresets.list.lastIndex, viewModel.state.value.selectedModelIndex)
-        verify { settingsManager.selectedModelIndex = ModelPresets.list.lastIndex }
+        assertEquals(seedShortlistFromPresets().size, viewModel.state.value.modelShortlist.size)
+        assertTrue(viewModel.state.value.selectedModelIndex in viewModel.state.value.modelShortlist.indices)
         verify { repository.configure("http://server.test", null, null) }
     }
 
@@ -2033,13 +2041,89 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `selectModel with active session saves model index per session`() = runTest {
+    fun `selectModel with active session saves model id per session`() = runTest {
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(currentSessionId = "s1") }
 
         viewModel.selectModel(2)
 
-        verify { settingsManager.setModelForSession("s1", 2) }
+        val expectedId = seedShortlistFromPresets()[2].id
+        verify { settingsManager.setModelIdForSession("s1", expectedId) }
+    }
+
+    @Test
+    fun `moveModelShortlist reorders and persists`() = runTest {
+        val viewModel = createViewModel()
+        val before = viewModel.state.value.modelShortlist
+        assertTrue(before.size >= 2)
+
+        viewModel.moveModelShortlist(0, 1)
+
+        val after = viewModel.state.value.modelShortlist
+        assertEquals(before[1], after[0])
+        assertEquals(before[0], after[1])
+        verify { settingsManager.modelShortlistJson = any() }
+    }
+
+    @Test
+    fun `removeModelShortlistItem removes and reanchors selection`() = runTest {
+        val viewModel = createViewModel()
+        val before = viewModel.state.value.modelShortlist
+        val targetId = before[0].id
+
+        viewModel.removeModelShortlistItem(targetId)
+
+        val after = viewModel.state.value.modelShortlist
+        assertEquals(before.size - 1, after.size)
+        assertFalse(after.any { it.id == targetId })
+        assertTrue(viewModel.state.value.selectedModelIndex in after.indices)
+    }
+
+    @Test
+    fun `removeModelShortlistItem of current selection falls back and persists`() = runTest {
+        val viewModel = createViewModel()
+        val before = viewModel.state.value.modelShortlist
+        val targetId = before[0].id
+        // Make the first model the active selection on a live session.
+        updateState(viewModel) { it.copy(currentSessionId = "s1", selectedModelId = targetId, selectedModelIndex = 0) }
+
+        viewModel.removeModelShortlistItem(targetId)
+
+        val after = viewModel.state.value.modelShortlist
+        assertEquals(before.size - 1, after.size)
+        // Selection falls back to the new first item and is persisted globally and
+        // per-session, so a restart doesn't re-read the deleted id.
+        val fallbackId = after.first().id
+        assertEquals(fallbackId, viewModel.state.value.selectedModelId)
+        assertEquals(0, viewModel.state.value.selectedModelIndex)
+        verify { settingsManager.selectedModelId = fallbackId }
+        verify { settingsManager.setModelIdForSession("s1", fallbackId) }
+    }
+
+    @Test
+    fun `updateModelShortlistShortName edits the short name`() = runTest {
+        val viewModel = createViewModel()
+        val targetId = viewModel.state.value.modelShortlist[0].id
+
+        viewModel.updateModelShortlistShortName(targetId, "Custom")
+
+        val updated = viewModel.state.value.modelShortlist.first { it.id == targetId }
+        assertEquals("Custom", updated.shortName)
+    }
+
+    @Test
+    fun `addModelsToShortlist appends catalog models and dedups`() = runTest {
+        val viewModel = createViewModel()
+        val beforeSize = viewModel.state.value.modelShortlist.size
+        val existing = viewModel.state.value.modelShortlist[0]
+
+        viewModel.addModelsToShortlist(
+            listOf(ModelShortlistItem("anthropic", "claude-x", "Claude X", "Claude"), existing)
+        )
+
+        val after = viewModel.state.value.modelShortlist
+        assertEquals(beforeSize + 1, after.size)
+        assertTrue(after.any { it.id == "anthropic/claude-x" })
     }
 
     @Test
@@ -2068,7 +2152,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `loadMessages uses per-session saved model index over message inference`() = runTest {
+    fun `loadMessages uses per-session saved model id over message inference`() = runTest {
         val inferredPreset = ModelPresets.list[2]
         val messages = listOf(
             MessageWithParts(
@@ -2080,7 +2164,8 @@ class MainViewModelTest {
             )
         )
         coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
-        every { settingsManager.getModelForSession("session-1") } returns 3
+        val savedId = seedShortlistFromPresets()[3].id
+        every { settingsManager.getModelIdForSession("session-1") } returns savedId
 
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(currentSessionId = "session-1") }
@@ -2089,6 +2174,58 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         assertEquals(3, viewModel.state.value.selectedModelIndex)
+    }
+
+    @Test
+    fun `loadMessages auto-adds a saved model missing from the shortlist`() = runTest {
+        // A saved model that is NOT in the seeded shortlist but whose provider
+        // is known (present in the loaded providers list). Loading the session
+        // must re-add it so the selected id and index stay consistent.
+        val savedId = "anthropic/claude-x"
+        every { settingsManager.getModelIdForSession("session-1") } returns savedId
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(emptyList())
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                providers = ProvidersResponse(
+                    providers = listOf(ConfigProvider(id = "anthropic", name = "Anthropic"))
+                )
+            )
+        }
+
+        viewModel.loadMessages("session-1")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.modelShortlist.any { it.id == savedId })
+        assertEquals(savedId, viewModel.state.value.selectedModelId)
+        val idx = viewModel.state.value.modelShortlist.indexOfFirst { it.id == savedId }
+        assertEquals(idx, viewModel.state.value.selectedModelIndex)
+    }
+
+    @Test
+    fun `loadMessages does not auto-add a saved model with unknown provider`() = runTest {
+        // A saved model whose provider is NOT in the loaded providers list
+        // (stale/retired provider). Loading the session must NOT re-add it.
+        val savedId = "ghost/phantom-model"
+        every { settingsManager.getModelIdForSession("session-1") } returns savedId
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(emptyList())
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                providers = ProvidersResponse(
+                    providers = listOf(ConfigProvider(id = "openai", name = "OpenAI"))
+                )
+            )
+        }
+
+        viewModel.loadMessages("session-1")
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.modelShortlist.any { it.id == savedId })
     }
 
     @Test

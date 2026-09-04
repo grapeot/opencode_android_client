@@ -4,6 +4,8 @@ import com.yage.opencode_client.data.model.ComposerImageAttachment
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
+import com.yage.opencode_client.data.model.ProviderModel
+import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
@@ -205,14 +207,42 @@ internal fun launchLoadMessages(
             .onSuccess { messages ->
                 if (sessionId == state.value.currentSessionId) {
                     val lastAssistant = messages.lastOrNull { it.info.isAssistant }
-                    val inferredModelIndex = lastAssistant?.info?.resolvedModel?.let { model ->
-                        ModelPresets.list.indexOfFirst {
-                            it.providerId == model.providerId && it.modelId == model.modelId
-                        }.takeIf { it >= 0 }
-                    }
+                    val inferredModel = lastAssistant?.info?.resolvedModel
                     val inferredAgentName = lastAssistant?.info?.agent
-                    val modelIndex = settingsManager?.getModelForSession(sessionId) ?: inferredModelIndex
+                    val savedModelId = settingsManager?.getModelIdForSession(sessionId)
+                    val inferredModelId = inferredModel?.let { "${it.providerId}/${it.modelId}" }
+                    val sessionModelId = savedModelId ?: inferredModelId
                     val agentName = settingsManager?.getAgentForSession(sessionId) ?: inferredAgentName
+
+                    // Ensure the session's effective model (saved, or inferred from
+                    // history) is present in the shortlist. Only auto-add when
+                    // the provider is known (present in the loaded providers
+                    // list) to avoid resurrecting stale/retired models.
+                    var nextShortlist = state.value.modelShortlist
+                    if (sessionModelId != null) {
+                        val slash = sessionModelId.indexOf('/')
+                        if (slash > 0) {
+                            val providerId = sessionModelId.substring(0, slash)
+                            val modelId = sessionModelId.substring(slash + 1)
+                            val alreadyInShortlist = nextShortlist.any { it.id == sessionModelId }
+                            val providerKnown = state.value.providers?.providers
+                                ?.any { it.id == providerId } == true
+                            if (!alreadyInShortlist && providerKnown) {
+                                val displayName = buildProviderModelsIndex(state.value.providers)[sessionModelId]?.name
+                                    ?: modelId
+                                val (added, changed) = addModelToShortlist(
+                                    nextShortlist, providerId, modelId, displayName
+                                )
+                                if (changed) {
+                                    nextShortlist = added
+                                    settingsManager?.modelShortlistJson = encodeShortlist(nextShortlist)
+                                }
+                            }
+                        }
+                    }
+                    val effectiveModelId = sessionModelId ?: state.value.selectedModelId
+                    val modelIndex = reanchorSelectedModelIndex(nextShortlist, effectiveModelId)
+
                     state.update {
                         val (mergedMessages, prunedPending) = mergePendingOptimisticMessages(messages, it)
                         it.copy(
@@ -220,7 +250,9 @@ internal fun launchLoadMessages(
                             pendingOptimisticMessageIds = prunedPending,
                             messageLimit = limit,
                             isLoadingMessages = false,
-                            selectedModelIndex = modelIndex ?: it.selectedModelIndex,
+                            modelShortlist = nextShortlist,
+                            selectedModelId = effectiveModelId,
+                            selectedModelIndex = modelIndex,
                             selectedAgentName = agentName ?: it.selectedAgentName
                         )
                     }
@@ -307,17 +339,62 @@ internal fun launchLoadProviders(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
+    settingsManager: SettingsManager?,
     onNonFatalError: (String, Throwable?) -> Unit
 ) {
     scope.launch {
-        repository.getProviders()
-            .onSuccess { providers ->
-                state.update { it.copy(providers = providers) }
+        val providersResult = repository.getProviders()
+        providersResult
+            .onSuccess { providers -> state.update { it.copy(providers = providers) } }
+            .onFailure { error -> onNonFatalError("Failed to load providers", error) }
+
+        // Build the model catalog from /provider (connected-scoped), falling back
+        // to config/providers (unscoped) when the registry is unavailable (D4).
+        // When both endpoints fail, keep the previously loaded catalog (D4).
+        val resolvedCatalog = resolveModelCatalog(repository, providersResult)
+        if (resolvedCatalog != null) {
+            // Refresh shortlist display names from the catalog; short names are kept (D6).
+            val refreshed = refreshShortlistDisplayNames(state.value.modelShortlist, resolvedCatalog.models)
+            if (refreshed != state.value.modelShortlist) {
+                settingsManager?.modelShortlistJson = encodeShortlist(refreshed)
             }
-            .onFailure { error ->
-                onNonFatalError("Failed to load providers", error)
+            state.update {
+                it.copy(
+                    catalogModels = resolvedCatalog.models,
+                    providerDisplayNames = resolvedCatalog.providerDisplayNames,
+                    modelShortlist = refreshed,
+                    selectedModelIndex = reanchorSelectedModelIndex(refreshed, it.selectedModelId)
+                )
             }
+        }
     }
+}
+
+private suspend fun resolveModelCatalog(
+    repository: OpenCodeRepository,
+    providersResult: Result<ProvidersResponse>
+): CatalogBuildResult? {
+    val registryResult = repository.getProviderRegistry()
+    if (registryResult.isSuccess) {
+        val registry = registryResult.getOrThrow()
+        return buildCatalog(registry.all, registry.connectedProviderIds)
+    }
+    val providers = providersResult.getOrNull()
+    if (providers != null) {
+        return buildCatalog(providers.providers, null)
+    }
+    // Both endpoints failed: fall back to the hardcoded presets so the
+    // "Add Model" catalog is never empty (users can still add known models
+    // while offline or against an incompatible server).
+    val presetCatalog = ModelPresets.list.map { preset ->
+        CatalogModel(
+            providerId = preset.providerId,
+            modelId = preset.modelId,
+            displayName = preset.displayName,
+            shortName = preset.customShortName ?: preset.displayName
+        )
+    }
+    return CatalogBuildResult(models = presetCatalog, providerDisplayNames = emptyMap())
 }
 
 internal fun launchCreateSession(

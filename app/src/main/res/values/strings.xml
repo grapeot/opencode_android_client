@@ -57,6 +57,26 @@
     <string name="common_import">Import</string>
     <string name="common_delete">Delete</string>
     <string name="common_refresh">Refresh</string>
+    <string name="settings_model_shortlist">Models</string>
+    <string name="settings_model_shortlist_entry">Choose which models appear in the chat picker</string>
+    <string name="model_shortlist_title">Models</string>
+    <string name="model_shortlist_add">Add models</string>
+    <string name="model_shortlist_empty">No models in your list. Tap + to add one.</string>
+    <string name="model_shortlist_edit_short_name">Edit short name</string>
+    <string name="model_shortlist_short_name">Short name</string>
+    <string name="model_shortlist_move_up">Move up</string>
+    <string name="model_shortlist_move_down">Move down</string>
+    <string name="model_shortlist_add_title">Add models</string>
+    <string name="model_shortlist_search">Search models</string>
+    <string name="model_shortlist_no_models">No models found</string>
+    <string name="model_shortlist_already_added">Added</string>
+    <string name="model_shortlist_add_confirm">Add (%1$d)</string>
+    <string name="model_shortlist_current">Current: %1$s</string>
+    <plurals name="model_shortlist_count">
+        <item quantity="one">%1$d model</item>
+        <item quantity="other">%1$d models</item>
+    </plurals>
+    <string name="model_shortlist_manage">Manage models</string>
     <string name="deep_link_opening">Opening session…</string>
     <string name="deep_link_invalid">This OpenCode session link is invalid.</string>
     <string name="deep_link_session_unavailable">This session is not available on the current host. It may belong to another host or exist only in offline history.</string>

@@ -35,7 +35,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
@@ -67,6 +69,7 @@ fun SettingsScreen(
     val context = LocalContext.current
 
     var showHostProfiles by remember { mutableStateOf(false) }
+    var showModelShortlist by rememberSaveable { mutableStateOf(false) }
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<TestResult?>(null) }
     var aiBuilderBaseURL by remember { mutableStateOf(savedAIBuilder.baseURL) }
@@ -120,12 +123,28 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(state.pendingModelShortlistFocus) {
+        if (state.pendingModelShortlistFocus) {
+            showModelShortlist = true
+            viewModel.clearModelShortlistFocus()
+        }
+    }
+
     if (showHostProfiles) {
         HostProfilesManagerScreen(
             viewModel = viewModel,
             profiles = state.hostProfiles,
             currentProfileId = state.currentHostProfileId,
             onBack = { showHostProfiles = false }
+        )
+        return
+    }
+
+    if (showModelShortlist) {
+        BackHandler(enabled = true) { showModelShortlist = false }
+        ModelShortlistScreen(
+            viewModel = viewModel,
+            onBack = { showModelShortlist = false }
         )
         return
     }
@@ -168,6 +187,14 @@ fun SettingsScreen(
                 languageMode = state.languageMode,
                 onThemeSelected = viewModel::setThemeMode,
                 onLanguageSelected = viewModel::setLanguageMode
+            )
+
+            SettingsSectionDivider()
+
+            ModelShortlistEntry(
+                modelCount = state.modelShortlist.size,
+                currentModelName = state.availableModels.getOrNull(state.selectedModelIndex)?.displayName,
+                onManage = { showModelShortlist = true }
             )
 
             SettingsSectionDivider()

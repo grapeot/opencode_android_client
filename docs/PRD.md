@@ -128,7 +128,7 @@ Android Client 提供以下核心能力：
   - Todo：在 tool 卡片内展示任务列表 ✅
 - **流式显示**：SSE delta 增量累积，text/reasoning 均支持打字机效果 ✅
 - **自动跟随**：当用户停留在底部时，新的消息 / tool call / 流式更新自动跟随；离开底部时保持当前位置 ✅
-- **模型选择**：从 `/provider` API 动态获取，TopBar 下拉菜单 ✅
+- **模型选择**：TopBar 下拉菜单显示用户维护的模型短名单（可增删/排序/改短名），候选目录从 `/provider` 注册表动态生成，见"模型列表管理" ✅
 - **Agent 选择**：从 `/agent` API 动态获取 ✅
 - **Context Usage**：环形进度显示上下文占用（绿/橙/红三色），AI 回答中也始终可见 ✅
 - **权限审批**：手动批准/拒绝 permission 请求 ✅
@@ -164,6 +164,18 @@ Android Client 提供以下核心能力：
 #### 模型/Agent 选择按 Session 记忆（Phase 5）
 
 模型和 Agent 的选择按 sessionID 存储。切换 session 时，优先从持久化存储恢复该 session 上次的选择；若无记录则从最后一条 assistant message 推断（当前已有此逻辑）；推断不到时保持全局默认值。
+
+#### 模型列表管理（Model Shortlist，对齐 iOS）
+
+聊天模型下拉框只显示用户维护的"模型短名单"，不再硬编码。设置页新增"模型列表"入口（带数量角标），进入短名单管理页可增删、上移/下移排序、编辑短名；"添加模型"从服务器 `/provider` 注册表动态生成的候选目录里搜索并多选加入。
+
+- **短名单**（持久化）：聊天 picker 只读这个列表。首启播种当前 9 个默认模型（存量迁移，非空）。
+- **候选目录**（运行时）：每次连接后从 `GET /provider` 重建，只取 connected 的 provider 与 chat-capable 的 model；`/provider` 不可用时降级到 `config/providers`（不做 connected 过滤）。
+- **选择态按 model ID 持久化**（`providerId/modelId`），不再按列表下标——短名单可变（顺序/成员）后 index 会错位。一次性幂等迁移 + schema version 保护，现有用户无感。
+- **自动添加**：切换 session 恢复的模型不在短名单但在目录里 → 自动加入；加载消息历史时最后一条 assistant 消息用的模型不在 picker 里 → 作为 ad-hoc 条目自动加入（保证 toolbar 显示 session 实际在跑的模型）。
+- **displayName 跟随目录刷新**（server 改名后自动同步），用户自定义短名不动。
+- **重排用"上移/下移"**（不做拖拽）；删除无"至少保留一个"约束，空短名单是合法状态。
+- **聊天 picker 底部**有"管理模型"跳转行，深链直接落到设置页短名单管理子页。
 
 #### 消息历史分页（Phase 5b — Bug 修复）
 
@@ -335,6 +347,7 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 | Chat Toolbar 布局 | 左 Session 操作 / 右 Model+Agent+Context | ✅ Phase 5 完成 | 两行布局已对齐 |
 | 草稿持久化 | 按 Session 存储 | ✅ Phase 5 完成 | JSON Map in EncryptedSharedPreferences |
 | Model/Agent 按 Session 记忆 | 按 Session 存储 | ✅ Phase 5 完成 | per-session > 推断 > 全局 |
+| 模型列表管理（Shortlist） | 短名单 + /provider 动态 catalog + 拖拽重排 | ✅ 已对齐（上移/下移重排，无拖拽） | 短名单/ID 持久化/自动添加/displayName 跟随对齐；重排用上下移（iOS 拖拽 bug 独立 follow-up） |
 | Session Rename UI | Toolbar pencil 按钮 | ✅ Phase 5 完成 | AlertDialog 已实现 |
 | Model/Agent 文本显示 | Capsule 按钮含模型名 | ✅ Phase 5b 完成 | 模型名 + Agent 名文本化显示 |
 | 消息历史分页 | pull-to-refresh | Phase 5b 修复 | 当前 Android 滚动检测方向反转 |
@@ -355,6 +368,7 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 | 3 | Bug 修复、Markdown 渲染、模型选择、Context Usage、主题、平板布局 | ✅ 完成 (2026-03-02) |
 | 5 | UX 对齐 iOS：Chat toolbar 重排、Session Rename UI、草稿持久化、Model/Agent per-session 记忆 | ✅ 完成 (2026-03-14) |
 | 5b | 消息历史分页修复、Model/Agent 文本化 Capsule、平板 toolbar 适配、消息模型标注 | 🔲 进行中 |
+| 5c | 模型列表管理（Model Shortlist）：短名单 + 动态 catalog + ID 持久化迁移 + 管理 UI | ✅ 完成 (2026-09-04) |
 | 6 | 语音输入 realtime recovery：立即 PCM capture、本地 cache、session attach/replay、断线恢复 | ✅ 完成 (2026-05-25) |
 | 7 | Markdown Web Preview、Native/Web/Source 三态、平板 Sessions pane 折叠 | 🔲 规划中 (2026-06-14) |
 | 8 | Host Profiles、SSH Tunnel、iOS import/export parity、分阶段连接诊断 | 🔲 规划中 (2026-06-21) |
@@ -385,6 +399,7 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 5. **大型 Session**：暂不考虑性能优化，不预期 session 超过百条消息。
 6. **后台 SSE 连接**：不保持。App 进入后台时断开 SSE，回到前台时通过 REST 全量同步 + 重建 SSE 恢复。
 7. **SSH Tunnel**：Android 端进入 Phase 8 实现，目标是与 iOS 完成 Host Profiles + SSH Tunnel feature parity。底层采用 JSch app 内 local forward，不使用系统 VPN，不依赖 Termux/OpenSSH，不承诺后台永久保活。
+8. **模型列表管理**：聊天 picker 只显示用户维护的短名单，候选目录从 `/provider` 动态生成。按 model ID 持久化选择态（非 index）。首启播种 9 个默认模型（存量迁移，非 iOS 的空短名单）。重排用"上移/下移"不做拖拽（iOS 拖拽 bug 是独立 follow-up）。退役模型直接从短名单消失，不做静默 ID 替换。
 
 ---
 

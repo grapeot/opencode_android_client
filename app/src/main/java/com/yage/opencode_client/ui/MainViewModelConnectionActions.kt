@@ -17,6 +17,7 @@ internal fun applySavedSettings(
     state: MutableStateFlow<AppState>
 ) {
     settingsManager.migrateRemovedGpt56SolProModelIndices()
+    migrateModelSelectionToIds(settingsManager)
     val currentProfile = hostProfileStore.currentProfile()
     val password = currentProfile.basicAuth?.passwordId?.let { settingsManager.basicAuthPassword(it) }
     repository.configure(
@@ -25,11 +26,9 @@ internal fun applySavedSettings(
         password = password
     )
 
-    val savedModelIndex = settingsManager.selectedModelIndex
-    val clampedModelIndex = savedModelIndex.coerceIn(0, ModelPresets.list.size - 1)
-    if (clampedModelIndex != savedModelIndex) {
-        settingsManager.selectedModelIndex = clampedModelIndex
-    }
+    val shortlist = decodeShortlist(settingsManager.modelShortlistJson) ?: seedShortlistFromPresets()
+    val selectedModelId = settingsManager.selectedModelId
+    val clampedModelIndex = reanchorSelectedModelIndex(shortlist, selectedModelId)
 
     state.update {
         it.copy(
@@ -37,6 +36,8 @@ internal fun applySavedSettings(
             hostProfiles = hostProfileStore.profiles(),
             currentHostProfileId = currentProfile.id,
             selectedModelIndex = clampedModelIndex,
+            selectedModelId = selectedModelId,
+            modelShortlist = shortlist,
             selectedAgentName = settingsManager.selectedAgentName ?: "build",
             themeMode = settingsManager.themeMode,
             languageMode = settingsManager.languageMode
@@ -51,6 +52,34 @@ internal fun applySavedSettings(
     if (savedSignature != null && savedSignature == currentSignature) {
         state.update { it.copy(aiBuilderConnectionOK = true) }
     }
+}
+
+/**
+ * One-time migration from the legacy index-based model selection to the
+ * ID-based model. Seeds the shortlist from the presets when none is persisted,
+ * maps the legacy selected index and per-session index map onto stable
+ * "providerId/modelId" strings, and stamps the schema version so it runs once.
+ */
+internal fun migrateModelSelectionToIds(settingsManager: SettingsManager) {
+    if (settingsManager.modelShortlistSchemaVersion >= SettingsManager.MODEL_SHORTLIST_SCHEMA_VERSION) return
+    val rawShortlistJson = settingsManager.modelShortlistJson
+    // Seed only when the shortlist key is genuinely absent. When the key is
+    // present but undecodable, keep the on-disk value untouched (don't clobber a
+    // user's list with the defaults) and fall back to the seed in-memory.
+    val existingShortlist = rawShortlistJson?.let { decodeShortlist(it) }
+    val migration = migrateToIdBasedModelSelection(
+        existingShortlist = existingShortlist,
+        legacySelectedIndex = settingsManager.selectedModelIndex,
+        legacySessionModels = settingsManager.getLegacySessionModels()
+    )
+    // Persist the resolved shortlist only when we have a real one (absent -> seed,
+    // present -> kept). A present-but-malformed list is left on disk as-is.
+    if (rawShortlistJson == null || existingShortlist != null) {
+        settingsManager.modelShortlistJson = encodeShortlist(migration.shortlist)
+    }
+    migration.selectedModelId?.let { settingsManager.selectedModelId = it }
+    settingsManager.setSessionModelIds(migration.sessionModelIds)
+    settingsManager.modelShortlistSchemaVersion = SettingsManager.MODEL_SHORTLIST_SCHEMA_VERSION
 }
 
 internal fun launchConnectionTest(

@@ -282,6 +282,9 @@ private fun PhoneLayout(viewModel: MainViewModel) {
                     onNavigateToSettings = {
                         navigateToTopLevel(Screen.Settings.route)
                     },
+                    onManageModels = {
+                        navigateToTopLevel(Screen.Settings.route)
+                    },
                     showSettingsButton = false
                 )
             }
@@ -370,7 +373,13 @@ private fun BoxScope.DeepLinkFeedback(
 private fun TabletLayout(viewModel: MainViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var sessionsPaneCollapsed by rememberSaveable { mutableStateOf(false) }
-    val onOpenSettings: () -> Unit = { selectedTab = 1 }
+    // Opening Settings (e.g. from the chat "Manage models" jump) must also expand
+    // the left pane, otherwise the Settings screen isn't composed when the Sessions
+    // pane is collapsed and the pending model-shortlist focus is never consumed.
+    val onOpenSettings: () -> Unit = {
+        sessionsPaneCollapsed = false
+        selectedTab = 1
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val filesWeight = if (sessionsPaneCollapsed) 0.5f else 0.375f
     val chatWeight = if (sessionsPaneCollapsed) 0.5f else 0.375f
@@ -483,6 +492,7 @@ private fun TabletLayout(viewModel: MainViewModel) {
                     },
                     useInlineFilePreview = true,
                     onNavigateToSettings = onOpenSettings,
+                    onManageModels = onOpenSettings,
                     showSettingsButton = false,
                     showNewSessionInTopBar = false,
                     showSessionListInTopBar = false

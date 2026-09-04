@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.yage.opencode_client.data.model.ModelShortlistItem
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -76,6 +77,22 @@ class SettingsManager @Inject constructor(
     var selectedModelIndex: Int
         get() = encryptedPrefs.getInt(KEY_MODEL_INDEX, 1)
         set(value) = encryptedPrefs.edit().putInt(KEY_MODEL_INDEX, value).apply()
+
+    /** JSON array of [ModelShortlistItem]; the user-curated model list. */
+    var modelShortlistJson: String?
+        get() = encryptedPrefs.getString(KEY_MODEL_SHORTLIST, null)
+        set(value) = encryptedPrefs.edit().putString(KEY_MODEL_SHORTLIST, value).apply()
+
+    /** Stable "providerId/modelId" of the currently selected model. */
+    var selectedModelId: String?
+        get() = encryptedPrefs.getString(KEY_SELECTED_MODEL_ID, null)
+        set(value) = encryptedPrefs.edit().apply {
+            if (value == null) remove(KEY_SELECTED_MODEL_ID) else putString(KEY_SELECTED_MODEL_ID, value)
+        }.apply()
+
+    var modelShortlistSchemaVersion: Int
+        get() = encryptedPrefs.getInt(KEY_MODEL_SHORTLIST_SCHEMA_VERSION, 0)
+        set(value) = encryptedPrefs.edit().putInt(KEY_MODEL_SHORTLIST_SCHEMA_VERSION, value).apply()
 
     fun migrateRemovedGpt56SolProModelIndices() {
         if (encryptedPrefs.getInt(KEY_MODEL_PRESET_SCHEMA_VERSION, 0) >= MODEL_PRESET_SCHEMA_VERSION) return
@@ -181,24 +198,52 @@ class SettingsManager @Inject constructor(
         encryptedPrefs.edit().putString(KEY_SESSION_DRAFTS, Json.encodeToString(map)).apply()
     }
 
-    fun getModelForSession(sessionId: String): Int? {
-        val json = encryptedPrefs.getString(KEY_SESSION_MODELS, null) ?: return null
+    /** Raw legacy "sessionId -> modelIndex" map, used only for the one-time ID migration. */
+    fun getLegacySessionModels(): Map<String, String> {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODELS, null) ?: return emptyMap()
         return try {
-            Json.decodeFromString<Map<String, String>>(json)[sessionId]?.toIntOrNull()
+            Json.decodeFromString<Map<String, String>>(json)
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun getModelIdForSession(sessionId: String): String? {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODEL_IDS, null) ?: return null
+        return try {
+            Json.decodeFromString<Map<String, String>>(json)[sessionId]
         } catch (e: Exception) {
             null
         }
     }
 
-    fun setModelForSession(sessionId: String, modelIndex: Int) {
-        val json = encryptedPrefs.getString(KEY_SESSION_MODELS, null)
+    fun setModelIdForSession(sessionId: String, modelId: String) {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODEL_IDS, null)
         val map: MutableMap<String, String> = try {
             json?.let { Json.decodeFromString<Map<String, String>>(it).toMutableMap() } ?: mutableMapOf()
         } catch (e: Exception) {
             mutableMapOf()
         }
-        map[sessionId] = modelIndex.toString()
-        encryptedPrefs.edit().putString(KEY_SESSION_MODELS, Json.encodeToString(map)).apply()
+        map[sessionId] = modelId
+        encryptedPrefs.edit().putString(KEY_SESSION_MODEL_IDS, Json.encodeToString(map)).apply()
+    }
+
+    /** Removes a single session's saved model ID (e.g. when its model is deleted). */
+    fun removeModelIdForSession(sessionId: String) {
+        val json = encryptedPrefs.getString(KEY_SESSION_MODEL_IDS, null) ?: return
+        val map: MutableMap<String, String> = try {
+            Json.decodeFromString<Map<String, String>>(json).toMutableMap()
+        } catch (e: Exception) {
+            return
+        }
+        if (map.remove(sessionId) != null) {
+            encryptedPrefs.edit().putString(KEY_SESSION_MODEL_IDS, Json.encodeToString(map)).apply()
+        }
+    }
+
+    /** Bulk-replaces the "sessionId -> modelId" map (used by the one-time ID migration). */
+    fun setSessionModelIds(ids: Map<String, String>) {
+        encryptedPrefs.edit().putString(KEY_SESSION_MODEL_IDS, Json.encodeToString(ids)).apply()
     }
 
     fun getAgentForSession(sessionId: String): String? {
@@ -254,11 +299,17 @@ class SettingsManager @Inject constructor(
         private const val KEY_SESSION_DRAFTS = "session_drafts"
         private const val KEY_SESSION_MODELS = "session_models"
         private const val KEY_SESSION_AGENTS = "session_agents"
+        private const val KEY_MODEL_SHORTLIST = "model_shortlist.v1"
+        private const val KEY_SELECTED_MODEL_ID = "selected_model_id"
+        private const val KEY_SESSION_MODEL_IDS = "session_model_ids"
+        private const val KEY_MODEL_SHORTLIST_SCHEMA_VERSION = "model_shortlist_schema_version"
         private const val KEY_NFC_ENABLED = "nfc_enabled"
         private const val KEY_NFC_PROMPT = "nfc_prompt"
         private const val KEY_NFC_AUTO_SEND = "nfc_auto_send"
 
         private const val MODEL_PRESET_SCHEMA_VERSION = 1
+
+        const val MODEL_SHORTLIST_SCHEMA_VERSION = 2
 
         private fun basicAuthPasswordKey(passwordId: String): String = "basic_auth_password_$passwordId"
     }

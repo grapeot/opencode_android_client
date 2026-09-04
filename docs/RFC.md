@@ -564,6 +564,97 @@ fun setAgentForSession(sessionId: String, agentName: String) { /* 同上模式 *
 
 **全局默认值保留**：SettingsManager 中原有的全局 `selectedModelIndex` 和 `selectedAgentName` 继续保留，作为新 session 或无 per-session 记录时的 fallback。
 
+### 4.5 Model Shortlist（模型短名单，对齐 iOS）
+
+**背景**：此前模型列表硬编码在 `ui/ModelPresets.kt`（9 个模型），`availableModels` 直接返回该列表，增删模型需改代码重编译；服务器 `config/providers` 全量列表只用于 context/AI usage，不喂给模型下拉框。本节把 iOS 的"模型短名单"机制移植到 Android：聊天下拉框只显示用户维护的短名单，设置里可增删/排序/改短名，候选目录从服务器 `/provider` 注册表动态生成。同时把 §4.4 的**模型**选择持久化从 index 升级为 model ID（Agent 记忆不变）。
+
+**两个列表的分工（核心概念）**：
+
+| 列表 | 来源 | 用途 |
+|---|---|---|
+| `modelShortlist`（持久化） | 用户维护 + 自动添加 | 聊天模型下拉框**只读这个**（`availableModels = modelShortlist.map { it.toModelOption() }`） |
+| `catalogModels`（运行时） | `GET /provider` → 只取 `connected` 的 provider、只取 chat-capable 的 model，按 provider+name 排序 | 设置里"添加模型"的候选目录 |
+
+**数据模型**（`data/model/`）：
+
+```kotlin
+// 持久化单元（对应 iOS ModelShortlistItem）
+@Serializable
+data class ModelShortlistItem(
+    val providerId: String,
+    val modelId: String,
+    val displayName: String,
+    val shortName: String
+) {
+    val id: String get() = "$providerId/$modelId"
+    fun toModelOption() = AppState.ModelOption(shortName, providerId, modelId, customShortName = shortName)
+}
+
+// /provider 响应（对应 iOS ProviderRegistryResponse）
+@Serializable
+data class ProviderRegistryResponse(
+    val all: List<ConfigProvider> = emptyList(),
+    @SerialName("default") val defaultByProvider: Map<String, String> = emptyMap(),
+    val connected: List<String> = emptyList()
+)
+
+// ProviderModel 新增可选 capabilities（chat-capable 过滤）
+@Serializable
+data class ProviderModelCapabilities(val output: ProviderModelOutput? = null)
+@Serializable
+data class ProviderModelOutput(val text: Boolean? = null)
+// ProviderModel 加字段：val capabilities: ProviderModelCapabilities? = null
+```
+
+**持久化**（`SettingsManager`，全走 `EncryptedSharedPreferences`）：
+
+| Key | 类型 | 说明 |
+|---|---|---|
+| `model_shortlist.v1` | JSON `List<ModelShortlistItem>` | 短名单本体 |
+| `selected_model_id` | String? | 全局当前选择（model ID，替代 `model_index` 语义） |
+| `session_model_ids` | JSON `Map<sessionId, modelId>` | 替代 `session_models`（index 版） |
+| `model_shortlist_schema_version` | Int | bump 到 `2` |
+
+**一次性迁移**（`migrateModelSelectionToIds`，`applySavedSettings` 调用，schema version 保护、幂等）：
+1. 读旧 `model_index` → 用**当前硬编码** `ModelPresets.list[index]` 解析出 model ID → 写 `selected_model_id`。
+2. 读旧 `session_models`（index 版）→ 逐条同样解析 → 写 `session_model_ids`。
+3. **短名单播种**：`model_shortlist.v1` 不存在时，用当前 9 个 `ModelPresets` 初始化（决策 D1）。
+4. bump `model_shortlist_schema_version = 2`。
+
+> 与 iOS 差异：iOS 首启短名单为空（从零建）；Android 是存量迁移，播种 9 个默认项保证现有用户无感（已存 index 选择正好解析到播种进短名单的同一批 ID）。
+
+**API**（`OpenCodeApi` / `OpenCodeRepository`）：
+
+```kotlin
+@GET("provider")
+suspend fun getProviderRegistry(): ProviderRegistryResponse
+```
+
+- Repository `getProviderRegistry(): Result<ProviderRegistryResponse>`，走 REST client。
+- **降级**：`/provider` 失败（老服务器无该路由）时，用现有 `getProviders()`（`config/providers`）构建 catalog，且**不做 connected 过滤**（视为全部 connected）。catalog 构建失败则保持旧 catalog 不动（对齐 iOS"注册表不可用则 catalog 不变"）。
+
+**Catalog 构建**（纯函数 `buildCatalog`，`ui/ModelShortlist.kt`）：只取 `connected` 集合内的 provider；跳过 `capabilities.output.text == false` 的 model（null/缺省视为 chat-capable）；`displayName = model.name ?: modelId`；`shortName` 复用 `suggestedShortName` 推断；按 providerId、再按 displayName 排序。同时产出 `providerDisplayNames`（providerId → 人类可读名）。
+
+**AppState / ViewModel 行为**：
+- `AppState` 新增 `modelShortlist`、`catalogModels`、`providerDisplayNames`、`selectedModelId`、`pendingModelShortlistFocus`；`ModelOption` 新增 `customShortName`（`shortName` getter 委托 `suggestedShortName`）。
+- `availableModels` getter 改为 `modelShortlist.map { it.toModelOption() }`（不再读 `ModelPresets.list`；`ModelPresets` 降级为播种 + 迁移解析的唯一用途，保留文件）。
+- `reanchorSelectedModelIndex()`：任何短名单变动（增/删/移/改）后调用——在 `availableModels` 里找当前选中 model ID 的下标，找不到回落 0。
+- `selectModel(index)`：持久化 **model ID**（`selected_model_id` + `session_model_ids[currentSession]`），不再存 index。
+- `selectSession`：按 ID 恢复；saved ID 不在短名单但在 catalog → 自动加入短名单再选中。
+- `launchLoadMessages` 推断：按 `providerId/modelId` 在短名单里 `firstIndex`；找不到且 session 有 assistant 消息 → ad-hoc 加入短名单（displayName 从 `providerModelsIndex` 取）。
+- catalog 刷新时机：`loadProviders()`（连接成功 / host 切换后）拉 `getProviderRegistry()` → `buildCatalog` → 更新 `catalogModels`/`providerDisplayNames` → `refreshShortlistDisplayNames`（短名单 displayName 跟随 catalog，shortName 不动）→ `reanchorSelectedModelIndex`。
+- 短名单操作（ViewModel 方法，全部 = 改 state + 写 prefs + reanchor）：`addModelsToShortlist`（去重 by id）、`removeModelShortlistItem`、`moveModelShortlist`、`updateModelShortlistShortName`（空值回落 `suggestedShortName`）。
+
+**决策（已确认）**：
+- **D1**：首启播种当前 9 个 `ModelPresets`（存量迁移，非 iOS 的空短名单）。
+- **D2**：按 model ID 持久化选择态（短名单可变后 index 必然错位；一次性幂等迁移 + schema version 保护）。
+- **D3**：重排用"上移/下移"，不做拖拽（iOS 拖拽 bug 是独立低优先级 follow-up）。
+- **D4**：`/provider` 端点 + `config/providers` 降级（不做 connected 过滤）。
+- **D5**：不做 ongoing canonical ID 老化映射；退役模型直接从短名单消失。
+- **D6**：displayName 跟随 catalog 刷新；用户自定义 shortName 不动。
+
+**不受影响**：`selectedAIUsageQuota` 的 provider 映射（走 `availableModels.getOrNull(selectedModelIndex)?.providerId`，reanchor 正确则自动正确）；乐观发送 / SSE / 网络层 / NFC / deep link / 语音。
+
 ---
 
 ## 5. UI 设计
@@ -1041,6 +1132,15 @@ Chat Markdown 在 `WorkspaceMarkdownLinkResolver` 之前拦截 `opencode` scheme
 
 安全边界与 iOS 一致：当前 Host only，不轮询其他 Host，不恢复离线 archive DB，不接受 server/凭证/prompt/tool action，不自动执行 Markdown link。测试覆盖 parser contract、repository by-ID path、断连 pending、成功 hydration、失败保留上下文和 session-window preservation；系统 cold/warm Intent 的 emulator E2E 作为后续可选 Tier 3，不在物理设备执行。
 
+### 5.14 Model Shortlist 管理 UI（对齐 iOS）
+
+- **设置页入口**（`SettingsScreen.kt`）：`AppearanceSection` 之后新增一行 `ModelShortlistEntry`（带 `modelShortlist.size` 数量角标 + `ChevronRight`），复用 `HostProfilesManagerScreen` 的子页面模式（`showModelShortlist` state 切换，渲染 `ModelShortlistScreen(viewModel, onBack)`）。
+- **短名单页**（新 `ui/settings/ModelShortlistScreen.kt`）：TopAppBar 标题 "模型列表"，actions 里 "+" → catalog picker。行对齐 `HostProfileRow` 视觉语言（卡片 + 右侧单个 MoreVert 溢出菜单）：主行 displayName + 简称 badge（电蓝小 chip，呼应聊天胶囊里显示的标签），副行 `providerDisplayNames[providerId] ?: providerId / modelId`。所有操作收进 MoreVert 菜单：编辑短名 / 上移 / 下移（决策 D3，不做拖拽）/ 删除（error 色，直接执行，空短名单是合法状态）；上移/下移在首/尾位禁用。点行主体 → 编辑短名 dialog（`AlertDialog` + `OutlinedTextField`）。空态：提示文案 + 醒目"添加模型"按钮。
+- **Catalog picker**（同文件 `AddModelCatalogDialog`）：搜索框（displayName/modelId/providerId 三字段过滤）+ 多选 checkbox（排除已在短名单的）+ 底部"添加所选 (n)"（0 选禁用）。catalog 为空时显示"未获取到模型目录"。
+- **聊天 picker**（`ChatTopBar.kt`）：DropdownMenu 底部加 "Manage models" 跳转行（`onManageModels` → `requestModelShortlistFocus()` + 跳设置）；`availableModels.isEmpty()` 时显示"去设置添加模型"跳转行。
+- **深链**：`pendingModelShortlistFocus` state + `SettingsScreen` 的 `LaunchedEffect` 一次性打开短名单子页（跳转即直接落到目标页，无需额外高亮；消费后清除，不重复触发）。tablet 折叠 Sessions 左栏时，设置跳转同时展开左栏，否则 `SettingsScreen` 不会 composition、pending 无法消费。
+- **文案**：`values/strings.xml` + `values-zh/strings.xml` 各新增 17 条（`settings_model_shortlist`、`model_shortlist_*` 等）。
+
 ---
 
 ## 6. 安全设计
@@ -1170,6 +1270,7 @@ app/
 | 3 | 文件树、Markdown / 图片预览、Diff、平板布局 | 已完成 |
 | 5 | UX 对齐 iOS：Chat toolbar 重排（§5.4）、Session Rename UI、草稿持久化（§4.3）、Model/Agent per-session（§4.4） | ✅ 完成 |
 | 5b | 消息历史分页修复（§5.5）、Model/Agent Capsule 文本化（§5.6）、平板 toolbar 适配（§5.7）、消息模型标注（§5.8） | 1-2 天 |
+| 5c | Model Shortlist（§4.5、§5.14）：模型短名单 + 动态 catalog + ID 持久化迁移 + 管理 UI | ✅ 完成 |
 | 7 | Markdown Web Preview（§5.10）、Tablet Sessions pane 折叠（§5.11） | 2-4 天 |
 | 4 | SSH Tunnel（可选） | 1 周 |
 

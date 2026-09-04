@@ -57,6 +57,25 @@
     <string name="common_import">导入</string>
     <string name="common_delete">删除</string>
     <string name="common_refresh">刷新</string>
+    <string name="settings_model_shortlist">模型</string>
+    <string name="settings_model_shortlist_entry">选择聊天选择器中显示的模型</string>
+    <string name="model_shortlist_title">模型</string>
+    <string name="model_shortlist_add">添加模型</string>
+    <string name="model_shortlist_empty">列表中没有模型。点击 + 添加一个。</string>
+    <string name="model_shortlist_edit_short_name">编辑简称</string>
+    <string name="model_shortlist_short_name">简称</string>
+    <string name="model_shortlist_move_up">上移</string>
+    <string name="model_shortlist_move_down">下移</string>
+    <string name="model_shortlist_add_title">添加模型</string>
+    <string name="model_shortlist_search">搜索模型</string>
+    <string name="model_shortlist_no_models">未找到模型</string>
+    <string name="model_shortlist_already_added">已添加</string>
+    <string name="model_shortlist_add_confirm">添加 (%1$d)</string>
+    <string name="model_shortlist_current">当前：%1$s</string>
+    <plurals name="model_shortlist_count">
+        <item quantity="other">%1$d 个模型</item>
+    </plurals>
+    <string name="model_shortlist_manage">管理模型</string>
     <string name="deep_link_opening">正在打开会话…</string>
     <string name="deep_link_invalid">这个 OpenCode 会话链接无效。</string>
     <string name="deep_link_session_unavailable">当前主机上找不到这个会话。它可能属于其他主机，或只存在于离线历史中。</string>
