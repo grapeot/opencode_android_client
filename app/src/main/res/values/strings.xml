@@ -72,7 +72,10 @@
     <string name="model_shortlist_already_added">Added</string>
     <string name="model_shortlist_add_confirm">Add (%1$d)</string>
     <string name="model_shortlist_current">Current: %1$s</string>
-    <string name="model_shortlist_count">%1$d models</string>
+    <plurals name="model_shortlist_count">
+        <item quantity="one">%1$d model</item>
+        <item quantity="other">%1$d models</item>
+    </plurals>
     <string name="model_shortlist_manage">Manage models</string>
     <string name="deep_link_opening">Opening session…</string>
     <string name="deep_link_invalid">This OpenCode session link is invalid.</string>

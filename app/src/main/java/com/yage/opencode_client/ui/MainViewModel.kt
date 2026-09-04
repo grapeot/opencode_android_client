@@ -1827,8 +1827,28 @@ class MainViewModel @Inject constructor(
         }
         if (!changed) return
         settingsManager.modelShortlistJson = encodeShortlist(next)
+        // Ensure the ID invariant: a non-empty shortlist always has a valid
+        // selectedModelId. When the shortlist was empty (selectedModelId null)
+        // and we just added items, anchor to the first item and persist.
+        val currentId = _state.value.selectedModelId
+        val resolvedId = if (currentId != null && next.any { it.id == currentId }) {
+            currentId
+        } else {
+            next.firstOrNull()?.id
+        }
+        if (resolvedId != currentId) {
+            settingsManager.selectedModelId = resolvedId
+            _state.value.currentSessionId?.let { sessionId ->
+                if (resolvedId != null) settingsManager.setModelIdForSession(sessionId, resolvedId)
+                else settingsManager.removeModelIdForSession(sessionId)
+            }
+        }
         _state.update {
-            it.copy(modelShortlist = next, selectedModelIndex = reanchorSelectedModelIndex(next, it.selectedModelId))
+            it.copy(
+                modelShortlist = next,
+                selectedModelId = resolvedId,
+                selectedModelIndex = reanchorSelectedModelIndex(next, resolvedId)
+            )
         }
     }
 

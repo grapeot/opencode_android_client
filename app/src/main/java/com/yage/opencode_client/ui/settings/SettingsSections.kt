@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -682,7 +683,7 @@ internal fun ModelShortlistEntry(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.model_shortlist_count, modelCount), style = MaterialTheme.typography.titleMedium)
+                Text(pluralStringResource(R.plurals.model_shortlist_count, modelCount, modelCount), style = MaterialTheme.typography.titleMedium)
                 Text(
                     stringResource(R.string.settings_model_shortlist_entry),
                     style = MaterialTheme.typography.bodySmall,

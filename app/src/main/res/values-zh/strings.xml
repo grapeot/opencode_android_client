@@ -72,7 +72,9 @@
     <string name="model_shortlist_already_added">已添加</string>
     <string name="model_shortlist_add_confirm">添加 (%1$d)</string>
     <string name="model_shortlist_current">当前：%1$s</string>
-    <string name="model_shortlist_count">%1$d 个模型</string>
+    <plurals name="model_shortlist_count">
+        <item quantity="other">%1$d 个模型</item>
+    </plurals>
     <string name="model_shortlist_manage">管理模型</string>
     <string name="deep_link_opening">正在打开会话…</string>
     <string name="deep_link_invalid">这个 OpenCode 会话链接无效。</string>

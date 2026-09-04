@@ -215,27 +215,28 @@ internal fun launchLoadMessages(
                     val agentName = settingsManager?.getAgentForSession(sessionId) ?: inferredAgentName
 
                     // Ensure the session's effective model (saved, or inferred from
-                    // history) is present in the shortlist. The saved ID may be
-                    // missing (the user removed it, or it predates the shortlist);
-                    // the inferred model may be a dynamic/ad-hoc one. Without this,
-                    // a saved ID absent from the shortlist would reanchor to index 0
-                    // while selectedModelId still points elsewhere, so the send path
-                    // would use a different model than the state claims. Mirrors iOS
-                    // applySavedModelForCurrentSession + syncModelFromMessageHistory.
+                    // history) is present in the shortlist. Only auto-add when
+                    // the provider is known (present in the loaded providers
+                    // list) to avoid resurrecting stale/retired models.
                     var nextShortlist = state.value.modelShortlist
                     if (sessionModelId != null) {
                         val slash = sessionModelId.indexOf('/')
                         if (slash > 0) {
                             val providerId = sessionModelId.substring(0, slash)
                             val modelId = sessionModelId.substring(slash + 1)
-                            val displayName = buildProviderModelsIndex(state.value.providers)[sessionModelId]?.name
-                                ?: modelId
-                            val (added, changed) = addModelToShortlist(
-                                nextShortlist, providerId, modelId, displayName
-                            )
-                            if (changed) {
-                                nextShortlist = added
-                                settingsManager?.modelShortlistJson = encodeShortlist(nextShortlist)
+                            val alreadyInShortlist = nextShortlist.any { it.id == sessionModelId }
+                            val providerKnown = state.value.providers?.providers
+                                ?.any { it.id == providerId } == true
+                            if (!alreadyInShortlist && providerKnown) {
+                                val displayName = buildProviderModelsIndex(state.value.providers)[sessionModelId]?.name
+                                    ?: modelId
+                                val (added, changed) = addModelToShortlist(
+                                    nextShortlist, providerId, modelId, displayName
+                                )
+                                if (changed) {
+                                    nextShortlist = added
+                                    settingsManager?.modelShortlistJson = encodeShortlist(nextShortlist)
+                                }
                             }
                         }
                     }
@@ -382,8 +383,18 @@ private suspend fun resolveModelCatalog(
     if (providers != null) {
         return buildCatalog(providers.providers, null)
     }
-    // Both endpoints failed: return null so the caller keeps the existing catalog.
-    return null
+    // Both endpoints failed: fall back to the hardcoded presets so the
+    // "Add Model" catalog is never empty (users can still add known models
+    // while offline or against an incompatible server).
+    val presetCatalog = ModelPresets.list.map { preset ->
+        CatalogModel(
+            providerId = preset.providerId,
+            modelId = preset.modelId,
+            displayName = preset.displayName,
+            shortName = preset.customShortName ?: preset.displayName
+        )
+    }
+    return CatalogBuildResult(models = presetCatalog, providerDisplayNames = emptyMap())
 }
 
 internal fun launchCreateSession(

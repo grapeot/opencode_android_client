@@ -14,6 +14,7 @@ import com.yage.opencode_client.data.model.SSEPayload
 import com.yage.opencode_client.data.model.HealthResponse
 import com.yage.opencode_client.data.model.HostProfile
 import com.yage.opencode_client.data.model.HostTransport
+import com.yage.opencode_client.data.model.ConfigProvider
 import com.yage.opencode_client.data.model.ModelShortlistItem
 import com.yage.opencode_client.data.model.ProviderRegistryResponse
 import com.yage.opencode_client.data.model.ProvidersResponse
@@ -2177,14 +2178,22 @@ class MainViewModelTest {
 
     @Test
     fun `loadMessages auto-adds a saved model missing from the shortlist`() = runTest {
-        // A saved model that is NOT in the seeded shortlist (e.g. the user removed
-        // it, or it predates the shortlist). Loading the session must re-add it so
-        // the selected id and index stay consistent (no ID/index split).
+        // A saved model that is NOT in the seeded shortlist but whose provider
+        // is known (present in the loaded providers list). Loading the session
+        // must re-add it so the selected id and index stay consistent.
         val savedId = "anthropic/claude-x"
         every { settingsManager.getModelIdForSession("session-1") } returns savedId
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(emptyList())
 
         val viewModel = createViewModel()
-        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                providers = ProvidersResponse(
+                    providers = listOf(ConfigProvider(id = "anthropic", name = "Anthropic"))
+                )
+            )
+        }
 
         viewModel.loadMessages("session-1")
         advanceUntilIdle()
@@ -2193,6 +2202,30 @@ class MainViewModelTest {
         assertEquals(savedId, viewModel.state.value.selectedModelId)
         val idx = viewModel.state.value.modelShortlist.indexOfFirst { it.id == savedId }
         assertEquals(idx, viewModel.state.value.selectedModelIndex)
+    }
+
+    @Test
+    fun `loadMessages does not auto-add a saved model with unknown provider`() = runTest {
+        // A saved model whose provider is NOT in the loaded providers list
+        // (stale/retired provider). Loading the session must NOT re-add it.
+        val savedId = "ghost/phantom-model"
+        every { settingsManager.getModelIdForSession("session-1") } returns savedId
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(emptyList())
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                providers = ProvidersResponse(
+                    providers = listOf(ConfigProvider(id = "openai", name = "OpenAI"))
+                )
+            )
+        }
+
+        viewModel.loadMessages("session-1")
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.modelShortlist.any { it.id == savedId })
     }
 
     @Test

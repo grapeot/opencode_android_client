@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -228,7 +230,7 @@ private fun ModelShortlistRow(
                 )
             }
             Box {
-                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = { menuExpanded = true }) {
                     Icon(
                         Icons.Default.MoreVert,
                         contentDescription = stringResource(R.string.chat_more_options),
@@ -307,20 +309,21 @@ private fun AddModelCatalogDialog(
                     singleLine = true
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                Column(
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState())
                 ) {
                     if (filtered.isEmpty()) {
-                        Text(
-                            stringResource(R.string.model_shortlist_no_models),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        item {
+                            Text(
+                                stringResource(R.string.model_shortlist_no_models),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                    filtered.forEach { cm ->
+                    items(filtered, key = { it.id }) { cm ->
                         val inShortlist = cm.id in existingIds
                         Row(
                             modifier = Modifier

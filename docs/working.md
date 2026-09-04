@@ -705,3 +705,14 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 - 管理行重设计（对齐 RFC 本来就指定的 `HostProfileRow` 模式，`SettingsScreen.kt` 已有先例）：卡片整行可点 → 编辑简称 dialog；主行 displayName（省略号截断）+ 简称 badge（电蓝 10% 底色小 chip，呼应聊天胶囊标签，`widthIn(max=120dp)` 防超长简称撑爆）；副行 `provider / modelId`（单行省略）；右侧只留一个 32dp MoreVert，菜单含 编辑短名 / 上移（首位禁用）/ 下移（尾位禁用）/ 删除（error 色 + error 色图标），均带 leadingIcon，contentDescription 复用 `chat_more_options`。
 - 聊天下拉恢复原样：单行 displayName，选中项 primary 色；胶囊按钮继续显示简称（唯一展示简称的聊天表面）。
 - 验证：`compileDebugKotlin`/`compileDebugUnitTestKotlin` 通过，`testDebugUnitTest` 351 全过（无 androidTest 覆盖该 UI，无测试需更新）。
+
+**第二轮 subagent review 修复（merge 前）**
+
+- **P1 selectedModelId 不变量**：`addModelsToShortlist` 在短名单从空变非空时未设置 `selectedModelId`，导致 ID/index 分裂。修复：添加后若当前 ID 无效则锚定到首项并同步落盘全局 + 当前 session。
+- **P1 catalog 兜底**：`/provider` 与 `config/providers` 双失败时返回 null（保留旧 catalog），但全新安装时 catalog 为空、"添加模型"无可选。修复：双失败时回落到 `ModelPresets` 硬编码列表构建 catalog。
+- **P1 过期 session 模型**：`launchLoadMessages` 对任何语法合法的 `providerId/modelId` 都自动加入短名单，即使 provider 已断开/退役。修复：仅当 provider 在已加载的 providers 列表中时才自动加入；未知 provider 的 saved ID 不再复活。
+- **P1 catalog picker 性能**：`AddModelCatalogDialog` 用 `Column.verticalScroll()` 一次性 compose 所有行（OpenRouter 可达数千模型）。修复：改为 `LazyColumn` + `items(key = { it.id })`。
+- **P1 子页 Back 键**：`showModelShortlist` 是普通 `remember`，系统 Back 直接弹出 Settings 而非返回 Settings 根。修复：改 `rememberSaveable` + `BackHandler`。
+- **P2 触摸目标**：MoreVert `IconButton` 限制 32dp 低于 48dp 无障碍最低。修复：移除 size 约束，用默认 48dp。
+- **P2 复数**：`model_shortlist_count` 英文 "1 models"。修复：改 `<plurals>`（one/other），中文用 `other`。
+- 验证：352 tests 全过（新增 1 个 unknown-provider 回归测试）。
