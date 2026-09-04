@@ -79,6 +79,9 @@ interface OpenCodeApi {
     @GET("config/providers")
     suspend fun getProviders(): ProvidersResponse
 
+    @GET("provider")
+    suspend fun getProviderRegistry(): ProviderRegistryResponse
+
     @GET("agent")
     suspend fun getAgents(): List<AgentInfo>
 

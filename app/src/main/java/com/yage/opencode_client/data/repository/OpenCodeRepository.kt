@@ -204,6 +204,8 @@ class OpenCodeRepository @Inject constructor() {
 
     suspend fun getProviders(): Result<ProvidersResponse> = apiCall { api.getProviders() }
 
+    suspend fun getProviderRegistry(): Result<ProviderRegistryResponse> = apiCall { api.getProviderRegistry() }
+
     suspend fun getAgents(): Result<List<AgentInfo>> = apiCall { api.getAgents() }
 
     suspend fun getSessionDiff(sessionId: String): Result<List<FileDiff>> = apiCall {

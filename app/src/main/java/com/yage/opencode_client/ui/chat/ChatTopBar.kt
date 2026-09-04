@@ -98,6 +98,7 @@ internal data class ChatTopBarActions(
     val onRefreshSessions: () -> Unit = {},
     val onToggleSessionExpanded: (String) -> Unit = {},
     val onSelectModel: (Int) -> Unit,
+    val onManageModels: () -> Unit = {},
     val onOpenAIUsage: () -> Unit = {},
     val onRefreshAIUsage: () -> Unit = {},
     val onNavigateToSettings: () -> Unit = {},
@@ -266,6 +267,15 @@ internal fun ChatTopBar(
                                     }
                                 )
                             }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.model_shortlist_manage)) },
+                                onClick = {
+                                    actions.onManageModels()
+                                    showModelMenu = false
+                                },
+                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
+                            )
                         }
                     }
 

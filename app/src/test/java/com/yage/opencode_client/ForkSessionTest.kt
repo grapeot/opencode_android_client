@@ -3,6 +3,8 @@ package com.yage.opencode_client
 import android.util.Log
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.HostProfile
+import com.yage.opencode_client.data.model.ProviderRegistryResponse
+import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ssh.SSHKeyManager
@@ -99,8 +101,8 @@ class ForkSessionTest {
 
         every { settingsManager.getDraftText(any()) } returns ""
         every { settingsManager.setDraftText(any(), any()) } just runs
-        every { settingsManager.getModelForSession(any()) } returns null
-        every { settingsManager.setModelForSession(any(), any()) } just runs
+        every { settingsManager.getModelIdForSession(any()) } returns null
+        every { settingsManager.getLegacySessionModels() } returns emptyMap()
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
@@ -108,6 +110,8 @@ class ForkSessionTest {
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         coEvery { repository.getPendingPermissions() } returns Result.success(emptyList())
+        coEvery { repository.getProviders() } returns Result.success(ProvidersResponse())
+        coEvery { repository.getProviderRegistry() } returns Result.success(ProviderRegistryResponse())
     }
 
     @After

@@ -4,6 +4,8 @@ import com.yage.opencode_client.data.model.ComposerImageAttachment
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
+import com.yage.opencode_client.data.model.ProviderModel
+import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
@@ -205,14 +207,30 @@ internal fun launchLoadMessages(
             .onSuccess { messages ->
                 if (sessionId == state.value.currentSessionId) {
                     val lastAssistant = messages.lastOrNull { it.info.isAssistant }
-                    val inferredModelIndex = lastAssistant?.info?.resolvedModel?.let { model ->
-                        ModelPresets.list.indexOfFirst {
-                            it.providerId == model.providerId && it.modelId == model.modelId
-                        }.takeIf { it >= 0 }
-                    }
+                    val inferredModel = lastAssistant?.info?.resolvedModel
                     val inferredAgentName = lastAssistant?.info?.agent
-                    val modelIndex = settingsManager?.getModelForSession(sessionId) ?: inferredModelIndex
+                    val targetModelId = settingsManager?.getModelIdForSession(sessionId)
+                        ?: inferredModel?.let { "${it.providerId}/${it.modelId}" }
                     val agentName = settingsManager?.getAgentForSession(sessionId) ?: inferredAgentName
+
+                    // Surface the session's actual model in the shortlist when it's
+                    // missing (provider disconnected, or a dynamic model), mirroring iOS.
+                    var nextShortlist = state.value.modelShortlist
+                    if (inferredModel != null) {
+                        val fullId = "${inferredModel.providerId}/${inferredModel.modelId}"
+                        val displayName = buildProviderModelsIndex(state.value.providers)[fullId]?.name
+                            ?: inferredModel.modelId
+                        val (added, changed) = addModelToShortlist(
+                            nextShortlist, inferredModel.providerId, inferredModel.modelId, displayName
+                        )
+                        if (changed) {
+                            nextShortlist = added
+                            settingsManager?.modelShortlistJson = encodeShortlist(nextShortlist)
+                        }
+                    }
+                    val effectiveModelId = targetModelId ?: state.value.selectedModelId
+                    val modelIndex = reanchorSelectedModelIndex(nextShortlist, effectiveModelId)
+
                     state.update {
                         val (mergedMessages, prunedPending) = mergePendingOptimisticMessages(messages, it)
                         it.copy(
@@ -220,7 +238,9 @@ internal fun launchLoadMessages(
                             pendingOptimisticMessageIds = prunedPending,
                             messageLimit = limit,
                             isLoadingMessages = false,
-                            selectedModelIndex = modelIndex ?: it.selectedModelIndex,
+                            modelShortlist = nextShortlist,
+                            selectedModelId = effectiveModelId,
+                            selectedModelIndex = modelIndex,
                             selectedAgentName = agentName ?: it.selectedAgentName
                         )
                     }
@@ -307,17 +327,51 @@ internal fun launchLoadProviders(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
+    settingsManager: SettingsManager?,
     onNonFatalError: (String, Throwable?) -> Unit
 ) {
     scope.launch {
-        repository.getProviders()
-            .onSuccess { providers ->
-                state.update { it.copy(providers = providers) }
-            }
-            .onFailure { error ->
-                onNonFatalError("Failed to load providers", error)
-            }
+        val providersResult = repository.getProviders()
+        providersResult
+            .onSuccess { providers -> state.update { it.copy(providers = providers) } }
+            .onFailure { error -> onNonFatalError("Failed to load providers", error) }
+
+        // Build the model catalog from /provider (connected-scoped), falling back
+        // to config/providers (unscoped) when the registry is unavailable (D4).
+        val (catalogModels, providerDisplayNames) = resolveModelCatalog(repository, providersResult)
+
+        // Refresh shortlist display names from the catalog; short names are kept (D6).
+        val refreshed = refreshShortlistDisplayNames(state.value.modelShortlist, catalogModels)
+        if (refreshed != state.value.modelShortlist) {
+            settingsManager?.modelShortlistJson = encodeShortlist(refreshed)
+        }
+        state.update {
+            it.copy(
+                catalogModels = catalogModels,
+                providerDisplayNames = providerDisplayNames,
+                modelShortlist = refreshed,
+                selectedModelIndex = reanchorSelectedModelIndex(refreshed, it.selectedModelId)
+            )
+        }
     }
+}
+
+private suspend fun resolveModelCatalog(
+    repository: OpenCodeRepository,
+    providersResult: Result<ProvidersResponse>
+): Pair<List<CatalogModel>, Map<String, String>> {
+    val registryResult = repository.getProviderRegistry()
+    if (registryResult.isSuccess) {
+        val registry = registryResult.getOrThrow()
+        val built = buildCatalog(registry.all, registry.connectedProviderIds)
+        return built.models to built.providerDisplayNames
+    }
+    val providers = providersResult.getOrNull()
+    if (providers != null) {
+        val built = buildCatalog(providers.providers, null)
+        return built.models to built.providerDisplayNames
+    }
+    return emptyList<CatalogModel>() to emptyMap()
 }
 
 internal fun launchCreateSession(

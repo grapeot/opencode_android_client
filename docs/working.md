@@ -650,3 +650,35 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 - 验证：`testDebugUnitTest` 308 tests 全部通过；新增 session switch、stale typewriter、Grok cancel-and-join、active retry discard join、PCM saturation tests。VoiceFlowKit JitPack 已 pin 到 feature commit `54141fbb46ae495c6787a5de9800a30cae085f3d`，Kit 发布后、合并前替换为 exact `0.4.0`。
 - `compileDebugKotlin`、`compileDebugUnitTestKotlin`、`assembleDebug` 通过。`compileDebugAndroidTestKotlin` 仍被既有 `ReadToolCardIntegrationTest.kt:151` 阻塞：调用缺少 `completedTurnActivities` 和 `onMarkdownLinkClick`；该错误与 speech 改动无关，本轮未扩大 scope 修复。
 - 本地 composite sibling `:voiceflowkit:testDebugUnitTest` 全部通过，确认 host mutex memoization 与 Kit 当前 atomic `AudioDisposition` termination contract 兼容。
+
+## 2026-09-04: Model Shortlist（模型短名单，对齐 iOS）
+
+把 iOS 已落地的"模型短名单"机制移植到 Android：聊天模型下拉框只显示用户维护的短名单，设置里可增删/排序/改短名，候选目录从服务器 `/provider` 注册表动态生成。同时把模型选择持久化从 index 升级为 model ID。设计见 RFC §4.5 / §5.14，功能见 PRD"模型列表管理"。
+
+**数据 + API**
+- `data/model/ModelShortlist.kt`（新）：`ModelShortlistItem(providerId, modelId, displayName, shortName)`，`id = "providerId/modelId"`。
+- `data/model/Config.kt`：新增 `ProviderRegistryResponse(all, defaultByProvider, connected)`、`ProviderModelCapabilities(output)`、`ProviderModelOutput(text)`，`ProviderModel` 加 `capabilities` 字段。
+- `OpenCodeApi.getProviderRegistry()`（`@GET("provider")`）+ `OpenCodeRepository.getProviderRegistry(): Result<...>`。
+
+**持久化 + 迁移**（`SettingsManager`）
+- 新 key：`model_shortlist.v1`（JSON List）、`selected_model_id`、`session_model_ids`、`model_shortlist_schema_version`（bump 到 2）。
+- 一次性 `migrateModelSelectionToIds`（`applySavedSettings` 调用，schema version 保护、幂等）：旧 `model_index`/`session_models`（index 版）用当前 `ModelPresets` 解析成 model ID 写入新 key；`model_shortlist.v1` 不存在时播种当前 9 个 `ModelPresets`（决策 D1）。删除死代码 `getModelForSession`/`setModelForSession`。
+
+**纯函数**（`ui/ModelShortlist.kt`，新）
+- `buildCatalog`（connected 过滤 + chat-capable 过滤 + 排序 + providerDisplayNames）、`buildProviderModelsIndex`、`seedShortlistFromPresets`、`addModelToShortlist`/`removeShortlistItem`/`moveShortlistItem`/`updateShortlistShortName`/`refreshShortlistDisplayNames`、`reanchorSelectedModelIndex`、`migrateToIdBasedModelSelection`、`encodeShortlist`/`decodeShortlist`、`suggestedShortName`（抽出的共享推断）。
+
+**ViewModel 接线**
+- `AppState`：`ModelOption.customShortName`；新增 `modelShortlist`/`catalogModels`/`providerDisplayNames`/`selectedModelId`/`pendingModelShortlistFocus`；`availableModels` getter 改源为短名单。
+- `selectModel` 改按 ID 持久化；`selectSession`/`launchLoadMessages` 按 ID 恢复 + ad-hoc 自动加入；`loadProviders` 拉注册表 → 建 catalog（含 `config/providers` 降级）→ 刷 displayName → reanchor。
+- 新增短名单操作方法 + `requestModelShortlistFocus`/`clearModelShortlistFocus`。
+
+**UI**
+- `ui/settings/ModelShortlistScreen.kt`（新）：管理页（上移/下移、编辑短名 dialog、删除、`AddModelCatalogDialog` 搜索 + 多选）。
+- `SettingsSections.ModelShortlistEntry` + `SettingsScreen` 入口行 + `LaunchedEffect` 深链自动打开。
+- `ChatTopBar` 加 `onManageModels` + "Manage models" 跳转行；`ChatScreen`/`MainActivity` 接线（两处 ChatScreen 调用）。
+- 文案：`values/strings.xml` + `values-zh/strings.xml` 各 17 条。
+
+**验证**
+- `compileDebugKotlin`、`compileDebugUnitTestKotlin` 通过。
+- `testDebugUnitTest` 348 tests 全部通过（新增 `ModelShortlistTest` 16 个纯函数测试；更新 `AppStateTest`/`MainViewModelTest`/`ForkSessionTest`/`NfcQuickPromptTest` 的 stub 与模型选择测试为 ID 版）。
+- `lintDebug`：本 feature 0 新增 error（16 个 `MissingTranslation` 已补中文）；剩余 3 个 error 为 master 既有（`MainViewModelSupport.kt` 的 SuspiciousIndentation / LocalContextGetResourceValueCall / ByteOrderMark），不在本分支 diff 内。

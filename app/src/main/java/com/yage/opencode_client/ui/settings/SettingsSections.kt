@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
@@ -657,6 +658,52 @@ internal fun AboutSection() {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.outline
     )
+}
+
+@Composable
+internal fun ModelShortlistEntry(
+    modelCount: Int,
+    currentModelName: String?,
+    onManage: () -> Unit
+) {
+    SectionHeader(title = stringResource(R.string.settings_model_shortlist))
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onManage)
+            .testTag("settings.model_shortlist.entry"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.model_shortlist_count, modelCount), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.settings_model_shortlist_entry),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+    currentModelName?.let {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.model_shortlist_current, it),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
 
 @Composable

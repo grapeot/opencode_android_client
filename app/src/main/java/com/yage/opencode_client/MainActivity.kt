@@ -282,6 +282,9 @@ private fun PhoneLayout(viewModel: MainViewModel) {
                     onNavigateToSettings = {
                         navigateToTopLevel(Screen.Settings.route)
                     },
+                    onManageModels = {
+                        navigateToTopLevel(Screen.Settings.route)
+                    },
                     showSettingsButton = false
                 )
             }
@@ -483,6 +486,7 @@ private fun TabletLayout(viewModel: MainViewModel) {
                     },
                     useInlineFilePreview = true,
                     onNavigateToSettings = onOpenSettings,
+                    onManageModels = onOpenSettings,
                     showSettingsButton = false,
                     showNewSessionInTopBar = false,
                     showSessionListInTopBar = false
