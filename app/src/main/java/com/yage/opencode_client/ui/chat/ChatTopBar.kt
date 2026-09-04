@@ -253,13 +253,21 @@ internal fun ChatTopBar(
                             state.availableModels.forEachIndexed { index, model ->
                                 DropdownMenuItem(
                                     text = {
-                                        Text(
-                                            model.displayName,
-                                            color = if (index == state.selectedModelIndex)
-                                                MaterialTheme.colorScheme.primary
-                                            else
-                                                MaterialTheme.colorScheme.onSurface
-                                        )
+                                        Column {
+                                            Text(
+                                                model.displayName,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = if (index == state.selectedModelIndex)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                model.modelId,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     },
                                     onClick = {
                                         actions.onSelectModel(index)
