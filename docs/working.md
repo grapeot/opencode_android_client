@@ -698,3 +698,10 @@ iOS/Android feature parity 调研完成，确认以下体验层差异需要对�
 - **P2**：短名单行副行改为稳定的 `provider / modelId`（原只显示 shortName，同名模型无法区分）；`buildCatalog` 对空白 model name 回落 modelId；RFC/PRD 去掉"高亮"措辞（深链直接落到子页，无需高亮）。
 
 **复验**：`testDebugUnitTest` 351 tests 全部通过（新增 3 个回归测试：删除当前选中回落落盘、saved ID 缺失自动加入、blank model name 回落）；`lintDebug` 仍 0 新增 error。
+
+**用户走查后的 UI 迭代（同日）**
+
+- 第一版修复把简称加进了聊天下拉副标题 + 管理行第三行，用户反馈：聊天下拉不需要动（恢复单行 displayName）；管理行三行文字 + 4 个内联 IconButton（编辑/上移/下移/删除，各 48dp 触摸目标约 190dp）把文字挤到左侧一小块，太乱。
+- 管理行重设计（对齐 RFC 本来就指定的 `HostProfileRow` 模式，`SettingsScreen.kt` 已有先例）：卡片整行可点 → 编辑简称 dialog；主行 displayName（省略号截断）+ 简称 badge（电蓝 10% 底色小 chip，呼应聊天胶囊标签，`widthIn(max=120dp)` 防超长简称撑爆）；副行 `provider / modelId`（单行省略）；右侧只留一个 32dp MoreVert，菜单含 编辑短名 / 上移（首位禁用）/ 下移（尾位禁用）/ 删除（error 色 + error 色图标），均带 leadingIcon，contentDescription 复用 `chat_more_options`。
+- 聊天下拉恢复原样：单行 displayName，选中项 primary 色；胶囊按钮继续显示简称（唯一展示简称的聊天表面）。
+- 验证：`compileDebugKotlin`/`compileDebugUnitTestKotlin` 通过，`testDebugUnitTest` 351 全过（无 androidTest 覆盖该 UI，无测试需更新）。

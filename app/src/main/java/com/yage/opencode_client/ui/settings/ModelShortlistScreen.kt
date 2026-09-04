@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -21,16 +24,20 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -43,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yage.opencode_client.R
@@ -155,6 +163,7 @@ fun ModelShortlistScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelShortlistRow(
     item: ModelShortlistItem,
@@ -166,7 +175,12 @@ private fun ModelShortlistRow(
     onDelete: () -> Unit,
     onEditShortName: () -> Unit
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    // Aligns with HostProfileRow: whole row opens the short-name editor, all
+    // management actions live behind a single compact overflow menu so the
+    // text gets the card's full width.
     Card(
+        onClick = onEditShortName,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("model.shortlist.row.${item.id}"),
@@ -175,33 +189,88 @@ private fun ModelShortlistRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                Text(item.displayName, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    item.shortName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        item.displayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // The label the chat capsule shows, echoed as a compact badge.
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                        modifier = Modifier.widthIn(max = 120.dp)
+                    ) {
+                        Text(
+                            item.shortName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     providerSubtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            IconButton(onClick = onEditShortName) {
-                Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.model_shortlist_edit_short_name))
-            }
-            IconButton(onClick = onMoveUp, enabled = !isFirst) {
-                Icon(Icons.Default.KeyboardArrowUp, contentDescription = stringResource(R.string.model_shortlist_move_up))
-            }
-            IconButton(onClick = onMoveDown, enabled = !isLast) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.model_shortlist_move_down))
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.common_delete))
+            Box {
+                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = stringResource(R.string.chat_more_options),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.model_shortlist_edit_short_name)) },
+                        onClick = { menuExpanded = false; onEditShortName() },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.model_shortlist_move_up)) },
+                        enabled = !isFirst,
+                        onClick = { menuExpanded = false; onMoveUp() },
+                        leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.model_shortlist_move_down)) },
+                        enabled = !isLast,
+                        onClick = { menuExpanded = false; onMoveDown() },
+                        leadingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(R.string.common_delete),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        },
+                        onClick = { menuExpanded = false; onDelete() },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    )
+                }
             }
         }
     }

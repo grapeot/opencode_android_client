@@ -1135,7 +1135,7 @@ Chat Markdown 在 `WorkspaceMarkdownLinkResolver` 之前拦截 `opencode` scheme
 ### 5.14 Model Shortlist 管理 UI（对齐 iOS）
 
 - **设置页入口**（`SettingsScreen.kt`）：`AppearanceSection` 之后新增一行 `ModelShortlistEntry`（带 `modelShortlist.size` 数量角标 + `ChevronRight`），复用 `HostProfilesManagerScreen` 的子页面模式（`showModelShortlist` state 切换，渲染 `ModelShortlistScreen(viewModel, onBack)`）。
-- **短名单页**（新 `ui/settings/ModelShortlistScreen.kt`）：TopAppBar 标题 "模型列表"，actions 里 "+" → catalog picker。行对齐 `HostProfileRow` 视觉语言（卡片 + 右侧 MoreVert 菜单）：主行 displayName，副行 `providerDisplayNames[providerId] ?: providerId / modelId`。重排用 MoreVert 菜单里的"上移/下移"（决策 D3，不做拖拽）；MoreVert 还有"编辑短名 / 删除"（删除直接执行，空短名单是合法状态）。点行主体 → 编辑短名 dialog（`AlertDialog` + `OutlinedTextField`）。空态：提示文案 + 醒目"添加模型"按钮。
+- **短名单页**（新 `ui/settings/ModelShortlistScreen.kt`）：TopAppBar 标题 "模型列表"，actions 里 "+" → catalog picker。行对齐 `HostProfileRow` 视觉语言（卡片 + 右侧单个 MoreVert 溢出菜单）：主行 displayName + 简称 badge（电蓝小 chip，呼应聊天胶囊里显示的标签），副行 `providerDisplayNames[providerId] ?: providerId / modelId`。所有操作收进 MoreVert 菜单：编辑短名 / 上移 / 下移（决策 D3，不做拖拽）/ 删除（error 色，直接执行，空短名单是合法状态）；上移/下移在首/尾位禁用。点行主体 → 编辑短名 dialog（`AlertDialog` + `OutlinedTextField`）。空态：提示文案 + 醒目"添加模型"按钮。
 - **Catalog picker**（同文件 `AddModelCatalogDialog`）：搜索框（displayName/modelId/providerId 三字段过滤）+ 多选 checkbox（排除已在短名单的）+ 底部"添加所选 (n)"（0 选禁用）。catalog 为空时显示"未获取到模型目录"。
 - **聊天 picker**（`ChatTopBar.kt`）：DropdownMenu 底部加 "Manage models" 跳转行（`onManageModels` → `requestModelShortlistFocus()` + 跳设置）；`availableModels.isEmpty()` 时显示"去设置添加模型"跳转行。
 - **深链**：`pendingModelShortlistFocus` state + `SettingsScreen` 的 `LaunchedEffect` 一次性打开短名单子页（跳转即直接落到目标页，无需额外高亮；消费后清除，不重复触发）。tablet 折叠 Sessions 左栏时，设置跳转同时展开左栏，否则 `SettingsScreen` 不会 composition、pending 无法消费。
