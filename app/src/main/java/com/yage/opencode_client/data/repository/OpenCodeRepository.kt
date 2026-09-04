@@ -28,12 +28,13 @@ class OpenCodeRepository @Inject constructor() {
         encodeDefaults = true  // Include type in parts - server needs discriminator
     }
 
-    private var okHttpClient: OkHttpClient = buildOkHttpClient()
-    private var retrofit: Retrofit = buildRetrofit()
+    private var restHttpClient: OkHttpClient = buildHttpClient(REST_READ_TIMEOUT_SECONDS)
+    private var sseHttpClient: OkHttpClient = buildHttpClient(SSE_READ_TIMEOUT_SECONDS)
+    private var retrofit: Retrofit = buildRetrofit(restHttpClient)
     private var api: OpenCodeApi = retrofit.create(OpenCodeApi::class.java)
-    private var sseClient: SSEClient = SSEClient(okHttpClient)
+    private var sseClient: SSEClient = SSEClient(sseHttpClient)
 
-    private fun buildOkHttpClient(): OkHttpClient {
+    private fun buildHttpClient(readTimeoutSeconds: Long): OkHttpClient {
         return OkHttpClient.Builder()
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
@@ -52,26 +53,28 @@ class OpenCodeRepository @Inject constructor() {
                     .build()
                 chain.proceed(request)
             }
-            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(readTimeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
-    private fun buildRetrofit(): Retrofit {
+    private fun buildRetrofit(client: OkHttpClient): Retrofit {
         val url = if (baseUrl.startsWith("http")) baseUrl else "http://$baseUrl"
         return Retrofit.Builder()
             .baseUrl(url.trimEnd('/') + "/")
-            .client(okHttpClient)
+            .client(client)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
     }
 
     @Synchronized
     private fun rebuildClients() {
-        okHttpClient = buildOkHttpClient()
-        retrofit = buildRetrofit()
+        restHttpClient = buildHttpClient(REST_READ_TIMEOUT_SECONDS)
+        sseHttpClient = buildHttpClient(SSE_READ_TIMEOUT_SECONDS)
+        retrofit = buildRetrofit(restHttpClient)
         api = retrofit.create(OpenCodeApi::class.java)
-        sseClient = SSEClient(okHttpClient)
+        sseClient = SSEClient(sseHttpClient)
     }
 
     @Synchronized
@@ -126,7 +129,8 @@ class OpenCodeRepository @Inject constructor() {
         text: String,
         agent: String = "build",
         model: Message.ModelInfo? = null,
-        attachments: List<ComposerImageAttachment> = emptyList()
+        attachments: List<ComposerImageAttachment> = emptyList(),
+        messageId: String? = null
     ): Result<Unit> = apiCall {
         val parts = buildList {
             if (text.isNotBlank()) add(PromptRequest.PartInput(type = "text", text = text))
@@ -142,6 +146,7 @@ class OpenCodeRepository @Inject constructor() {
             }
         }
         val request = PromptRequest(
+            messageId = messageId,
             parts = parts,
             agent = agent,
             model = model?.let { PromptRequest.ModelInput(it.providerId, it.modelId) }
@@ -229,5 +234,14 @@ class OpenCodeRepository @Inject constructor() {
 
     companion object {
         const val DEFAULT_SERVER = "http://localhost:4096"
+
+        // REST calls (prompt_async, getMessages, ...) get a bounded read timeout so a
+        // half-open connection fails fast instead of hanging forever. SSE is a
+        // long-lived stream that can be silent for minutes while the agent works, so
+        // it keeps an infinite read timeout on its own client.
+        private const val CONNECT_TIMEOUT_SECONDS = 15L
+        private const val WRITE_TIMEOUT_SECONDS = 60L
+        private const val REST_READ_TIMEOUT_SECONDS = 60L
+        private const val SSE_READ_TIMEOUT_SECONDS = 0L
     }
 }

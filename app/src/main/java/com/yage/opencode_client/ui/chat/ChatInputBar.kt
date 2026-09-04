@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -83,6 +84,7 @@ import kotlin.math.sin
 internal fun ChatInputBar(
     text: String,
     isBusy: Boolean,
+    isSending: Boolean = false,
     isRecording: Boolean,
     isTranscribing: Boolean,
     hasPreservedSpeechAudio: Boolean,
@@ -201,12 +203,13 @@ internal fun ChatInputBar(
 
                 ChatPrimaryActionButton(
                     onClick = onSend,
-                    enabled = canSend,
+                    enabled = canSend && !isSending,
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = Color.White,
                     dimWhenDisabled = true,
                     icon = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.chat_send)
+                    contentDescription = stringResource(R.string.chat_send),
+                    progress = isSending
                 )
             }
 
@@ -528,7 +531,8 @@ private fun ChatPrimaryActionButton(
     contentColor: Color,
     dimWhenDisabled: Boolean,
     icon: ImageVector,
-    contentDescription: String
+    contentDescription: String,
+    progress: Boolean = false
 ) {
     val effectiveAlpha = if (!enabled && dimWhenDisabled) 0.35f else 1f
     val interaction = remember { MutableInteractionSource() }
@@ -549,12 +553,20 @@ private fun ChatPrimaryActionButton(
             },
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = contentColor,
-            modifier = Modifier.size(20.dp)
-        )
+        if (progress) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = contentColor
+            )
+        } else {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 

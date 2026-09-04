@@ -7,6 +7,7 @@ import com.yage.opencode_client.data.model.SSEEvent
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.security.MessageDigest
 
@@ -167,6 +168,28 @@ internal fun parseQuestionAskedEvent(event: SSEEvent): QuestionRequest? {
     return runCatching {
         lenientJson.decodeFromString<QuestionRequest>(properties.toString())
     }.getOrNull()
+}
+
+/**
+ * Builds a short display reason from a `session.error` payload
+ * (`error: {name, data: {message}}`). Server causes can be long multi-line
+ * dumps; keep the first meaningful line, bounded.
+ */
+internal fun parseSessionErrorReason(event: SSEEvent): String {
+    val errorObj = event.payload.getJsonObject("error") ?: return "unknown error"
+    val name = (errorObj["name"] as? JsonPrimitive)?.content
+    val data = errorObj["data"] as? JsonObject
+    val message = (data?.get("message") as? JsonPrimitive)?.content
+        ?: (data?.get("error") as? JsonPrimitive)?.content
+    val text = when {
+        !message.isNullOrBlank() -> {
+            val firstLine = message.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: message
+            if (!name.isNullOrBlank()) "$name: $firstLine" else firstLine
+        }
+        !name.isNullOrBlank() -> name
+        else -> "unknown error"
+    }
+    return text.take(300)
 }
 
 internal fun reasoningPartOrNull(partType: String, partId: String, messageId: String, sessionId: String): Part? {

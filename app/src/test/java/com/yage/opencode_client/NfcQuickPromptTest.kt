@@ -107,7 +107,7 @@ class NfcQuickPromptTest {
         coEvery { repository.getSessions(any()) } returns Result.success(emptyList())
         coEvery { repository.getAgents() } returns Result.success(emptyList())
         coEvery { repository.getProviders() } returns Result.success(ProvidersResponse())
-        coEvery { repository.sendMessage(any(), any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
     }
 
     @After
@@ -165,7 +165,7 @@ class NfcQuickPromptTest {
             Session(id = "s1", directory = "/tmp")
         )
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
-        coEvery { repository.sendMessage(any(), any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
 
         val vm = createViewModel()
         vm.handleNfcPrompt("test prompt", autoSend = true)
@@ -174,7 +174,7 @@ class NfcQuickPromptTest {
         // autoSend=true: sendMessage clears inputText on success
         assertNull(vm.state.value.pendingNfcAction)
         // Verify sendMessage was called
-        coVerify { repository.sendMessage("s1", "test prompt", any(), any(), any()) }
+        coVerify { repository.sendMessage("s1", "test prompt", any(), any(), any(), any()) }
     }
 
     @Test

@@ -61,6 +61,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -376,7 +377,7 @@ class MainViewModelTest {
 
     @Test
     fun `sendMessage success clears input and uses selected preset model`() = runTest {
-        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
         coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
@@ -397,7 +398,9 @@ class MainViewModelTest {
                 "session-1",
                 "hello world",
                 "review",
-                Message.ModelInfo(selected.providerId, selected.modelId)
+                Message.ModelInfo(selected.providerId, selected.modelId),
+                any(),
+                any()
             )
         }
         assertEquals("", viewModel.state.value.inputText)
@@ -406,7 +409,7 @@ class MainViewModelTest {
 
     @Test
     fun `sendMessage ignores duplicate sends while request is in flight`() = runTest {
-        coEvery { repository.sendMessage(any(), any(), any(), any(), any()) } coAnswers {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } coAnswers {
             delay(100)
             Result.success(Unit)
         }
@@ -421,13 +424,13 @@ class MainViewModelTest {
 
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { repository.sendMessage(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { repository.sendMessage(any(), any(), any(), any(), any(), any()) }
         assertFalse(viewModel.state.value.sendingSessionIds.contains("session-1"))
     }
 
     @Test
     fun `sendMessage success refreshes sessions`() = runTest {
-        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
         coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project", title = "Updated"))
         )
@@ -458,7 +461,7 @@ class MainViewModelTest {
             title = "Previous Top",
             time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 2_000)
         )
-        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
         coEvery { repository.getSessions(400) } returns Result.success(listOf(previousTop, current))
 
         val viewModel = createViewModel()
@@ -478,7 +481,7 @@ class MainViewModelTest {
 
     @Test
     fun `sendMessage failure keeps input and exposes error`() = runTest {
-        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.failure(IllegalStateException("send failed"))
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.failure(IllegalStateException("send failed"))
 
         val viewModel = createViewModel()
         viewModel.selectSession("session-1")
@@ -494,7 +497,7 @@ class MainViewModelTest {
 
     @Test
     fun `sendMessage still queues prompt when current session is busy`() = runTest {
-        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
 
         val viewModel = createViewModel()
         viewModel.selectSession("session-1")
@@ -513,6 +516,8 @@ class MainViewModelTest {
             repository.sendMessage(
                 "session-1",
                 "queue this next",
+                any(),
+                any(),
                 any(),
                 any()
             )
@@ -534,8 +539,230 @@ class MainViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any(), any(), any()) }
         assertEquals("do not send yet", viewModel.state.value.inputText)
+    }
+
+    @Test
+    fun `sendMessage inserts optimistic user row and clears input immediately`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } coAnswers {
+            delay(100)
+            Result.success(Unit)
+        }
+        val viewModel = createViewModel()
+        viewModel.selectSession("session-1")
+        advanceUntilIdle()
+        viewModel.setInputText("hello")
+
+        viewModel.sendMessage()
+
+        // The optimistic row is inserted synchronously, before the network call resolves.
+        val state = viewModel.state.value
+        assertEquals("", state.inputText)
+        assertTrue(state.sendingSessionIds.contains("session-1"))
+        val optimistic = state.messages.lastOrNull()
+        assertNotNull(optimistic)
+        assertEquals("user", optimistic!!.info.role)
+        assertEquals("hello", optimistic.parts.first { it.isText }.text)
+        assertTrue(state.pendingOptimisticMessageIds.contains(optimistic.info.id))
+    }
+
+    @Test
+    fun `sendMessage failure removes optimistic row and restores input`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns
+                Result.failure(IllegalStateException("send failed"))
+        val viewModel = createViewModel()
+        viewModel.selectSession("session-1")
+        advanceUntilIdle()
+        viewModel.setInputText("hello")
+
+        viewModel.sendMessage()
+        // Optimistic row is present immediately after the send is dispatched.
+        assertTrue(viewModel.state.value.messages.isNotEmpty())
+        advanceUntilIdle()
+
+        // After the failure, the optimistic row is dropped and the input restored.
+        val state = viewModel.state.value
+        assertEquals("hello", state.inputText)
+        assertEquals("send failed", state.error)
+        assertTrue(state.messages.isEmpty())
+        assertTrue(state.pendingOptimisticMessageIds.isEmpty())
+    }
+
+    @Test
+    fun `sendMessage success keeps optimistic row until server confirms it`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
+        coEvery { repository.getSessions(400) } returns Result.success(
+            listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
+        )
+
+        val viewModel = createViewModel()
+        viewModel.selectSession("session-1")
+        advanceUntilIdle()
+        viewModel.setInputText("hello")
+
+        viewModel.sendMessage()
+        advanceUntilIdle()
+
+        // The server has not echoed the message yet, so the optimistic row stays visible.
+        val state = viewModel.state.value
+        val optimistic = state.messages.lastOrNull()
+        assertNotNull(optimistic)
+        assertEquals("user", optimistic!!.info.role)
+        assertTrue(state.pendingOptimisticMessageIds.contains(optimistic.info.id))
+    }
+
+    @Test
+    fun `sendMessage failure does not clobber another session draft after switching`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } coAnswers {
+            delay(100)
+            Result.failure(IllegalStateException("send failed"))
+        }
+        every { settingsManager.getDraftText("session-2") } returns "session-2 draft"
+
+        val viewModel = createViewModel()
+        viewModel.selectSession("session-1")
+        advanceUntilIdle()
+        viewModel.setInputText("hello")
+
+        viewModel.sendMessage()
+        // Switch to another session while session-1's send is still in flight.
+        viewModel.selectSession("session-2")
+        advanceUntilIdle()
+
+        // session-1's send failed, but session-2's draft must be preserved.
+        val state = viewModel.state.value
+        assertEquals("session-2", state.currentSessionId)
+        assertEquals("session-2 draft", state.inputText)
+        assertEquals("send failed", state.error)
+        assertTrue(state.pendingOptimisticMessageIds.isEmpty())
+    }
+
+    @Test
+    fun `session_error SSE removes pending optimistic row and recovers text`() = runTest {
+        coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(
+                        info = Message(id = "msg_pending", sessionId = "session-1", role = "user"),
+                        parts = listOf(
+                            Part(id = "p1", messageId = "msg_pending", sessionId = "session-1", type = "text", text = "hello")
+                        )
+                    )
+                ),
+                pendingOptimisticMessageIds = setOf("msg_pending")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "session.error",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "error",
+                            buildJsonObject {
+                                put("name", JsonPrimitive("ProviderAuthError"))
+                                put("data", buildJsonObject { put("message", JsonPrimitive("nope")) })
+                            }
+                        )
+                    }
+                )
+            )
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertTrue(state.messages.isEmpty())
+        assertTrue(state.pendingOptimisticMessageIds.isEmpty())
+        assertEquals("hello", state.inputText)
+        assertEquals("Send failed: ProviderAuthError: nope", state.error)
+    }
+
+    @Test
+    fun `session_error SSE for another session is ignored`() = runTest {
+        coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(
+                        info = Message(id = "msg_pending", sessionId = "session-1", role = "user"),
+                        parts = listOf(
+                            Part(id = "p1", messageId = "msg_pending", sessionId = "session-1", type = "text", text = "hello")
+                        )
+                    )
+                ),
+                pendingOptimisticMessageIds = setOf("msg_pending")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "session.error",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-2"))
+                        put("error", buildJsonObject { put("name", JsonPrimitive("X")) })
+                    }
+                )
+            )
+        )
+        advanceUntilIdle()
+
+        // The error belongs to a different session, so the pending row is untouched.
+        assertEquals(1, viewModel.state.value.messages.size)
+        assertTrue(viewModel.state.value.pendingOptimisticMessageIds.contains("msg_pending"))
+        assertNull(viewModel.state.value.error)
+    }
+
+    @Test
+    fun `host switch clears pending optimistic message ids`() = runTest {
+        val first = HostProfile(
+            id = "host-1",
+            name = "First",
+            transport = HostTransport.DIRECT,
+            serverUrl = "http://first.test"
+        )
+        val second = HostProfile(
+            id = "host-2",
+            name = "Second",
+            transport = HostTransport.DIRECT,
+            serverUrl = "http://second.test"
+        )
+        var currentProfile = first
+        every { hostProfileStore.currentProfile() } answers { currentProfile }
+        every { hostProfileStore.profiles() } returns listOf(first, second)
+        every { hostProfileStore.select(second.id) } answers {
+            currentProfile = second
+            second
+        }
+        coEvery { repository.checkHealth() } returns Result.failure(IllegalStateException("offline"))
+
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                isConnected = true,
+                currentSessionId = "session-1",
+                messages = listOf(MessageWithParts(Message(id = "msg_pending", sessionId = "session-1", role = "user"))),
+                pendingOptimisticMessageIds = setOf("msg_pending")
+            )
+        }
+
+        viewModel.selectHostProfile(second.id)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.pendingOptimisticMessageIds.isEmpty())
+        assertNull(viewModel.state.value.currentSessionId)
+        assertTrue(viewModel.state.value.messages.isEmpty())
     }
 
     @Test
@@ -548,7 +775,7 @@ class MainViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any(), any(), any()) }
         assertEquals("   ", viewModel.state.value.inputText)
     }
 
@@ -560,7 +787,7 @@ class MainViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.sendMessage(any(), any(), any(), any(), any(), any()) }
         assertEquals("hello", viewModel.state.value.inputText)
     }
 
@@ -1827,7 +2054,7 @@ class MainViewModelTest {
 
     @Test
     fun `sendMessage on success clears draft for current session`() = runTest {
-        coEvery { repository.sendMessage(any(), any(), any(), any()) } returns Result.success(Unit)
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
 
         val viewModel = createViewModel()
         viewModel.selectSession("s1")

@@ -271,6 +271,7 @@ fun ChatScreen(
             ChatInputBar(
                 text = state.inputText,
                 isBusy = currentSessionIsRunning,
+                isSending = state.currentSessionId?.let { it in state.sendingSessionIds } == true,
                 isRecording = state.isRecording,
                 isTranscribing = state.isTranscribing,
                 hasPreservedSpeechAudio = state.hasPreservedSpeechAudio,

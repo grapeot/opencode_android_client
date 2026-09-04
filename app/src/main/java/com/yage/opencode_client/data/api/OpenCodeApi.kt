@@ -123,6 +123,7 @@ data class UpdateSessionTimeRequest(
 
 @kotlinx.serialization.Serializable
 data class PromptRequest(
+    @kotlinx.serialization.SerialName("messageID") val messageId: String? = null,
     val parts: List<PartInput>,
     val agent: String = "build",
     val model: ModelInput? = null
