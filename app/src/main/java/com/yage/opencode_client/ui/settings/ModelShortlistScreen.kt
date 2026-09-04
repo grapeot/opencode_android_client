@@ -181,8 +181,13 @@ private fun ModelShortlistRow(
             Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(item.displayName, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    providerSubtitle,
+                    item.shortName,
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    providerSubtitle,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
