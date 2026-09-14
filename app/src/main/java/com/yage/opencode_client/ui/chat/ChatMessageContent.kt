@@ -344,8 +344,13 @@ private fun MessageRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (!isUser) message.info.resolvedModel?.let { model ->
+                val segments = mutableListOf("${model.providerId}/${model.modelId}")
+                message.throughputComponents()?.let { components ->
+                    val rate = components.throughput
+                    if (rate > 0) segments.add(MessageWithParts.throughputText(rate))
+                }
                 Text(
-                    text = "${model.providerId}/${model.modelId}",
+                    text = segments.joinToString(" | "),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )

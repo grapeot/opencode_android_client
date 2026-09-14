@@ -140,6 +140,12 @@ data class AppState(
         val cost: Double? = null
     )
 
+    data class ThroughputStats(
+        val averageThroughput: Double?,
+        val totalOutputTokens: Int,
+        val totalGenerationSeconds: Double?
+    )
+
     data class ConnectionState(
         val isConnected: Boolean = false,
         val isConnecting: Boolean = false,
@@ -209,6 +215,7 @@ data class AppState(
         val catalogModels: List<CatalogModel> = emptyList(),
         val providerDisplayNames: Map<String, String> = emptyMap(),
         val contextUsage: ContextUsage? = null,
+        val throughputStats: ThroughputStats? = null,
         val agents: List<AgentInfo> = emptyList(),
         val providers: ProvidersResponse? = null,
         val isRecording: Boolean = false
@@ -283,6 +290,7 @@ data class AppState(
             catalogModels = catalogModels,
             providerDisplayNames = providerDisplayNames,
             contextUsage = contextUsage,
+            throughputStats = throughputStats,
             agents = agents,
             providers = providers,
             isRecording = isRecording
@@ -372,6 +380,30 @@ data class AppState(
         runCatching { Log.d("AppState", "contextUsage unavailable: $reason") }
         return null
     }
+
+    /** Session-level generation throughput over raw `messages` (same source as
+     *  `contextUsage`, not `visibleMessages`). Sums each completed step's
+     *  generated tokens and tool-adjusted generation time, then divides.
+     *  Null when no assistant message contributes. */
+    val throughputStats: ThroughputStats?
+        get() {
+            var totalOutput = 0
+            var totalSeconds = 0.0
+            var anySeconds = false
+            for (m in messages) {
+                if (!m.info.isAssistant) continue
+                val components = m.throughputComponents() ?: continue
+                totalOutput += components.generatedTokens
+                totalSeconds += components.effectiveSeconds
+                anySeconds = true
+            }
+            if (totalOutput <= 0) return null
+            return ThroughputStats(
+                averageThroughput = if (anySeconds && totalSeconds > 0) totalOutput / totalSeconds else null,
+                totalOutputTokens = totalOutput,
+                totalGenerationSeconds = if (anySeconds && totalSeconds > 0) totalSeconds else null
+            )
+        }
 
     private fun tokenTotal(tokens: Message.TokenInfo?): Int? {
         if (tokens == null) return null

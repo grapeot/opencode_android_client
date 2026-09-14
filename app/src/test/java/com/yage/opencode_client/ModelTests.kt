@@ -500,4 +500,211 @@ class ModelTests {
         assertEquals(1, toolPart.files!![0].additions)
         assertEquals(0, toolPart.files!![0].deletions)
     }
+
+    // ---- Throughput (model footer t/s and Context sheet aggregation) ----
+
+    private fun throughputMessage(
+        created: Long?,
+        completed: Long?,
+        output: Int? = null,
+        reasoning: Int? = null,
+        partJson: String = "[]"
+    ): MessageWithParts {
+        val timeJson = when {
+            created != null && completed != null -> """"time":{"created":$created,"completed":$completed}"""
+            created != null -> """"time":{"created":$created}"""
+            completed != null -> """"time":{"completed":$completed}"""
+            else -> ""
+        }
+        val tokensJson = if (output != null || reasoning != null) {
+            val o = output?.toString() ?: "null"
+            val r = reasoning?.toString() ?: "null"
+            ""","tokens":{"output":$o,"reasoning":$r}"""
+        } else ""
+        val infoJson = """{"id":"msg_1","role":"assistant","sessionID":"ses_1"$timeJson$tokensJson}"""
+        return json.decodeFromString(
+            """{"info":$infoJson,"parts":$partJson}"""
+        )
+    }
+
+    @Test
+    fun `state time parses int double and missing forms`() {
+        val apiJson = """
+            [{"info":{"id":"msg_1","role":"assistant","sessionID":"ses_1"},"parts":[
+            {"type":"tool","id":"prt_1","sessionID":"ses_1","messageID":"msg_1","tool":"a",
+             "state":{"status":"completed","time":{"start":1000,"end":2000}}},
+            {"type":"tool","id":"prt_2","sessionID":"ses_1","messageID":"msg_1","tool":"b",
+             "state":{"status":"completed","time":{"start":1000.0,"end":3500.5}}},
+            {"type":"tool","id":"prt_3","sessionID":"ses_1","messageID":"msg_1","tool":"c",
+             "state":{"status":"running"}}
+            ]}]
+        """.trimIndent()
+        val mwp = json.decodeFromString<List<MessageWithParts>>(apiJson)[0]
+        assertEquals(1.0, mwp.parts[0].toolRunSeconds!!, 1e-9)
+        assertEquals(2.5005, mwp.parts[1].toolRunSeconds!!, 1e-9)
+        assertEquals(null, mwp.parts[2].toolRunSeconds)
+        // Part with no tool at all contributes nothing.
+        assertEquals(3.5005, mwp.toolRunSeconds, 1e-9)
+    }
+
+    @Test
+    fun `tool time with end before start contributes nothing`() {
+        val apiJson = """
+            [{"info":{"id":"msg_1","role":"assistant","sessionID":"ses_1"},"parts":[
+            {"type":"tool","id":"prt_1","sessionID":"ses_1","messageID":"msg_1","tool":"a",
+             "state":{"status":"completed","time":{"start":5000,"end":2000}}},
+            {"type":"tool","id":"prt_2","sessionID":"ses_1","messageID":"msg_1","tool":"b",
+             "state":{"status":"completed","time":{"start":1000,"end":1000}}}
+            ]}]
+        """.trimIndent()
+        val mwp = json.decodeFromString<List<MessageWithParts>>(apiJson)[0]
+        assertEquals(null, mwp.parts[0].toolRunSeconds)
+        assertEquals(null, mwp.parts[1].toolRunSeconds)
+        assertEquals(0.0, mwp.toolRunSeconds, 1e-9)
+    }
+
+    @Test
+    fun `throughput excludes tool seconds from step window`() {
+        // 56s step, tool ran 48s. 2000 tokens over the adjusted 8s window = 250 t/s;
+        // the raw window would read ~36 t/s and a 48s-in-a-56s write would read 9 t/s.
+        val created = 1000L
+        val completed = created + 56_000L
+        val partJson = """
+            [{"type":"tool","id":"prt_1","sessionID":"ses_1","messageID":"msg_1","tool":"write",
+             "state":{"status":"completed","time":{"start":$created,"end":${created + 48_000L}}}}]
+        """.trimIndent()
+        val m = throughputMessage(created, completed, output = 2000, partJson = partJson)
+        val components = m.throughputComponents()
+        assertNotNull(components)
+        assertEquals(2000, components!!.generatedTokens)
+        assertEquals(8.0, components.effectiveSeconds, 1e-9)
+        assertEquals(250.0, components.throughput, 1e-9)
+        assertEquals("250 t/s", MessageWithParts.throughputText(components.throughput))
+    }
+
+    @Test
+    fun `throughput falls back to raw window when tools fill it`() {
+        val created = 1000L
+        val completed = created + 30_000L
+        val partJson = """
+            [{"type":"tool","id":"prt_1","sessionID":"ses_1","messageID":"msg_1","tool":"bash",
+             "state":{"status":"completed","time":{"start":$created,"end":$completed}}}]
+        """.trimIndent()
+        val m = throughputMessage(created, completed, output = 300, partJson = partJson)
+        val components = m.throughputComponents()
+        assertNotNull(components)
+        assertEquals(30.0, components!!.effectiveSeconds, 1e-9)
+        assertEquals(10.0, components.throughput, 1e-9)
+    }
+
+    @Test
+    fun `throughput falls back to raw window when tool time exceeds it`() {
+        // Tool outlasted the step window (e.g. timing recorded across steps).
+        val created = 1000L
+        val completed = created + 10_000L
+        val partJson = """
+            [{"type":"tool","id":"prt_1","sessionID":"ses_1","messageID":"msg_1","tool":"bash",
+             "state":{"status":"completed","time":{"start":$created,"end":${created + 12_000L}}}}]
+        """.trimIndent()
+        val m = throughputMessage(created, completed, output = 100, partJson = partJson)
+        val components = m.throughputComponents()
+        assertNotNull(components)
+        assertEquals(10.0, components!!.effectiveSeconds, 1e-9)
+        assertEquals(10.0, components.throughput, 1e-9)
+    }
+
+    @Test
+    fun `throughput falls back to raw window when no tool timing recorded`() {
+        val created = 1000L
+        val completed = created + 10_000L
+        val m = throughputMessage(created, completed, output = 83)
+        val components = m.throughputComponents()
+        assertNotNull(components)
+        assertEquals(10.0, components!!.effectiveSeconds, 1e-9)
+        assertEquals(8.3, components.throughput, 1e-9)
+        assertEquals("8.3 t/s", MessageWithParts.throughputText(components.throughput))
+    }
+
+    @Test
+    fun `throughput is null while streaming or without tokens`() {
+        // Streaming: no completed timestamp.
+        assertNull(throughputMessage(1000L, null, output = 100).throughputComponents())
+        // Completed but zero generated tokens.
+        assertNull(throughputMessage(1000L, 2000L, output = 0, reasoning = 0).throughputComponents())
+        // Missing created bound with completed present (Android TimeInfo fields
+        // are both nullable; iOS treats created as non-null).
+        assertNull(throughputMessage(null, 2000L, output = 100).throughputComponents())
+    }
+
+    @Test
+    fun `reasoning tokens count as generated`() {
+        val created = 1000L
+        val completed = created + 20_000L
+        val m = throughputMessage(created, completed, output = 100, reasoning = 400)
+        val components = m.throughputComponents()
+        assertNotNull(components)
+        assertEquals(500, components!!.generatedTokens)
+        assertEquals(25.0, components.throughput, 1e-9)
+    }
+
+    @Test
+    fun `throughputText formats integer above ten and one decimal below`() {
+        assertEquals("10 t/s", MessageWithParts.throughputText(10.0))
+        assertEquals("146 t/s", MessageWithParts.throughputText(146.2))
+        // 9.96 < 10 -> one decimal, even though it rounds to 10.
+        assertEquals("10.0 t/s", MessageWithParts.throughputText(9.96))
+        assertEquals("0.8 t/s", MessageWithParts.throughputText(0.8))
+    }
+
+    @Test
+    fun `throughputStats aggregates raw messages and skips non contributors`() {
+        val m1 = throughputMessage(1000L, 11000L, output = 83) // 8.3 t/s over 10s
+        val streaming = throughputMessage(2000L, null, output = 5) // skipped: incomplete
+        val noTokens = throughputMessage(3000L, 13000L, output = 0, reasoning = 0) // skipped
+        val m2 = throughputMessage(4000L, 14000L, output = 100, reasoning = 100) // 20 t/s over 10s
+        val userMsg = json.decodeFromString<MessageWithParts>(
+            """{"info":{"id":"msg_u","role":"user","sessionID":"ses_1","time":{"created":500}},"parts":[]}"""
+        )
+        val state = AppState(messages = listOf(m1, streaming, noTokens, m2, userMsg))
+        val stats = state.throughputStats
+        assertNotNull(stats)
+        // 283 generated tokens over 20 seconds (83 from m1, 200 from m2).
+        assertEquals(283, stats!!.totalOutputTokens)
+        assertEquals(20.0, stats.totalGenerationSeconds!!, 1e-9)
+        assertEquals(14.15, stats.averageThroughput!!, 1e-9)
+    }
+
+    @Test
+    fun `throughputStats mixes tool-adjusted and fallback steps`() {
+        // Step 1: 10s window, 4s tool, 120 tokens -> 120/6. Step 2: 10s window,
+        // 12s tool (exceeds window, falls back to raw), 100 tokens -> 100/10.
+        // Aggregate: 220 tokens over 16 seconds = 13.75 t/s.
+        val p1 = """
+            [{"type":"tool","id":"prt_1","sessionID":"ses_1","messageID":"msg_1","tool":"edit",
+             "state":{"status":"completed","time":{"start":1000,"end":5000}}}]
+        """.trimIndent()
+        val p2 = """
+            [{"type":"tool","id":"prt_2","sessionID":"ses_1","messageID":"msg_2","tool":"write",
+             "state":{"status":"completed","time":{"start":11000,"end":23000}}}]
+        """.trimIndent()
+        val s1 = throughputMessage(1000L, 11000L, output = 120, partJson = p1)
+        val s2 = throughputMessage(11000L, 21000L, output = 100, partJson = p2)
+        val state = AppState(messages = listOf(s1, s2))
+        val stats = state.throughputStats
+        assertNotNull(stats)
+        assertEquals(220, stats!!.totalOutputTokens)
+        assertEquals(16.0, stats.totalGenerationSeconds!!, 1e-9)
+        assertEquals(13.75, stats.averageThroughput!!, 1e-9)
+    }
+
+    @Test
+    fun `throughputStats is null when nothing contributes`() {
+        val state = AppState(
+            messages = listOf(
+                throughputMessage(1000L, 2000L, output = 0),
+                throughputMessage(3000L, null, output = 10)
+            )
+        )
+        assertNull(state.throughputStats)
+    }
 }

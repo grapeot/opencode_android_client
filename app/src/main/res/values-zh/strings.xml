@@ -120,6 +120,11 @@
     <string name="chat_context_reasoning">推理</string>
     <string name="chat_context_cached_read">缓存读</string>
     <string name="chat_context_cached_write">缓存写</string>
+    <string name="chat_context_throughput_section">生成速率</string>
+    <string name="chat_context_throughput_avg">平均速率</string>
+    <string name="chat_context_throughput_tokens">生成 token 数</string>
+    <string name="chat_context_throughput_time">生成耗时</string>
+    <string name="chat_context_no_throughput">暂无生成数据</string>
     <string name="chat_context_cost">成本</string>
     <string name="chat_context_no_cost">无成本数据</string>
     <string name="chat_context_unknown">未知</string>

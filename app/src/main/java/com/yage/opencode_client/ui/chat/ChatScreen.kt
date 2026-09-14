@@ -155,6 +155,7 @@ fun ChatScreen(
                 availableModels = state.availableModels,
                 selectedModelIndex = state.selectedModelIndex,
                 contextUsage = cachedContextUsage,
+                throughputStats = state.throughputStats,
                 sessionTodos = state.sessionTodos[state.currentSessionId ?: ""] ?: emptyList(),
                 aiUsageEnabled = state.aiUsageDashboardUrl.isNotBlank() && state.availableModels.getOrNull(state.selectedModelIndex)?.providerId in setOf("openai", "zai-coding-plan", "ollama-cloud"),
                 selectedAIUsageQuota = state.selectedAIUsageQuota,

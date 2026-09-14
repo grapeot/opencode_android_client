@@ -121,6 +121,11 @@
     <string name="chat_context_reasoning">Reasoning</string>
     <string name="chat_context_cached_read">Cached read</string>
     <string name="chat_context_cached_write">Cached write</string>
+    <string name="chat_context_throughput_section">Throughput</string>
+    <string name="chat_context_throughput_avg">Average rate</string>
+    <string name="chat_context_throughput_tokens">Generated tokens</string>
+    <string name="chat_context_throughput_time">Generation time</string>
+    <string name="chat_context_no_throughput">No generation data yet</string>
     <string name="chat_context_cost">Cost</string>
     <string name="chat_context_no_cost">No cost data</string>
     <string name="chat_context_unknown">Unknown</string>

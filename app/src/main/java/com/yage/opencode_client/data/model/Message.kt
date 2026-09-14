@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.util.Locale
 
 @Serializable
 data class Message(
@@ -76,13 +77,71 @@ data class Message(
         get() = model ?: (if (providerId != null && modelId != null) {
             ModelInfo(providerId, modelId)
         } else null)
+
+    /** Tokens the model actually emitted: visible output plus reasoning.
+     *  Input and cache reads/writes are not generated tokens. */
+    val generatedTokens: Int
+        get() = (tokens?.output ?: 0) + (tokens?.reasoning ?: 0)
+
+    /** Step wall-clock in seconds (created -> completed). Null while the step
+     *  is incomplete (streaming) or when either bound is missing/non-positive. */
+    val stepSeconds: Double?
+        get() {
+            val created = time?.created ?: return null
+            val completed = time?.completed ?: return null
+            val ms = completed - created
+            if (ms <= 0) return null
+            return ms / 1000.0
+        }
+}
+
+/** Numerator and denominator for one step's throughput, already tool-adjusted.
+ *  Shared by the per-message footer and the session aggregate so the two
+ *  displays cannot drift. */
+data class ThroughputComponents(
+    val generatedTokens: Int,
+    val effectiveSeconds: Double
+) {
+    val throughput: Double
+        get() = generatedTokens / effectiveSeconds
 }
 
 @Serializable
 data class MessageWithParts(
     val info: Message,
     val parts: List<Part> = emptyList()
-)
+) {
+    /** Wall-clock this step spent inside its tools (sum of state.time). Each
+     *  part only contributes when both bounds exist and end > start, so the
+     *  sum is always >= 0. Zero when the server recorded no tool timing. */
+    val toolRunSeconds: Double
+        get() = parts.sumOf { it.toolRunSeconds ?: 0.0 }
+
+    /** Numerator/denominator pair for this step's throughput, with the step's
+     *  tool execution removed from the denominator. Falls back to the raw step
+     *  window when subtracting tool time would leave nothing positive, and
+     *  returns null when there is no completed step window or no generated
+     *  tokens (e.g. mid-stream). */
+    fun throughputComponents(): ThroughputComponents? {
+        val window = info.stepSeconds ?: return null
+        val generated = info.generatedTokens
+        if (generated <= 0) return null
+        val adjusted = window - toolRunSeconds
+        val seconds = if (adjusted > 0) adjusted else window
+        if (seconds <= 0) return null
+        return ThroughputComponents(generated, seconds)
+    }
+
+    /** Shared tokens/second formatter: integer when >= 10, one decimal below.
+     *  Used by both the message footer and the Context sheet so the two can
+     *  never drift. */
+    companion object {
+        fun throughputText(value: Double): String {
+            val text = if (value >= 10) Math.round(value).toString() else String.format(Locale.US, "%.1f", value)
+            return "$text t/s"
+        }
+    }
+}
 
 data class ComposerImageAttachment(
     val id: String,
@@ -140,6 +199,18 @@ data class Part(
     val toolReason: String? get() = state?.title
     val toolInputSummary: String? get() = state?.inputSummary
     val toolOutput: String? get() = state?.output
+
+    /** Wall-clock this tool itself ran, from state.time. Null unless both
+     *  bounds exist and end > start (mirrors iOS Message.swift:464-469), so a
+     *  running or malformed tool contributes nothing to throughput
+     *  denominators. */
+    val toolRunSeconds: Double?
+        get() {
+            val start = state?.runStartMillis ?: return null
+            val end = state?.runEndMillis ?: return null
+            if (end <= start) return null
+            return (end - start) / 1000.0
+        }
 
     val toolTodos: List<TodoItem>
         get() {
@@ -215,7 +286,12 @@ data class PartState(
     val inputSummary: String? = null,
     val output: String? = null,
     val pathFromInput: String? = null,
-    val todos: List<TodoItem>? = null
+    val todos: List<TodoItem>? = null,
+    /** Tool execution bounds from state.time, in epoch milliseconds. Doubles
+     *  because the server may emit Int or Double-encoded numbers. Null while
+     *  running or when the server recorded no timing. */
+    val runStartMillis: Double? = null,
+    val runEndMillis: Double? = null
 )
 
 object PartStateSerializer : kotlinx.serialization.KSerializer<PartState> {
@@ -250,6 +326,14 @@ object PartStateSerializer : kotlinx.serialization.KSerializer<PartState> {
                 var inputSummary: String? = null
                 var pathFromInput: String? = null
                 var todos: List<TodoItem>? = null
+                var runStartMillis: Double? = null
+                var runEndMillis: Double? = null
+
+                val timeObj = element["time"] as? JsonObject
+                if (timeObj != null) {
+                    runStartMillis = (timeObj["start"] as? JsonPrimitive)?.content?.toDoubleOrNull()
+                    runEndMillis = (timeObj["end"] as? JsonPrimitive)?.content?.toDoubleOrNull()
+                }
 
                 val inputObj = element["input"]
                 if (inputObj is JsonPrimitive) {
@@ -296,7 +380,9 @@ object PartStateSerializer : kotlinx.serialization.KSerializer<PartState> {
                     inputSummary = inputSummary,
                     output = output,
                     pathFromInput = pathFromInput,
-                    todos = todos
+                    todos = todos,
+                    runStartMillis = runStartMillis,
+                    runEndMillis = runEndMillis
                 )
             }
             else -> PartState("…")

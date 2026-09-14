@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import com.yage.opencode_client.R
 import com.yage.opencode_client.data.model.AIUsageQuota
 import com.yage.opencode_client.data.model.AIUsageQuotaSnapshot
+import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.model.TodoItem
@@ -75,6 +76,7 @@ internal data class ChatTopBarState(
     val availableModels: List<AppState.ModelOption>,
     val selectedModelIndex: Int,
     val contextUsage: AppState.ContextUsage?,
+    val throughputStats: AppState.ThroughputStats? = null,
     val sessionTodos: List<TodoItem> = emptyList(),
     val aiUsageEnabled: Boolean = false,
     val selectedAIUsageQuota: AIUsageQuota? = null,
@@ -483,6 +485,7 @@ internal fun ChatTopBar(
     if (showContextDialog) {
         ContextUsageDialog(
             usage = state.contextUsage,
+            throughputStats = state.throughputStats,
             onDismiss = { showContextDialog = false }
         )
     }
@@ -491,6 +494,7 @@ internal fun ChatTopBar(
 @Composable
 private fun ContextUsageDialog(
     usage: AppState.ContextUsage?,
+    throughputStats: AppState.ThroughputStats?,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -498,28 +502,50 @@ private fun ContextUsageDialog(
         title = { Text(stringResource(R.string.chat_context)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (usage == null) {
+                if (usage == null && throughputStats?.averageThroughput == null) {
                     Text(
                         stringResource(R.string.chat_no_usage_data),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    ContextUsageSection(stringResource(R.string.chat_context_model_section)) {
-                        ContextUsageRow(stringResource(R.string.chat_context_provider), usage.providerId ?: stringResource(R.string.chat_context_unknown))
-                        ContextUsageRow(stringResource(R.string.chat_context_model), usage.modelId ?: stringResource(R.string.chat_context_unknown))
-                        ContextUsageRow(stringResource(R.string.chat_context_limit), formatCount(usage.contextLimit))
+                    usage?.let { u ->
+                        ContextUsageSection(stringResource(R.string.chat_context_model_section)) {
+                            ContextUsageRow(stringResource(R.string.chat_context_provider), u.providerId ?: stringResource(R.string.chat_context_unknown))
+                            ContextUsageRow(stringResource(R.string.chat_context_model), u.modelId ?: stringResource(R.string.chat_context_unknown))
+                            ContextUsageRow(stringResource(R.string.chat_context_limit), formatCount(u.contextLimit))
+                        }
+                        ContextUsageSection(stringResource(R.string.chat_context_tokens)) {
+                            ContextUsageRow(stringResource(R.string.chat_context_total), formatCount(u.totalTokens))
+                            ContextUsageRow(stringResource(R.string.chat_context_input), formatOptionalCount(u.inputTokens))
+                            ContextUsageRow(stringResource(R.string.chat_context_output), formatOptionalCount(u.outputTokens))
+                            ContextUsageRow(stringResource(R.string.chat_context_reasoning), formatOptionalCount(u.reasoningTokens))
+                            ContextUsageRow(stringResource(R.string.chat_context_cached_read), formatOptionalCount(u.cachedReadTokens))
+                            ContextUsageRow(stringResource(R.string.chat_context_cached_write), formatOptionalCount(u.cachedWriteTokens))
+                        }
                     }
-                    ContextUsageSection(stringResource(R.string.chat_context_tokens)) {
-                        ContextUsageRow(stringResource(R.string.chat_context_total), formatCount(usage.totalTokens))
-                        ContextUsageRow(stringResource(R.string.chat_context_input), formatOptionalCount(usage.inputTokens))
-                        ContextUsageRow(stringResource(R.string.chat_context_output), formatOptionalCount(usage.outputTokens))
-                        ContextUsageRow(stringResource(R.string.chat_context_reasoning), formatOptionalCount(usage.reasoningTokens))
-                        ContextUsageRow(stringResource(R.string.chat_context_cached_read), formatOptionalCount(usage.cachedReadTokens))
-                        ContextUsageRow(stringResource(R.string.chat_context_cached_write), formatOptionalCount(usage.cachedWriteTokens))
+                    if (throughputStats?.averageThroughput != null) {
+                        val stats = throughputStats
+                        ContextUsageSection(stringResource(R.string.chat_context_throughput_section)) {
+                            ContextUsageRow(stringResource(R.string.chat_context_throughput_avg), MessageWithParts.throughputText(stats.averageThroughput))
+                            ContextUsageRow(stringResource(R.string.chat_context_throughput_tokens), formatCount(stats.totalOutputTokens))
+                            if (stats.totalGenerationSeconds != null) {
+                                ContextUsageRow(stringResource(R.string.chat_context_throughput_time), formatGenerationSeconds(stats.totalGenerationSeconds))
+                            }
+                        }
+                    } else {
+                        ContextUsageSection(stringResource(R.string.chat_context_throughput_section)) {
+                            Text(
+                                stringResource(R.string.chat_context_no_throughput),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                    ContextUsageSection(stringResource(R.string.chat_context_cost)) {
-                        ContextUsageRow(stringResource(R.string.chat_context_cost), usage.cost?.let { "$" + String.format(Locale.US, "%.4f", it) } ?: stringResource(R.string.chat_context_no_cost))
+                    usage?.let { u ->
+                        ContextUsageSection(stringResource(R.string.chat_context_cost)) {
+                            ContextUsageRow(stringResource(R.string.chat_context_cost), u.cost?.let { "$" + String.format(Locale.US, "%.4f", it) } ?: stringResource(R.string.chat_context_no_cost))
+                        }
                     }
                 }
             }
@@ -572,6 +598,14 @@ private fun ContextUsageRow(label: String, value: String) {
 private fun formatCount(value: Int): String = String.format(Locale.US, "%,d", value)
 
 private fun formatOptionalCount(value: Int?): String = value?.let(::formatCount) ?: "-"
+
+/** "48.2s" below a minute, "1m 5s" above (matches iOS ContextUsageView). */
+private fun formatGenerationSeconds(seconds: Double): String {
+    if (seconds < 60) return String.format(Locale.US, "%.1fs", seconds)
+    val minutes = (seconds / 60).toInt()
+    val remainder = (seconds % 60).toInt()
+    return "${minutes}m ${remainder}s"
+}
 
 @Composable
 internal fun ContextUsageRing(usage: AppState.ContextUsage?) {
