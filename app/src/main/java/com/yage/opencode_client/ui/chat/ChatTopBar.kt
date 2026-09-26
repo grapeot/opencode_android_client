@@ -1,7 +1,6 @@
 package com.yage.opencode_client.ui.chat
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,8 +62,7 @@ import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
 import com.yage.opencode_client.ui.theme.BrandGold
-import com.yage.opencode_client.ui.theme.QuotaStaleDark
-import com.yage.opencode_client.ui.theme.QuotaStaleLight
+import com.yage.opencode_client.ui.theme.BrandPrimary
 import java.util.Locale
 
 internal data class ChatTopBarState(
@@ -82,7 +80,6 @@ internal data class ChatTopBarState(
     val throughputStats: AppState.ThroughputStats? = null,
     val sessionTodos: List<TodoItem> = emptyList(),
     val aiUsageEnabled: Boolean = false,
-    val aiUsageWindowLabel: String = "5h",
     val aiUsageStale: Boolean = false,
     val selectedAIUsageQuota: AIUsageQuota? = null,
     val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
@@ -294,27 +291,26 @@ internal fun ChatTopBar(
                         }
                     }
 
-                    if (state.aiUsageEnabled) {
-                        val quota = state.selectedAIUsageQuota
-                        val badgeText = if (quota == null) "-- @ ${state.aiUsageWindowLabel}" else "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                    val quota = state.selectedAIUsageQuota
+                    if (state.aiUsageEnabled && quota != null) {
+                        val badgeText = "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                        val badgeColor = if (state.aiUsageStale) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            BrandPrimary
+                        }
                         Surface(
                             onClick = { showAIUsageSheet = true },
                             shape = RoundedCornerShape(50),
                             color = Color.Transparent,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+                            border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f)),
                             modifier = Modifier.testTag("ai_usage.badge")
                         ) {
                             Text(
                                 text = badgeText,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = when {
-                                    quota != null && state.aiUsageStale -> if (isSystemInDarkTheme()) QuotaStaleDark else QuotaStaleLight
-                                    quota == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    quota.clampedRemainingPercentage <= 10 -> MaterialTheme.colorScheme.error
-                                    quota.clampedRemainingPercentage <= 20 -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                color = badgeColor,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                                 maxLines = 1
                             )

@@ -331,9 +331,7 @@ data class AppState(
     val selectedAIUsageQuota: AIUsageQuota?
         get() {
             val key = selectedModelQuotaKey ?: return null
-            return aiUsageQuotaSnapshot?.quotas?.firstOrNull {
-                it.provider.equals(key.provider, ignoreCase = true) && it.label.equals(key.label, ignoreCase = true)
-            }
+            return aiUsageQuotaSnapshot?.quotas?.let { resolveQuota(it, key) }
         }
 
     val isSelectedModelQuotaStale: Boolean
