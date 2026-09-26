@@ -1,5 +1,9 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-09-26 — v0.1.20260926 release
+
+- `versionName` 升至 `0.1.20260926`，`versionCode` 升至 19。GitHub Release tag `v0.1.20260926`。
+
 ## 2026-09-26 — Grok quota pill
 
 - 选中 `xai` 时 toolbar 不显示 quota pill。显示条件只包含 `openai` / `zai-coding-plan` / `ollama-cloud`，查找还写死 `5h`。
