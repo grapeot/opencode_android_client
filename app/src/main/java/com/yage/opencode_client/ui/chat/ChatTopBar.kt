@@ -311,14 +311,20 @@ internal fun ChatTopBar(
                             border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f)),
                             modifier = Modifier.testTag("ai_usage.badge")
                         ) {
-                            Text(
-                                text = badgeText,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = badgeColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                maxLines = 1
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .heightIn(min = 14.dp)
+                            ) {
+                                Text(
+                                    text = badgeText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = badgeColor,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
 

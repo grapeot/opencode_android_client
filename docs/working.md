@@ -4,7 +4,7 @@
 
 - 选中 `xai` 时 toolbar 不显示 quota pill。显示条件只包含 `openai` / `zai-coding-plan` / `ollama-cloud`，查找还写死 `5h`。
 - `xai` 映射到 dashboard 的 `grok` / `Weekly`。没有快照时 pill 用该窗口名，不再写死 `5h`。
-- 进入 Chat 就拉取。有数字显示百分比；还没有数字时只显示窗口名，不画 `--`。一小时内成功拉取为品牌蓝，超过一小时或刷新失败为灰色。
+- 进入 Chat 就拉取。有数字显示百分比；还没有数字时只显示窗口名，不画 `--`。一小时内成功拉取为品牌蓝，超过一小时或刷新失败为灰色。quota pill 的内边距和最小高度与模型 pill 对齐。
 
 ## 2026-09-21 — Docked file preview in phone chat
 
