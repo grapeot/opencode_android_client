@@ -80,6 +80,7 @@ internal data class ChatTopBarState(
     val throughputStats: AppState.ThroughputStats? = null,
     val sessionTodos: List<TodoItem> = emptyList(),
     val aiUsageEnabled: Boolean = false,
+    val aiUsageWindowLabel: String = "",
     val aiUsageStale: Boolean = false,
     val selectedAIUsageQuota: AIUsageQuota? = null,
     val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
@@ -292,12 +293,16 @@ internal fun ChatTopBar(
                     }
 
                     val quota = state.selectedAIUsageQuota
-                    if (state.aiUsageEnabled && quota != null) {
-                        val badgeText = "${quota.clampedRemainingPercentage}% @ ${quota.label}"
-                        val badgeColor = if (state.aiUsageStale) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                    if (state.aiUsageEnabled) {
+                        val badgeText = if (quota == null) {
+                            state.aiUsageWindowLabel
                         } else {
+                            "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                        }
+                        val badgeColor = if (quota != null && !state.aiUsageStale) {
                             BrandPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         }
                         Surface(
                             onClick = { showAIUsageSheet = true },

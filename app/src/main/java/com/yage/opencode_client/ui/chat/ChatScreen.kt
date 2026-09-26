@@ -55,6 +55,9 @@ fun ChatScreen(
     showSessionListInTopBar: Boolean = true
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(state.aiUsageDashboardUrl) {
+        if (state.aiUsageDashboardUrl.isNotBlank()) viewModel.loadAIUsage()
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val aiBuilderToken = sanitizeBearerToken(viewModel.getAIBuilderSettings().token)
@@ -212,6 +215,7 @@ fun ChatScreen(
                 throughputStats = state.throughputStats,
                 sessionTodos = state.sessionTodos[state.currentSessionId ?: ""] ?: emptyList(),
                 aiUsageEnabled = state.aiUsageDashboardUrl.isNotBlank() && state.selectedModelQuotaKey != null,
+                aiUsageWindowLabel = state.selectedModelQuotaKey?.label.orEmpty(),
                 aiUsageStale = state.isSelectedModelQuotaStale,
                 selectedAIUsageQuota = state.selectedAIUsageQuota,
                 aiUsageQuotaSnapshot = state.aiUsageQuotaSnapshot,
