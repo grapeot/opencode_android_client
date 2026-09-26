@@ -325,16 +325,14 @@ data class AppState(
             )
         }
 
+    val selectedModelQuotaKey: AIUsageQuotaKey?
+        get() = primaryQuotaKey(availableModels.getOrNull(selectedModelIndex)?.providerId)
+
     val selectedAIUsageQuota: AIUsageQuota?
         get() {
-            val provider = when (availableModels.getOrNull(selectedModelIndex)?.providerId) {
-                "openai" -> "codex"
-                "zai-coding-plan" -> "glm"
-                "ollama-cloud" -> "ollama"
-                else -> return null
-            }
+            val key = selectedModelQuotaKey ?: return null
             return aiUsageQuotaSnapshot?.quotas?.firstOrNull {
-                it.provider.equals(provider, ignoreCase = true) && it.label.equals("5h", ignoreCase = true)
+                it.provider.equals(key.provider, ignoreCase = true) && it.label.equals(key.label, ignoreCase = true)
             }
         }
 

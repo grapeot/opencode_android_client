@@ -29,3 +29,13 @@ data class AIUsageQuotaSnapshot(
     val fetchedAtMs: Long,
     val quotas: List<AIUsageQuota>
 )
+
+data class AIUsageQuotaKey(val provider: String, val label: String)
+
+fun primaryQuotaKey(providerId: String?): AIUsageQuotaKey? = when (providerId) {
+    "openai" -> AIUsageQuotaKey("codex", "5h")
+    "zai-coding-plan" -> AIUsageQuotaKey("glm", "5h")
+    "ollama-cloud" -> AIUsageQuotaKey("ollama", "5h")
+    "xai" -> AIUsageQuotaKey("grok", "Weekly")
+    else -> null
+}

@@ -161,6 +161,7 @@ private fun providerDisplayName(provider: String): String = when (provider.lower
     "codex" -> "OpenAI / Codex"
     "glm" -> "Z.ai / GLM"
     "ollama" -> "Ollama Cloud"
+    "grok" -> "Grok"
     "claude" -> "Claude"
     "antigravity" -> "Antigravity"
     else -> provider

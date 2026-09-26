@@ -1,0 +1,45 @@
+package com.yage.opencode_client
+
+import com.yage.opencode_client.data.model.AIUsageQuota
+import com.yage.opencode_client.data.model.AIUsageQuotaKey
+import com.yage.opencode_client.data.model.AIUsageQuotaSnapshot
+import com.yage.opencode_client.data.model.ModelShortlistItem
+import com.yage.opencode_client.data.model.primaryQuotaKey
+import com.yage.opencode_client.ui.AppState
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class AIUsageQuotaMappingTest {
+    @Test
+    fun `maps supported models to quota windows`() {
+        assertEquals(AIUsageQuotaKey("codex", "5h"), primaryQuotaKey("openai"))
+        assertEquals(AIUsageQuotaKey("glm", "5h"), primaryQuotaKey("zai-coding-plan"))
+        assertEquals(AIUsageQuotaKey("ollama", "5h"), primaryQuotaKey("ollama-cloud"))
+        assertEquals(AIUsageQuotaKey("grok", "Weekly"), primaryQuotaKey("xai"))
+        assertNull(primaryQuotaKey("google"))
+    }
+
+    @Test
+    fun `selected grok model resolves weekly quota`() {
+        val quota = AIUsageQuota(
+            provider = "grok",
+            label = "Weekly",
+            usedPercentage = 18,
+            remainingPercentage = 82
+        )
+        val state = AppState(
+            selectedModelIndex = 0,
+            modelShortlist = listOf(
+                ModelShortlistItem("xai", "grok-4.7", "Grok 4.7", "Grok")
+            ),
+            aiUsageQuotaSnapshot = AIUsageQuotaSnapshot(
+                generatedAt = "2026-09-26T09:00:00",
+                fetchedAtMs = 0,
+                quotas = listOf(quota)
+            )
+        )
+
+        assertEquals(quota, state.selectedAIUsageQuota)
+    }
+}
