@@ -21,6 +21,9 @@ val BrandPrimary = Color(0xFF3B82F6)       // shared primary, both themes
 val BrandPrimaryLight = Color(0xFF3B82F6)  // same vivid blue on light
 /** Gold #D9A621 — the ONLY secondary emphasis, reserved for the transient "AI working" state. */
 val BrandGold = Color(0xFFD9A621)
+/** Muted yellow for a quota pill older than 10 minutes. Matches iOS DesignColors.Semantic.stale. */
+val QuotaStaleLight = Color(red = 0.55f, green = 0.46f, blue = 0.18f)
+val QuotaStaleDark = Color(red = 0.76f, green = 0.68f, blue = 0.40f)
 
 /**
  * Stop button red. Material's default error red (#B3261E) read as too dark AND

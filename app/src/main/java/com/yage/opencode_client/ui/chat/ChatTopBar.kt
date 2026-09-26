@@ -1,6 +1,7 @@
 package com.yage.opencode_client.ui.chat
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,6 +63,8 @@ import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
 import com.yage.opencode_client.ui.theme.BrandGold
+import com.yage.opencode_client.ui.theme.QuotaStaleDark
+import com.yage.opencode_client.ui.theme.QuotaStaleLight
 import java.util.Locale
 
 internal data class ChatTopBarState(
@@ -80,6 +83,7 @@ internal data class ChatTopBarState(
     val sessionTodos: List<TodoItem> = emptyList(),
     val aiUsageEnabled: Boolean = false,
     val aiUsageWindowLabel: String = "5h",
+    val aiUsageStale: Boolean = false,
     val selectedAIUsageQuota: AIUsageQuota? = null,
     val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
     val isLoadingAIUsage: Boolean = false,
@@ -305,6 +309,7 @@ internal fun ChatTopBar(
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = when {
+                                    quota != null && state.aiUsageStale -> if (isSystemInDarkTheme()) QuotaStaleDark else QuotaStaleLight
                                     quota == null -> MaterialTheme.colorScheme.onSurfaceVariant
                                     quota.clampedRemainingPercentage <= 10 -> MaterialTheme.colorScheme.error
                                     quota.clampedRemainingPercentage <= 20 -> MaterialTheme.colorScheme.tertiary

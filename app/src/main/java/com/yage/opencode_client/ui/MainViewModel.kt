@@ -336,6 +336,12 @@ data class AppState(
             }
         }
 
+    val isSelectedModelQuotaStale: Boolean
+        get() {
+            val snapshot = aiUsageQuotaSnapshot ?: return false
+            return isQuotaSnapshotStale(snapshot.fetchedAtMs, System.currentTimeMillis(), aiUsageError != null)
+        }
+
     private val providerModelsIndex: Map<String, ProviderModel>
         get() = buildProviderModelsIndex(providers)
 
@@ -629,7 +635,7 @@ class MainViewModel @Inject constructor(
             _state.update { it.copy(isLoadingAIUsage = true, aiUsageError = null) }
             aiUsageClient.fetchQuotas(url)
                 .onSuccess { snapshot ->
-                    _state.update { it.copy(aiUsageQuotaSnapshot = snapshot, isLoadingAIUsage = false) }
+                    _state.update { it.copy(aiUsageQuotaSnapshot = snapshot, isLoadingAIUsage = false, aiUsageError = null) }
                 }
                 .onFailure { error ->
                     _state.update { it.copy(isLoadingAIUsage = false, aiUsageError = error.message) }
@@ -655,7 +661,8 @@ class MainViewModel @Inject constructor(
                         it.copy(
                             aiUsageQuotaSnapshot = snapshot,
                             isLoadingAIUsage = false,
-                            isRefreshingAIUsage = false
+                            isRefreshingAIUsage = false,
+                            aiUsageError = null
                         )
                     }
                 }

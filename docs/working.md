@@ -4,7 +4,7 @@
 
 - 选中 `xai` 时 toolbar 不显示 quota pill。显示条件只包含 `openai` / `zai-coding-plan` / `ollama-cloud`，查找还写死 `5h`。
 - `xai` 映射到 dashboard 的 `grok` / `Weekly`。没有快照时 pill 用该窗口名，不再写死 `5h`。
-- Android 没有 iOS 那套 10 分钟 stale 淡黄色，这次不补。
+- stale 与 iOS 对齐：本地拉取超过 10 分钟，或刷新失败仍留着旧快照。pill 继续显示百分比，字色用同一组淡黄色，描边不变黄。
 
 ## 2026-09-21 — Docked file preview in phone chat
 

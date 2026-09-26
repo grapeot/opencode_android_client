@@ -4,10 +4,13 @@ import com.yage.opencode_client.data.model.AIUsageQuota
 import com.yage.opencode_client.data.model.AIUsageQuotaKey
 import com.yage.opencode_client.data.model.AIUsageQuotaSnapshot
 import com.yage.opencode_client.data.model.ModelShortlistItem
+import com.yage.opencode_client.data.model.isQuotaSnapshotStale
 import com.yage.opencode_client.data.model.primaryQuotaKey
 import com.yage.opencode_client.ui.AppState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AIUsageQuotaMappingTest {
@@ -41,5 +44,27 @@ class AIUsageQuotaMappingTest {
         )
 
         assertEquals(quota, state.selectedAIUsageQuota)
+    }
+
+    @Test
+    fun `quota snapshot is stale after ten minutes or a failed refresh`() {
+        val fetched = 1_000_000L
+        assertFalse(isQuotaSnapshotStale(fetched, fetched + 600_000, hasError = false))
+        assertTrue(isQuotaSnapshotStale(fetched, fetched + 600_001, hasError = false))
+        assertTrue(isQuotaSnapshotStale(fetched, fetched + 1, hasError = true))
+    }
+
+    @Test
+    fun `selected model quota is stale when the snapshot failed`() {
+        val state = AppState(
+            aiUsageError = "refresh failed",
+            aiUsageQuotaSnapshot = AIUsageQuotaSnapshot(
+                generatedAt = null,
+                fetchedAtMs = System.currentTimeMillis(),
+                quotas = emptyList()
+            )
+        )
+
+        assertTrue(state.isSelectedModelQuotaStale)
     }
 }

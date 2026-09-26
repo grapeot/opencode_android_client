@@ -213,6 +213,7 @@ fun ChatScreen(
                 sessionTodos = state.sessionTodos[state.currentSessionId ?: ""] ?: emptyList(),
                 aiUsageEnabled = state.aiUsageDashboardUrl.isNotBlank() && state.selectedModelQuotaKey != null,
                 aiUsageWindowLabel = state.selectedModelQuotaKey?.label ?: "5h",
+                aiUsageStale = state.isSelectedModelQuotaStale,
                 selectedAIUsageQuota = state.selectedAIUsageQuota,
                 aiUsageQuotaSnapshot = state.aiUsageQuotaSnapshot,
                 isLoadingAIUsage = state.isLoadingAIUsage,

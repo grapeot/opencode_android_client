@@ -39,3 +39,10 @@ fun primaryQuotaKey(providerId: String?): AIUsageQuotaKey? = when (providerId) {
     "xai" -> AIUsageQuotaKey("grok", "Weekly")
     else -> null
 }
+
+const val QUOTA_STALE_AFTER_MS = 600_000L
+
+fun isQuotaSnapshotStale(fetchedAtMs: Long, nowMs: Long, hasError: Boolean): Boolean {
+    if (hasError) return true
+    return nowMs - fetchedAtMs > QUOTA_STALE_AFTER_MS
+}
