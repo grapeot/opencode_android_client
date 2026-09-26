@@ -325,17 +325,19 @@ data class AppState(
             )
         }
 
+    val selectedModelQuotaKey: AIUsageQuotaKey?
+        get() = primaryQuotaKey(availableModels.getOrNull(selectedModelIndex)?.providerId)
+
     val selectedAIUsageQuota: AIUsageQuota?
         get() {
-            val provider = when (availableModels.getOrNull(selectedModelIndex)?.providerId) {
-                "openai" -> "codex"
-                "zai-coding-plan" -> "glm"
-                "ollama-cloud" -> "ollama"
-                else -> return null
-            }
-            return aiUsageQuotaSnapshot?.quotas?.firstOrNull {
-                it.provider.equals(provider, ignoreCase = true) && it.label.equals("5h", ignoreCase = true)
-            }
+            val key = selectedModelQuotaKey ?: return null
+            return aiUsageQuotaSnapshot?.quotas?.let { resolveQuota(it, key) }
+        }
+
+    val isSelectedModelQuotaStale: Boolean
+        get() {
+            val snapshot = aiUsageQuotaSnapshot ?: return false
+            return isQuotaSnapshotStale(snapshot.fetchedAtMs, System.currentTimeMillis(), aiUsageError != null)
         }
 
     private val providerModelsIndex: Map<String, ProviderModel>
@@ -631,7 +633,7 @@ class MainViewModel @Inject constructor(
             _state.update { it.copy(isLoadingAIUsage = true, aiUsageError = null) }
             aiUsageClient.fetchQuotas(url)
                 .onSuccess { snapshot ->
-                    _state.update { it.copy(aiUsageQuotaSnapshot = snapshot, isLoadingAIUsage = false) }
+                    _state.update { it.copy(aiUsageQuotaSnapshot = snapshot, isLoadingAIUsage = false, aiUsageError = null) }
                 }
                 .onFailure { error ->
                     _state.update { it.copy(isLoadingAIUsage = false, aiUsageError = error.message) }
@@ -657,7 +659,8 @@ class MainViewModel @Inject constructor(
                         it.copy(
                             aiUsageQuotaSnapshot = snapshot,
                             isLoadingAIUsage = false,
-                            isRefreshingAIUsage = false
+                            isRefreshingAIUsage = false,
+                            aiUsageError = null
                         )
                     }
                 }

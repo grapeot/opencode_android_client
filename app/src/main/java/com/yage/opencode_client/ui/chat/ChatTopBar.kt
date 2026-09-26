@@ -62,6 +62,7 @@ import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
 import com.yage.opencode_client.ui.theme.BrandGold
+import com.yage.opencode_client.ui.theme.BrandPrimary
 import java.util.Locale
 
 internal data class ChatTopBarState(
@@ -79,6 +80,8 @@ internal data class ChatTopBarState(
     val throughputStats: AppState.ThroughputStats? = null,
     val sessionTodos: List<TodoItem> = emptyList(),
     val aiUsageEnabled: Boolean = false,
+    val aiUsageWindowLabel: String = "",
+    val aiUsageStale: Boolean = false,
     val selectedAIUsageQuota: AIUsageQuota? = null,
     val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
     val isLoadingAIUsage: Boolean = false,
@@ -289,29 +292,39 @@ internal fun ChatTopBar(
                         }
                     }
 
+                    val quota = state.selectedAIUsageQuota
                     if (state.aiUsageEnabled) {
-                        val quota = state.selectedAIUsageQuota
-                        val badgeText = if (quota == null) "-- @ 5h" else "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                        val badgeText = if (quota == null) {
+                            state.aiUsageWindowLabel
+                        } else {
+                            "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                        }
+                        val badgeColor = if (quota != null && !state.aiUsageStale) {
+                            BrandPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                         Surface(
                             onClick = { showAIUsageSheet = true },
                             shape = RoundedCornerShape(50),
                             color = Color.Transparent,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+                            border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f)),
                             modifier = Modifier.testTag("ai_usage.badge")
                         ) {
-                            Text(
-                                text = badgeText,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = when {
-                                    quota == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    quota.clampedRemainingPercentage <= 10 -> MaterialTheme.colorScheme.error
-                                    quota.clampedRemainingPercentage <= 20 -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                maxLines = 1
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .heightIn(min = 14.dp)
+                            ) {
+                                Text(
+                                    text = badgeText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = badgeColor,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
 
