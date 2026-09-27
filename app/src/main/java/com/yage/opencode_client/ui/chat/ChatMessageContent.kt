@@ -701,35 +701,33 @@ private fun ToolCallsRow(
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Card(
-        modifier = modifier.padding(vertical = 4.dp).testTag("toolcard.toolcalls"),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${parts.size} tool calls",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            if (expanded) {
-                Spacer(modifier = Modifier.size(8.dp))
-                parts.forEach { part ->
-                    ToolCard(part, onFileClick, Modifier.fillMaxWidth())
-                }
+    // Weight-reduced: no card surface on the collapsed row; expanded content is
+    // the individual ToolCards, which keep their own surface.
+    Column(modifier = modifier.padding(vertical = 4.dp).testTag("toolcard.toolcalls")) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${parts.size} tool calls",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
+        if (expanded) {
+            parts.forEach { part ->
+                ToolCard(part, onFileClick, Modifier.fillMaxWidth())
             }
         }
     }
@@ -837,53 +835,48 @@ private fun ReasoningCard(
         if (isStreaming) expanded = true
     }
 
-    Card(
-        modifier = modifier.padding(vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    // Weight-reduced process row (no card surface): quiet single-line header,
+    // whole row toggles, expanded thinking stays full width for readability.
+    Column(modifier = modifier.padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !isStreaming) { expanded = !expanded }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Psychology,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                title ?: "Thinking",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (!isStreaming) {
                 Icon(
-                    Icons.Default.Psychology,
-                    contentDescription = null,
+                    if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    title ?: "Thinking",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                if (!isStreaming) {
-                    IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
-                            contentDescription = if (expanded) "Collapse" else "Expand",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
             }
-            if ((expanded || isStreaming) && text.isNotBlank()) {
-                val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
-                SelectionContainer {
-                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
-                        Markdown(
-                            content = normalizedText,
-                            typography = markdownTypographyCompact(),
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            imageTransformer = DataUriImageTransformer
-                        )
-                    }
+        }
+        if ((expanded || isStreaming) && text.isNotBlank()) {
+            val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
+            SelectionContainer {
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                    Markdown(
+                        content = normalizedText,
+                        typography = markdownTypographyCompact(),
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        imageTransformer = DataUriImageTransformer
+                    )
                 }
             }
         }
