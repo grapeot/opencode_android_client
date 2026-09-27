@@ -701,14 +701,15 @@ private fun ToolCallsRow(
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // Weight-reduced: no card surface on the collapsed row; expanded content is
-    // the individual ToolCards, which keep their own surface.
+    // Weight-reduced: no card surface on the collapsed row; the header indents
+    // 12dp to align with the answer body, while the expanded ToolCards stay
+    // full width (same width as FileCard tiles).
     Column(modifier = modifier.padding(vertical = 4.dp).testTag("toolcard.toolcalls")) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { expanded = !expanded }
-                .padding(vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -837,12 +838,17 @@ private fun ReasoningCard(
 
     // Weight-reduced process row (no card surface): quiet single-line header,
     // whole row toggles, expanded thinking stays full width for readability.
+    // The 12dp horizontal padding aligns header/text with the answer body; the
+    // streaming item's outer Box carries its own 12dp, so the row sits at the
+    // same offset while streaming and once it lands in the message.
+    // No clickable modifier while streaming: the row is not a control then.
+    val toggle = if (isStreaming) Modifier else Modifier.clickable { expanded = !expanded }
     Column(modifier = modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !isStreaming) { expanded = !expanded }
-                .padding(vertical = 6.dp),
+                .then(toggle)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -855,7 +861,9 @@ private fun ReasoningCard(
             Text(
                 title ?: "Thinking",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.weight(1f))
             if (!isStreaming) {
@@ -874,7 +882,7 @@ private fun ReasoningCard(
                     Markdown(
                         content = normalizedText,
                         typography = markdownTypographyCompact(),
-                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 8.dp),
                         imageTransformer = DataUriImageTransformer
                     )
                 }
