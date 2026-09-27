@@ -20,7 +20,11 @@ import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.data.repository.OpenCodeRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
@@ -32,6 +36,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 class OpenCodeRepositoryTest {
 
@@ -66,6 +71,46 @@ class OpenCodeRepositoryTest {
             "http://localhost:4096",
             OpenCodeRepository.DEFAULT_SERVER
         )
+    }
+
+    @Test
+    fun `configure accepts base url with trailing slash`() = runBlocking {
+        // server.url("/") ends with "/", e.g. "http://127.0.0.1:43210/"
+        repository.configure(baseUrl = server.url("/").toString())
+
+        server.enqueue(
+            MockResponse()
+                .setBody("""{"healthy": true, "version": "1.0.0"}""")
+                .setHeader("Content-Type", "application/json")
+        )
+
+        val result = repository.checkHealth()
+        assertTrue(result.isSuccess)
+        val recorded = server.takeRequest()
+        assertEquals("/global/health", recorded.path)
+    }
+
+    @Test
+    fun `configure strips trailing slash from sse request path`() = runBlocking {
+        // server.url("/") ends with "/", e.g. "http://127.0.0.1:43210/"
+        repository.configure(baseUrl = server.url("/").toString())
+
+        server.enqueue(
+            MockResponse()
+                .setBody("data: {\"type\":\"message.updated\"}\n\n")
+                .setHeader("Content-Type", "text/event-stream")
+        )
+
+        val collector = launch { repository.connectSSE().catch { }.toList() }
+        // newEventSource blocks its thread, so take the request off the
+        // runBlocking event loop or the collector coroutine can't dispatch.
+        val recorded = withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) }
+        try {
+            assertNotNull(recorded)
+            assertEquals("/global/event", recorded?.path)
+        } finally {
+            collector.cancel()
+        }
     }
 
     @Test

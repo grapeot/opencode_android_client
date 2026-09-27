@@ -79,7 +79,8 @@ class OpenCodeRepository @Inject constructor() {
 
     @Synchronized
     fun configure(baseUrl: String, username: String? = null, password: String? = null) {
-        this.baseUrl = baseUrl
+        val normalized = if (baseUrl.startsWith("http")) baseUrl else "http://$baseUrl"
+        this.baseUrl = normalized.trimEnd('/')
         this.username = username
         this.password = password
         rebuildClients()

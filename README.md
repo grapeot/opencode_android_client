@@ -20,7 +20,7 @@ OpenCode 的原生 Android 客户端，用于远程连接 OpenCode 服务端、�
 ## 快速开始（局域网）
 
 1. 在电脑上启动 OpenCode：`opencode serve --port 4096`
-2. 打开 Android App，进入 Settings，填写服务器地址（如 `http://192.168.x.x:4096`）
+2. 打开 Android App，进入 Settings，填写服务器地址（如 `http://192.168.x.x:4096`）。缺少 `http://` 前缀时会自动补上，结尾多余的 `/` 会被自动去掉，`192.168.x.x:4096/` 与 `http://192.168.x.x:4096` 效果相同
 3. 点击 Test Connection 验证连接
 4. 在 Chat 中创建或选择 Session，开始对话
 
