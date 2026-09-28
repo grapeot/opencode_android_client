@@ -152,9 +152,7 @@ class TaskNotificationParserTest {
     }
 
     @Test
-    fun `default expand and large preview thresholds`() {
-        assertTrue(TaskNotificationParser.shouldExpandByDefault("a".repeat(500)))
-        assertFalse(TaskNotificationParser.shouldExpandByDefault("a".repeat(501)))
+    fun `large preview threshold`() {
         assertNull(TaskNotificationParser.largeMessagePreview("a".repeat(12_000)))
         assertEquals(12_000, TaskNotificationParser.largeMessagePreview("a".repeat(12_001))!!.length)
     }

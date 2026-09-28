@@ -27,7 +27,6 @@ data class TaskNotification(
 }
 
 object TaskNotificationParser {
-    const val EXPAND_THRESHOLD = 500
     const val LARGE_MESSAGE_LIMIT = 12_000
     private const val SHORT_SESSION_ID_LENGTH = 8
     private const val COMPLETED_PREFIX = "Background task completed:"
@@ -68,9 +67,6 @@ object TaskNotificationParser {
         if (stripped.isNotEmpty()) return stripped
         return shortSessionId(notification.sessionID)
     }
-
-    fun shouldExpandByDefault(resultText: String): Boolean =
-        resultText.length <= EXPAND_THRESHOLD
 
     fun largeMessagePreview(text: String): String? {
         if (text.length <= LARGE_MESSAGE_LIMIT) return null

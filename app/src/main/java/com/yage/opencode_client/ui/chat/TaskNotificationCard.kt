@@ -46,8 +46,9 @@ internal fun TaskNotificationCard(
     onOpenSession: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember(notification.sessionID, notification.resultText) {
-        mutableStateOf(TaskNotificationParser.shouldExpandByDefault(notification.resultText))
+    // 默认折叠：结论在随后 assistant 消息里，卡片正文是参考材料，用户 tap 展开。
+    var expanded by remember(notification.sessionID) {
+        mutableStateOf(false)
     }
     val statusColor = when (notification.state) {
         TaskState.COMPLETED -> AddedFile
