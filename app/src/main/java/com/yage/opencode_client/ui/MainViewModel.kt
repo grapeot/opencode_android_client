@@ -456,6 +456,7 @@ class MainViewModel @Inject constructor(
     private var lastHealthCheckTime = 0L
     private var deepLinkRouteGeneration = 0L
     private var deepLinkJob: Job? = null
+    private var childSessionJob: Job? = null
     private var hostRuntimeJob = SupervisorJob(viewModelScope.coroutineContext[Job])
     private val hostRuntimeScope: CoroutineScope
         get() = CoroutineScope(viewModelScope.coroutineContext + hostRuntimeJob)
@@ -1413,6 +1414,36 @@ class MainViewModel @Inject constructor(
         }
         loadMessages(sessionId)
         loadSessionStatus()
+    }
+
+    fun openChildSession(sessionId: String) {
+        if (sessionId.isBlank()) return
+        childSessionJob?.cancel()
+        childSessionJob = hostRuntimeScope.launch {
+            repository.getSession(sessionId)
+                .onSuccess { session ->
+                    _state.update {
+                        it.copy(
+                            sessions = upsertSession(it.sessions, session),
+                            deepLinkError = null
+                        )
+                    }
+                    if (_state.value.currentSessionId != session.id) {
+                        selectSession(session.id)
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            deepLinkError = if (error is HttpException && error.code() == 404) {
+                                DeepLinkError.SESSION_UNAVAILABLE
+                            } else {
+                                DeepLinkError.OPEN_FAILED
+                            }
+                        )
+                    }
+                }
+        }
     }
 
     fun receiveDeepLink(rawUrl: String) {

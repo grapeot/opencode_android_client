@@ -129,6 +129,19 @@ class ModelTests {
     }
 
     @Test
+    fun `Part synthetic is absent by default and only true text parts are synthetic`() {
+        val absent = json.decodeFromString<Part>("""{"id":"p1","type":"text","text":"hi"}""")
+        assertNull(absent.synthetic)
+        assertFalse(absent.isSyntheticText)
+
+        val marked = json.decodeFromString<Part>("""{"id":"p2","type":"text","text":"hi","synthetic":true}""")
+        assertTrue(marked.isSyntheticText)
+
+        val tool = json.decodeFromString<Part>("""{"id":"p3","type":"tool","synthetic":true}""")
+        assertFalse(tool.isSyntheticText)
+    }
+
+    @Test
     fun `Part type checks`() {
         val textPart = Part(id = "p1", type = "text", text = "Hello")
         assertTrue(textPart.isText)

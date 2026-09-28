@@ -176,6 +176,7 @@ data class Part(
     @SerialName("sessionID") val sessionId: String? = null,
     val type: String,
     val text: String? = null,
+    val synthetic: Boolean? = null,
     val tool: String? = null,
     @SerialName("callID") val callId: String? = null,
     val state: PartState? = null,
@@ -187,6 +188,7 @@ data class Part(
     val source: String? = null
 ) {
     val isText: Boolean get() = type == "text"
+    val isSyntheticText: Boolean get() = isText && synthetic == true
     val isReasoning: Boolean get() = type == "reasoning"
     val isTool: Boolean get() = type == "tool"
     val isPatch: Boolean get() = type == "patch"

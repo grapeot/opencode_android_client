@@ -1,5 +1,11 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-09-27 — Background task notification card
+
+- synthetic text part 且能解析成 `<task>` 信封时渲染回执卡片，不再进用户气泡。解析失败或没有 `synthetic` 时维持原渲染。
+- 展开后可打开子会话。先 `GET /session/:id`，成功再 upsert 并 `selectSession`；找不到会话走现有 deep link 错误条，不离开当前会话。
+- 结果超过 12,000 字符时只显示纯文本前缀，并提示已跳过 Markdown。
+
 ## 2026-09-27 — Agent 校验与删除假成功
 
 - 选中 agent 对照当前 server 的 `/agent` 列表重校验，避免跨 server 残留的名字（例如 `grok`）被发给只有 `build` 的 host。

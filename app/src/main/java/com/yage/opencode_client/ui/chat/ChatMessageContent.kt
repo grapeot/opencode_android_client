@@ -107,6 +107,7 @@ internal fun ChatMessageList(
     onMarkdownLinkClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit,
     onEditFromMessage: (String) -> Unit,
+    onOpenChildSession: (String) -> Unit = {},
     listState: LazyListState = rememberLazyListState()
 ) {
     val layoutInfo = listState.layoutInfo
@@ -217,7 +218,8 @@ internal fun ChatMessageList(
                     onFileClick = onFileClick,
                     onMarkdownLinkClick = onMarkdownLinkClick,
                     onForkFromMessage = onForkFromMessage,
-                    onEditFromMessage = onEditFromMessage
+                    onEditFromMessage = onEditFromMessage,
+                    onOpenChildSession = onOpenChildSession
                 )
                 is ChatItem.Activity -> TurnActivityRow(activity = item.activity)
             }
@@ -252,8 +254,11 @@ internal fun ChatMessageList(
 internal fun copyableMessageText(parts: List<Part>): String = parts
     .asSequence()
     .filter { it.isText }
-    .mapNotNull { it.text }
-    .filter { it.isNotEmpty() }
+    .mapNotNull { part ->
+        val notification = TaskNotificationParser.notificationFor(part)
+        val text = notification?.resultText ?: part.text
+        text?.takeIf { it.isNotEmpty() }
+    }
     .joinToString("\n\n")
 
 @Composable
@@ -265,7 +270,8 @@ private fun MessageRow(
     onFileClick: (String) -> Unit,
     onMarkdownLinkClick: (String) -> Unit,
     onForkFromMessage: (String) -> Unit,
-    onEditFromMessage: (String) -> Unit
+    onEditFromMessage: (String) -> Unit,
+    onOpenChildSession: (String) -> Unit
 ) {
     val isUser = message.info.isUser
     val clipboard = LocalClipboard.current
@@ -290,6 +296,7 @@ private fun MessageRow(
                     workspaceDirectory = workspaceDirectory,
                     onFileClick = onFileClick,
                     onMarkdownLinkClick = onMarkdownLinkClick,
+                    onOpenChildSession = onOpenChildSession,
                     modifier = Modifier.fillMaxWidth()
                 )
                 i += 1
@@ -381,6 +388,7 @@ private fun MessageRow(
                     workspaceDirectory = workspaceDirectory,
                     onFileClick = onFileClick,
                     onMarkdownLinkClick = onMarkdownLinkClick,
+                    onOpenChildSession = onOpenChildSession,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -437,7 +445,7 @@ private fun MessageRow(
                             showMenu = false
                         }
                     )
-                    if (isUser) {
+                    if (TaskNotificationParser.offersEditFromHere(isUser, message.parts)) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.chat_edit_from_here)) },
                             leadingIcon = {
@@ -499,11 +507,22 @@ private fun PartView(
     workspaceDirectory: String?,
     onFileClick: (String) -> Unit,
     onMarkdownLinkClick: (String) -> Unit,
+    onOpenChildSession: (String) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
+    val displayedText = streamingTextOverride ?: part.text ?: ""
+    val taskNotification = if (part.isText) TaskNotificationParser.notificationFor(part, displayedText) else null
     when {
+        taskNotification != null -> TaskNotificationCard(
+            notification = taskNotification,
+            repository = repository,
+            workspaceDirectory = workspaceDirectory,
+            onMarkdownLinkClick = onMarkdownLinkClick,
+            onOpenSession = onOpenChildSession,
+            modifier = modifier
+        )
         part.isText -> TextPart(
-            text = streamingTextOverride ?: part.text ?: "",
+            text = displayedText,
             isUser = isUser,
             modifier = modifier,
             repository = repository,
@@ -851,7 +870,7 @@ private fun TextPart(
 }
 
 @Composable
-private fun ResolvedMarkdownText(
+internal fun ResolvedMarkdownText(
     text: String,
     repository: OpenCodeRepository,
     workspaceDirectory: String?,
