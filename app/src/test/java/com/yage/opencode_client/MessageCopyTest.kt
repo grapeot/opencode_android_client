@@ -19,4 +19,21 @@ class MessageCopyTest {
             copyableMessageText(parts)
         )
     }
+
+    @Test
+    fun `receipt copy uses result text instead of the task envelope`() {
+        val xml = """
+            <task id="ses_child" state="completed">
+            <summary>Background task completed: scan logs</summary>
+            <task_result>
+            alpha
+            </task_result>
+            </task>
+        """.trimIndent()
+        val receipt = Part(id = "receipt", type = "text", text = xml, synthetic = true)
+
+        val copied = copyableMessageText(listOf(receipt))
+        assertEquals(true, copied.contains("alpha"))
+        assertEquals(false, copied.contains("<task"))
+    }
 }

@@ -277,6 +277,7 @@ fun ChatScreen(
                         }
                     },
                     onEditFromMessage = viewModel::editFromMessage,
+                    onOpenChildSession = viewModel::openChildSession,
                     listState = messageListState
                 )
             }

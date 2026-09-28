@@ -243,4 +243,9 @@
     <string name="nfc_hold_tag">请将标签靠近手机背面…</string>
     <string name="nfc_write_success">标签写入成功。</string>
     <string name="nfc_write_failed">标签写入失败。</string>
+    <string name="task_notification_completed">已完成</string>
+    <string name="task_notification_failed">失败</string>
+    <string name="task_notification_open_session">打开子代理会话</string>
+    <string name="task_notification_no_output">无输出</string>
+    <string name="chat_large_message_preview_notice">消息较长：当前只显示前 %1$d / %2$d 个字符。为保持流畅，已跳过 Markdown 渲染。</string>
 </resources>

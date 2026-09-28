@@ -244,4 +244,9 @@
     <string name="nfc_hold_tag">Hold a tag near the back of your phone…</string>
     <string name="nfc_write_success">Tag written successfully.</string>
     <string name="nfc_write_failed">Failed to write tag.</string>
+    <string name="task_notification_completed">Completed</string>
+    <string name="task_notification_failed">Failed</string>
+    <string name="task_notification_open_session">Open subagent session</string>
+    <string name="task_notification_no_output">No output</string>
+    <string name="chat_large_message_preview_notice">Large message: showing first %1$d of %2$d characters. Markdown rendering is skipped to keep the app responsive.</string>
 </resources>
