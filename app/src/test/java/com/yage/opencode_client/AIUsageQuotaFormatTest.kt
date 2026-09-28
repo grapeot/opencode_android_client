@@ -21,29 +21,29 @@ class AIUsageQuotaFormatTest {
             87,
             nextResetTimeMs = now + 51L * tenthDayMs
         )
-        assertEquals("5.1D", formatQuotaResetSuffix(quota.nextResetTimeMs!!, now))
-        assertEquals("87% / 5.1D", quotaBadgeText(quota, now))
-        assertEquals("5.1D", formatQuotaResetSuffix(now + 445_824_000L, now))
+        assertEquals("5.1d", formatQuotaResetSuffix(quota.nextResetTimeMs!!, now))
+        assertEquals("87% / 5.1d", quotaBadgeText(quota, now))
+        assertEquals("5.1d", formatQuotaResetSuffix(now + 445_824_000L, now))
     }
 
     @Test
     fun `twenty four hours is one day not twenty four hours`() {
-        assertEquals("1.0D", formatQuotaResetSuffix(now + 86_400_000L, now))
-        assertEquals("23H", formatQuotaResetSuffix(now + 86_400_000L - 1L, now))
+        assertEquals("1.0d", formatQuotaResetSuffix(now + 86_400_000L, now))
+        assertEquals("23h", formatQuotaResetSuffix(now + 86_400_000L - 1L, now))
     }
 
     @Test
     fun `hours floor and sub hour stays under one hour`() {
-        assertEquals("13H", formatQuotaResetSuffix(now + 13L * 3_600_000L + 3_500_000L, now))
-        assertEquals("1H", formatQuotaResetSuffix(now + 3_600_000L, now))
-        assertEquals("<1H", formatQuotaResetSuffix(now + 3_600_000L - 1L, now))
-        assertEquals("<1H", formatQuotaResetSuffix(now + 1L, now))
+        assertEquals("13h", formatQuotaResetSuffix(now + 13L * 3_600_000L + 3_500_000L, now))
+        assertEquals("1h", formatQuotaResetSuffix(now + 3_600_000L, now))
+        assertEquals("<1h", formatQuotaResetSuffix(now + 3_600_000L - 1L, now))
+        assertEquals("<1h", formatQuotaResetSuffix(now + 1L, now))
     }
 
     @Test
     fun `expired reset is zero hours`() {
-        assertEquals("0H", formatQuotaResetSuffix(now, now))
-        assertEquals("0H", formatQuotaResetSuffix(now - 1L, now))
+        assertEquals("0h", formatQuotaResetSuffix(now, now))
+        assertEquals("0h", formatQuotaResetSuffix(now - 1L, now))
     }
 
     @Test

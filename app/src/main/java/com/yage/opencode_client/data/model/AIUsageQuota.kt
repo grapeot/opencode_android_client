@@ -66,11 +66,11 @@ fun quotaResetEpochMs(quota: AIUsageQuota): Long? {
 
 fun formatQuotaResetSuffix(resetMs: Long, nowMs: Long): String {
     val remainingMs = resetMs - nowMs
-    if (remainingMs <= 0L) return "0H"
-    if (remainingMs < 3_600_000L) return "<1H"
-    if (remainingMs < 86_400_000L) return "${remainingMs / 3_600_000L}H"
+    if (remainingMs <= 0L) return "0h"
+    if (remainingMs < 3_600_000L) return "<1h"
+    if (remainingMs < 86_400_000L) return "${remainingMs / 3_600_000L}h"
     val tenths = remainingMs / 8_640_000L
-    return "${tenths / 10}.${tenths % 10}D"
+    return "${tenths / 10}.${tenths % 10}d"
 }
 
 fun quotaBadgeText(quota: AIUsageQuota, nowMs: Long): String {
