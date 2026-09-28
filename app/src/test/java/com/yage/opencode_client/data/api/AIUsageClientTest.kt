@@ -6,6 +6,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -34,8 +35,12 @@ class AIUsageClientTest {
         val result = client.fetchQuotas(server.url("/").toString())
 
         assertTrue(result.isSuccess)
-        assertEquals("2026-07-12T09:00:00", result.getOrThrow().generatedAt)
-        assertEquals(71, result.getOrThrow().quotas.single().clampedRemainingPercentage)
+        val decoded = result.getOrThrow()
+        assertEquals("2026-07-12T09:00:00", decoded.generatedAt)
+        val quota = decoded.quotas.single()
+        assertEquals(71, quota.clampedRemainingPercentage)
+        assertEquals(1783842841000L, quota.nextResetTimeMs)
+        assertNull(quota.nextResetIso)
         assertEquals("/api/v1/quotas", server.takeRequest().path)
     }
 
