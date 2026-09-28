@@ -47,13 +47,14 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 
 整屏在任何时刻最多出现一处彩色（accent 或 gold），其余全灰阶——这是"冷静"的硬约束。
 
-## 卡片三态语言
+## 卡片形态语言
 
-按功能分三类形态，这是 Quiet Tech 的核心，取代"多色同形的彩虹卡片"：
+按功能分四类形态，这是 Quiet Tech 的核心，取代"多色同形的彩虹卡片"：
 
-1. **信息卡片**（`ToolCard` / `PatchCard` / `ReasoningCard`）：中性 `surfaceVariant` 底，12dp 圆角，无重描边。**但它们是可交互的**（点开看 input/output、跳文件预览），所以卡片**内部的可操作元素**——工具图标、工具名、可跳转的文件路径、展开 chevron、OpenInNew 图标——用 `colorScheme.primary` 电蓝着色作为"可点"暗示；卡身保持中性。纯展示文字（tool reason、output 预览）走 `onSurfaceVariant` 灰。**不要把整张卡灰掉**——那样读起来像禁用控件（iOS 上踩过这个坑）。
-2. **操作卡片**（`ChatPermissionCard` / question card）：中性 surface + 左侧一条 3dp 电蓝色条（`colorScheme.primary`）作"请你操作"的功能信号，配纯文字按钮（TextButton）——Allow 类电蓝、Reject 灰，不用绿/蓝/红实底按钮。
-3. **状态行**（turn activity、elapsed 计时）：不是卡片，纯 `onSurfaceVariant` 文字。
+1. **信息卡片**（`ToolCard` / `PatchCard`）：中性 `surfaceVariant` 底，12dp 圆角，无重描边。**但它们是可交互的**（点开看 input/output、跳文件预览），所以卡片**内部的可操作元素**——工具图标、工具名、可跳转的文件路径、展开 chevron、OpenInNew 图标——用 `colorScheme.primary` 电蓝着色作为"可点"暗示；卡身保持中性。纯展示文字（tool reason、output 预览）走 `onSurfaceVariant` 灰。**不要把整张卡灰掉**——那样读起来像禁用控件（iOS 上踩过这个坑）。
+2. **过程行**（`ReasoningCard` / `ToolCallsRow`）：无底色的轻量行——单行 `labelMedium` header（icon + 文本 + chevron，12dp 水平 inset 对齐正文），整行可点切换展开，**展开内容留在同一个半宽 tile 内**（tile 变高、网格 reflow），不撑到全宽。它们是**永远半宽 tile**，与 file card 同进一个两列网格（见「消息区」）。
+3. **操作卡片**（`ChatPermissionCard` / question card）：中性 surface + 左侧一条 3dp 电蓝色条（`colorScheme.primary`）作"请你操作"的功能信号，配纯文字按钮（TextButton）——Allow 类电蓝、Reject 灰，不用绿/蓝/红实底按钮。
+4. **状态行**（turn activity、elapsed 计时）：不是卡片，纯 `onSurfaceVariant` 文字。
 
 圆角统一：信息/操作卡片 12dp，sheet 16dp，inline tag 6dp。
 
@@ -62,7 +63,7 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 - **用户消息**（`TextPart` when `isUser`）：3dp 电蓝左色条 + muted 蓝底（`primary.copy(alpha = 0.10f)`），12dp 圆角。和操作卡片、选中行同构——"左色条"语言贯穿全 app。
 - **AI 回复**：无容器，全宽纯文本 / markdown。
 
-工具/patch 卡片在手机上走 `run.chunked(2)` **两列网格**（信息密度优先；与 iPhone 一致，不改单列）。
+**卡片两列网格**：thinking（`ReasoningCard`）、合并的非文件工具（`ToolCallsRow`）、文件操作（`FileCard`）都是**永远半宽 tile**，进**同一个** `chunked(2) + Row(fillMaxWidth, spacedBy(8.dp))` 两列网格（tile `weight(1f)`，单 tile 补 `Spacer(weight(1f))`），按 part 顺序混排 2-up；Android 不能在 `LazyColumn` 里嵌 `LazyVGrid`，所以用手动两列手法（与 iPhone 2-up 一致，信息密度优先，不改单列）。奇数个 tile 时末行右列留空。tile 无论收起还是展开都是半宽：展开内容留在 tile 内（tile 变高、网格 reflow），不撑到全宽。text / 附件块**不进网格**，全宽渲染在网格之后（卡片先、正文后的读序是既定取舍）。列表级的 live streaming reasoning item 保持全宽、不进网格。
 
 ## Composer（`ChatInputBar`）
 
@@ -266,7 +267,7 @@ Export 使用 bottom sheet 展示只读 JSON 和 `Copy JSON`。Sheet 顶部明�
 
 ## 二、文件卡（2 列网格）
 
-**文件操作工具**渲染成新的 `FileCard` composable：左侧 `Icons.Default.Description`（doc 图标，电蓝 accent），中间该文件的 monospace basename，右侧 `ChevronRight`。一个工具一张卡，按 **2 列网格**排列——Android **不能**在 `LazyColumn` 里嵌 `LazyVGrid`，所以沿用现有的 `chunked(2) + Row` 手动两列手法（与 iPhone 2-up 一致）。
+**文件操作工具**渲染成新的 `FileCard` composable：左侧 `Icons.Default.Description`（doc 图标，电蓝 accent），中间该文件的 monospace basename，右侧 `ChevronRight`。一个工具一张卡，按 **2 列网格**排列——Android **不能**在 `LazyColumn` 里嵌 `LazyVGrid`，所以沿用现有的 `chunked(2) + Row` 手动两列手法（与 iPhone 2-up 一致）。这个两列网格不是文件卡专属：thinking tile 与合并的 "N tool calls" tile 也进同一个网格（见「消息区」）。
 
 判断依据封装在 `ToolCardClassifier.isFileOperation(part)`：patch（**Android 特有要求**：须带可导航文件路径 `filePathsForNavigationFiltered.isNotEmpty()`，否则无路径的 patch 会掉出网格落到无处），或 `tool ∈ {apply_patch, edit_file, write_file, read_file}`（含 `patch/edit/write/read` 历史别名，lowercase 前缀匹配）。
 
@@ -274,9 +275,9 @@ basename/displayPath 优先级照 iOS：`metadata.path` → `state.pathFromInput
 
 ## 三、合并成 "N tool calls"
 
-**其余所有工具（bash / 测试 / grep / glob / list / webfetch / task …）合并成一行** `ToolCallsRow`，文案 **"N tool calls"**（N = `otherParts.size`）——刻意抽象、不暴露具体类型。点 chevron 展开后逐条复用 `ToolCard` 的展开主体（tool 名 + reason + input/output）。收起是默认态。`testTag("toolcard.toolcalls")`。
+**其余所有工具（bash / 测试 / grep / glob / list / webfetch / task …）合并成一个永远半宽的 tile** `ToolCallsRow`，文案 **"N tool calls"**（N = `otherParts.size`）——刻意抽象、不暴露具体类型。点 chevron 展开后逐条复用 `ToolCard` 的展开主体（tool 名 + reason + input/output），**展开内容留在半宽 tile 内**（tile 变高、网格 reflow），不撑到全宽。收起是默认态。`testTag("toolcard.toolcalls")` 挂在 tile 最外层。
 
-一个 run 产出"文件卡网格（若有 fileParts）+ 一个 N tool calls 行（若有 otherParts）"。分类用 `ToolCardClassifier.split(run) -> Pair<fileParts, otherParts>`。排列是**版式优先的近时间序**：相邻文件卡聚成网格，相邻非文件工具聚成一行，不分组、不加分区标题。
+一个 run 产出"N 个文件卡 tile（fileParts，一个文件操作一个 tile）+ 一个 N tool calls tile（若有 otherParts，放在 run 末尾）"，与 thinking tile 一起进同一个两列网格（见「消息区」）。分类用 `ToolCardClassifier.split(run) -> Pair<fileParts, otherParts>`。tile 按 **part 顺序**排：文件操作 tile 在前、合并的非文件 tile 随后，不分组、不加分区标题。
 
 ## 四、文件夹卡
 

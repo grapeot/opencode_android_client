@@ -277,58 +277,11 @@ private fun MessageRow(
         // assistant's container-less reply already make it clear who's speaking,
         // so an extra blue label is redundant.
 
-        var i = 0
-        while (i < message.parts.size) {
-            val part = message.parts[i]
-            val streamingText = streamingPartTexts["${message.info.id}:${part.id}"]
-            val isToolLike = part.isTool || (part.isPatch && part.filePathsForNavigationFiltered.isNotEmpty())
-            if (isToolLike) {
-                // Buffer a contiguous run of tool/patch parts, then split it via
-                // ToolCardClassifier into file ops (→ 2-column file-card grid) and
-                // everything else (→ a single merged "N tool calls" row). Layout-first
-                // near-time order: file cards cluster, other tools cluster.
-                val run = mutableListOf<Part>()
-                var j = i
-                while (j < message.parts.size) {
-                    val p = message.parts[j]
-                    if (p.isTool || (p.isPatch && p.filePathsForNavigationFiltered.isNotEmpty())) {
-                        run.add(p)
-                        j++
-                    } else break
-                }
-
-                val (fileParts, otherParts) = ToolCardClassifier.split(run)
-
-                if (fileParts.isNotEmpty()) {
-                    // Android can't nest LazyVGrid inside LazyColumn, so use the existing
-                    // chunked(2) + manual Row two-column layout (matches iPhone 2-up grid).
-                    fileParts.chunked(2).forEach { chunk ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            chunk.forEach { p ->
-                                FileCard(
-                                    part = p,
-                                    onFileClick = onFileClick,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            if (chunk.size == 1) Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-
-                if (otherParts.isNotEmpty()) {
-                    ToolCallsRow(
-                        parts = otherParts,
-                        onFileClick = onFileClick,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                i = j
-            } else {
+        if (isUser) {
+            var i = 0
+            while (i < message.parts.size) {
+                val part = message.parts[i]
+                val streamingText = streamingPartTexts["${message.info.id}:${part.id}"]
                 PartView(
                     part = part,
                     isUser = isUser,
@@ -340,6 +293,96 @@ private fun MessageRow(
                     modifier = Modifier.fillMaxWidth()
                 )
                 i += 1
+            }
+        } else {
+            // Assistant reply: split parts into card tiles (thinking / tool calls /
+            // file cards — always half width, sharing one 2-up grid) and full-width
+            // content blocks (text / attachments), both kept in part order. The grid
+            // renders first and the content after it; that card-first read order is
+            // the accepted trade-off of the half-width tile design.
+            val tiles = mutableListOf<CardTile>()
+            val contentBlocks = mutableListOf<ContentBlock>()
+            var i = 0
+            while (i < message.parts.size) {
+                val part = message.parts[i]
+                when {
+                    part.isReasoning -> {
+                        tiles.add(ThinkingTile(part, streamingPartTexts["${message.info.id}:${part.id}"]))
+                        i += 1
+                    }
+                    part.isTool || part.isPatch -> {
+                        // Buffer a contiguous run of tool/patch parts and split it once
+                        // via ToolCardClassifier: file ops each become a FileCard tile,
+                        // the non-file rest merges into a single ToolCallsRow tile that
+                        // sits at the end of the run (file cards cluster, then calls).
+                        val run = mutableListOf<Part>()
+                        var j = i
+                        while (j < message.parts.size) {
+                            val p = message.parts[j]
+                            if (p.isTool || p.isPatch) {
+                                run.add(p)
+                                j++
+                            } else break
+                        }
+                        val (fileParts, otherParts) = ToolCardClassifier.split(run)
+                        fileParts.forEach { fp -> tiles.add(FileTile(fp)) }
+                        if (otherParts.isNotEmpty()) tiles.add(ToolCallTile(otherParts))
+                        i = j
+                    }
+                    part.isStepStart || part.isStepFinish -> i += 1
+                    else -> {
+                        contentBlocks.add(ContentBlock(part, streamingPartTexts["${message.info.id}:${part.id}"]))
+                        i += 1
+                    }
+                }
+            }
+
+            if (tiles.isNotEmpty()) {
+                // Same 2-up grid as the file cards: chunked(2) + manual Row (Android
+                // can't nest LazyVGrid inside LazyColumn), tiles at weight(1f), a lone
+                // tile leaves the right slot empty. Tiles stay half width whether
+                // collapsed or expanded; expanded content lives inside the tile.
+                tiles.chunked(2).forEach { chunk ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        chunk.forEach { tile ->
+                            when (tile) {
+                                is ThinkingTile -> ReasoningCard(
+                                    text = tile.streamingText ?: tile.part.text ?: "",
+                                    title = tile.part.toolReason,
+                                    isStreaming = false,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                is ToolCallTile -> ToolCallsRow(
+                                    parts = tile.parts,
+                                    onFileClick = onFileClick,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                is FileTile -> FileCard(
+                                    part = tile.part,
+                                    onFileClick = onFileClick,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        if (chunk.size == 1) Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+
+            contentBlocks.forEach { block ->
+                PartView(
+                    part = block.part,
+                    isUser = false,
+                    streamingTextOverride = block.streamingText,
+                    repository = repository,
+                    workspaceDirectory = workspaceDirectory,
+                    onFileClick = onFileClick,
+                    onMarkdownLinkClick = onMarkdownLinkClick,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
         Row(
@@ -428,6 +471,24 @@ private fun MessageRow(
         }
     }
 }
+
+/** One tile in the assistant 2-up card grid. Every tile is always half width
+ *  (a weight(1f) slot); expanded content stays inside the tile, never full width. */
+private sealed class CardTile
+
+/** Half-width thinking tile (ReasoningCard). Carries the streaming text override
+ *  so live reasoning text can replace the part's own text. */
+private data class ThinkingTile(val part: Part, val streamingText: String?) : CardTile()
+
+/** One merged half-width "N tool calls" tile (ToolCallsRow) holding a run's
+ *  non-file tools. */
+private data class ToolCallTile(val parts: List<Part>) : CardTile()
+
+/** Half-width file card tile (FileCard) for one file-operation tool/patch. */
+private data class FileTile(val part: Part) : CardTile()
+
+/** Full-width content block rendered after the card grid (text / attachment). */
+private data class ContentBlock(val part: Part, val streamingText: String?)
 
 @Composable
 private fun PartView(
@@ -690,8 +751,10 @@ private fun FolderContents(
 }
 
 /**
- * Merged "N tool calls" row for non-file tools. Collapsed by default; expanding
- * reveals each tool's full body (reused ToolCard content). Mirrors iOS's
+ * Merged "N tool calls" tile for non-file tools — always half width: it lives in a
+ * weight(1f) slot of the shared 2-up card grid, next to thinking and file tiles.
+ * Collapsed by default; expanding reveals each tool's full body (reused ToolCard
+ * content) inside the same half-width tile, which just gets taller. Mirrors iOS's
  * DisclosureGroup-based toolCallsRow.
  */
 @Composable
@@ -701,9 +764,9 @@ private fun ToolCallsRow(
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // Weight-reduced: no card surface on the collapsed row; the header indents
-    // 12dp to align with the answer body, while the expanded ToolCards stay
-    // full width (same width as FileCard tiles).
+    // No card surface: the header indents 12dp to align with the answer body; the
+    // header row fills its (half-width) slot so the spacer pushes the chevron to
+    // the tile's right edge; expanded ToolCards stay inside the same slot.
     Column(modifier = modifier.padding(vertical = 4.dp).testTag("toolcard.toolcalls")) {
         Row(
             modifier = Modifier
@@ -836,12 +899,13 @@ private fun ReasoningCard(
         if (isStreaming) expanded = true
     }
 
-    // Weight-reduced process row (no card surface): quiet single-line header,
-    // whole row toggles, expanded thinking stays full width for readability.
-    // The 12dp horizontal padding aligns header/text with the answer body; the
-    // streaming item's outer Box carries its own 12dp, so the row sits at the
-    // same offset while streaming and once it lands in the message.
-    // No clickable modifier while streaming: the row is not a control then.
+    // Always a half-width tile (weight(1f) slot of the shared 2-up card grid) once
+    // the thinking lands in a message; the list-level streaming item is the only
+    // full-width use (live content never goes half width). No card surface: the
+    // 12dp horizontal padding aligns header/text with the answer body, and the
+    // header row fills its slot so the spacer pushes the chevron to the tile's
+    // right edge. Expanded thinking stays inside the tile. No clickable modifier
+    // while streaming: the row is not a control then.
     val toggle = if (isStreaming) Modifier else Modifier.clickable { expanded = !expanded }
     Column(modifier = modifier.padding(vertical = 4.dp)) {
         Row(
