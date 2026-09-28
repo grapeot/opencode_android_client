@@ -66,17 +66,17 @@ internal fun TaskNotificationCard(
     }
     val title = TaskNotificationParser.displayTitle(notification)
 
+    // 与 ReasoningCard 同例：clickable 只放头部行，不把 SelectionContainer 和跳转按钮包进折叠手势。
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),
         modifier = modifier
             .padding(vertical = 4.dp)
             .testTag("task-notification-card")
-            .clickable { expanded = !expanded }
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(

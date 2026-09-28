@@ -86,8 +86,9 @@ object TaskNotificationParser {
         return summary.removePrefix(prefix).trim()
     }
 
+    // 服务端会话 id 是 ses_ + 可时间排序前缀 + 随机后缀，区分度在尾部随机段，取前缀会把邻近会话压成同一串。
     private fun shortSessionId(id: String): String =
-        if (id.length <= SHORT_SESSION_ID_LENGTH) id else id.take(SHORT_SESSION_ID_LENGTH)
+        if (id.length <= SHORT_SESSION_ID_LENGTH) id else "…" + id.takeLast(SHORT_SESSION_ID_LENGTH)
 
     private fun resultBody(inner: String, state: TaskState): String? {
         val preferred = if (state == TaskState.ERROR) "task_error" else "task_result"
@@ -106,7 +107,8 @@ object TaskNotificationParser {
             inner.indexOf(closeToken, openEnd + 1)
         }
         if (close < openEnd) return null
-        return inner.substring(openEnd + 1, close)
+        // 信封用 \n join，标签与内文之间各恰好一对换行不属于正文；只剥各一个，不 trim。
+        return inner.substring(openEnd + 1, close).removePrefix("\n").removeSuffix("\n")
     }
 
     private fun trailingEnvelopeClose(text: String): Int? {

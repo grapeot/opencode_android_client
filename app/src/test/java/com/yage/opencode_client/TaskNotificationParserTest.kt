@@ -21,7 +21,7 @@ class TaskNotificationParserTest {
         assertEquals(TaskState.COMPLETED, parsed.state)
         assertFalse(parsed.isFailed)
         assertEquals("Background task completed: scan logs", parsed.summary)
-        assertEquals("\nalpha\n", parsed.resultText)
+        assertEquals("alpha", parsed.resultText)
         assertEquals("scan logs", TaskNotificationParser.displayTitle(parsed))
     }
 
@@ -39,7 +39,7 @@ class TaskNotificationParserTest {
         assertNotNull(parsed)
         assertEquals(TaskState.ERROR, parsed!!.state)
         assertTrue(parsed.isFailed)
-        assertEquals("\nboom\n", parsed.resultText)
+        assertEquals("boom", parsed.resultText)
         assertEquals("scan logs", TaskNotificationParser.displayTitle(parsed))
     }
 
@@ -59,7 +59,7 @@ class TaskNotificationParserTest {
 
         assertNotNull(parsed)
         assertNull(parsed!!.summary)
-        assertEquals("ses_chil", TaskNotificationParser.displayTitle(parsed))
+        assertEquals("…ild_long", TaskNotificationParser.displayTitle(parsed))
     }
 
     @Test
@@ -102,7 +102,7 @@ class TaskNotificationParserTest {
 
         assertNotNull(parsed)
         assertEquals("ses_child_long", parsed!!.sessionID)
-        assertEquals("\nalpha\n", parsed.resultText)
+        assertEquals("alpha", parsed.resultText)
     }
 
     @Test
