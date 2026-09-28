@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import com.yage.opencode_client.R
 import com.yage.opencode_client.data.model.AIUsageQuota
 import com.yage.opencode_client.data.model.AIUsageQuotaSnapshot
+import com.yage.opencode_client.data.model.quotaBadgeText
+import com.yage.opencode_client.data.model.quotaResetEpochMs
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
@@ -63,6 +65,7 @@ import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
 import com.yage.opencode_client.ui.theme.BrandGold
 import com.yage.opencode_client.ui.theme.BrandPrimary
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 internal data class ChatTopBarState(
@@ -124,6 +127,15 @@ internal fun ChatTopBar(
     var showTodoDialog by remember { mutableStateOf(false) }
     var showContextDialog by remember { mutableStateOf(false) }
     var showAIUsageSheet by remember { mutableStateOf(false) }
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    val quotaResetMs = state.selectedAIUsageQuota?.let(::quotaResetEpochMs)
+    LaunchedEffect(state.aiUsageEnabled, quotaResetMs) {
+        if (!state.aiUsageEnabled || quotaResetMs == null) return@LaunchedEffect
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            delay(60_000)
+        }
+    }
 
     LaunchedEffect(showSessionSheet) {
         if (showSessionSheet) actions.onRefreshSessions()
@@ -297,9 +309,10 @@ internal fun ChatTopBar(
                         val badgeText = if (quota == null) {
                             state.aiUsageWindowLabel
                         } else {
-                            "${quota.clampedRemainingPercentage}% @ ${quota.label}"
+                            quotaBadgeText(quota, nowMs)
                         }
-                        val badgeColor = if (quota != null && !state.aiUsageStale) {
+                        val resetExpired = quotaResetMs != null && quotaResetMs - nowMs <= 0L
+                        val badgeColor = if (quota != null && !state.aiUsageStale && !resetExpired) {
                             BrandPrimary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
