@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui
 
+import com.yage.opencode_client.data.model.AgentInfo
 import com.yage.opencode_client.data.model.ComposerImageAttachment
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
@@ -195,6 +196,12 @@ internal fun mergePendingOptimisticMessages(
     return merged to prunedPending
 }
 
+internal fun effectiveSelectedAgent(selection: String, agents: List<AgentInfo>): String {
+    if (agents.isEmpty()) return selection
+    if (agents.any { it.name == selection }) return selection
+    return agents.firstOrNull { it.isVisible }?.name ?: "build"
+}
+
 internal fun launchLoadMessages(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
@@ -257,7 +264,7 @@ internal fun launchLoadMessages(
                             modelShortlist = nextShortlist,
                             selectedModelId = effectiveModelId,
                             selectedModelIndex = modelIndex,
-                            selectedAgentName = agentName ?: it.selectedAgentName
+                            selectedAgentName = effectiveSelectedAgent(agentName ?: it.selectedAgentName, it.agents)
                         )
                     }
                     onMessagesLoaded?.invoke()

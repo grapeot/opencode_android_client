@@ -273,6 +273,25 @@ class OpenCodeRepositoryTest {
     }
 
     @Test
+    fun `deleteSession returns failure with status and body on 501`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(501)
+                .setBody("session.delete is not supported")
+        )
+
+        val result = repository.deleteSession("session-1")
+
+        assertTrue(result.isFailure)
+        val message = result.exceptionOrNull()!!.message!!
+        assertTrue(message.contains("501"))
+        assertTrue(message.contains("session.delete is not supported"))
+        val request = server.takeRequest()
+        assertEquals("DELETE", request.method)
+        assertEquals("/session/session-1", request.path)
+    }
+
+    @Test
     fun `getSessionStatus returns map`() = runBlocking {
         val statuses = mapOf(
             "session-1" to SessionStatus(type = "busy", attempt = 2, message = "Running", next = 123L)

@@ -1573,7 +1573,12 @@ class MainViewModel @Inject constructor(
         hostRuntimeScope.launch {
             repository.getAgents()
                 .onSuccess { agents ->
-                    _state.update { it.copy(agents = agents) }
+                    _state.update {
+                        it.copy(
+                            agents = agents,
+                            selectedAgentName = effectiveSelectedAgent(it.selectedAgentName, agents)
+                        )
+                    }
                 }
                 .onFailure { error ->
                     reportNonFatalIssue(TAG, "Failed to load agents", error)
@@ -1642,7 +1647,7 @@ class MainViewModel @Inject constructor(
             )
         }
 
-        val agent = _state.value.selectedAgentName
+        val agent = effectiveSelectedAgent(_state.value.selectedAgentName, _state.value.agents)
         val model = buildSelectedModel(_state.value)
         val currentSession = _state.value.currentSession
 

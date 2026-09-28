@@ -1,5 +1,11 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-09-27 — Agent 校验与删除假成功
+
+- 选中 agent 对照当前 server 的 `/agent` 列表重校验，避免跨 server 残留的名字（例如 `grok`）被发给只有 `build` 的 host。
+- `deleteSession` 非 2xx 改为失败，错误带状态码和 body；失败时本地列表不删该行。
+- 说明见 `docs/fix_agent_validate_delete.md`。
+
 ## 2026-09-26 — v0.1.20260926 release
 
 - `versionName` 升至 `0.1.20260926`，`versionCode` 升至 19。GitHub Release tag `v0.1.20260926`。

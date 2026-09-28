@@ -115,7 +115,11 @@ class OpenCodeRepository @Inject constructor() {
     }
 
     suspend fun deleteSession(sessionId: String): Result<Unit> = apiCall {
-        api.deleteSession(sessionId)
+        val response = api.deleteSession(sessionId)
+        if (!response.isSuccessful) {
+            val errorBody = response.errorBody()?.string() ?: response.message()
+            throw Exception("Delete failed ${response.code()}: $errorBody")
+        }
     }
 
     suspend fun getSessionStatus(): Result<Map<String, SessionStatus>> = apiCall {
