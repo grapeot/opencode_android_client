@@ -30,15 +30,11 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -84,7 +80,6 @@ import kotlin.math.sin
 @Composable
 internal fun ChatInputBar(
     text: String,
-    isBusy: Boolean,
     isSending: Boolean = false,
     isRecording: Boolean,
     isTranscribing: Boolean,
@@ -92,14 +87,11 @@ internal fun ChatInputBar(
     isRetryingSpeech: Boolean,
     speechAudioLevel: Float,
     isSpeechConfigured: Boolean,
-    agentActivityText: String?,
-    agentStartedAtMillis: Long?,
     imageAttachments: List<ComposerImageAttachment>,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onAddImages: () -> Unit,
     onRemoveImage: (String) -> Unit,
-    onAbort: () -> Unit,
     onAbortSpeech: () -> Unit,
     onRetrySpeech: () -> Unit,
     onDiscardSpeech: () -> Unit,
@@ -107,17 +99,6 @@ internal fun ChatInputBar(
 ) {
     val canSend = (text.isNotBlank() || imageAttachments.isNotEmpty()) &&
         !isRecording && !isTranscribing && !isRetryingSpeech
-    val voiceStatus = when {
-        isRecording -> stringResource(R.string.chat_listening)
-        isTranscribing -> stringResource(R.string.chat_transcribing)
-        isRetryingSpeech -> stringResource(R.string.chat_retry_segment)
-        hasPreservedSpeechAudio -> stringResource(R.string.chat_preserved_audio)
-        else -> null
-    }
-    val composerStatus = listOfNotNull(
-        if (isBusy) agentActivityText ?: stringResource(R.string.chat_agent_running) else null,
-        voiceStatus
-    ).joinToString(" · ").takeIf { it.isNotEmpty() }
 
     Surface(
         modifier = Modifier.fillMaxWidth().imePadding(),
@@ -126,17 +107,8 @@ internal fun ChatInputBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 8.dp)
         ) {
-            if (composerStatus != null) {
-                QuietComposerStatus(
-                    status = composerStatus,
-                    isBusy = isBusy,
-                    startedAtMillis = if (isBusy) agentStartedAtMillis else null,
-                    onAbort = onAbort,
-                )
-            }
-
             VoiceRail(
                 isRecording = isRecording,
                 isTranscribing = isTranscribing,
@@ -355,83 +327,6 @@ private fun speechLevelForMode(mode: WaveformMode, audioLevel: Float): Float = w
     WaveformMode.Active -> audioLevel
     WaveformMode.Generating -> 0.2f
     WaveformMode.Idle -> 0.04f
-}
-
-@Composable
-private fun QuietComposerStatus(
-    status: String,
-    isBusy: Boolean,
-    startedAtMillis: Long?,
-    onAbort: () -> Unit,
-) {
-    var menuExpanded by remember { mutableStateOf(false) }
-    var nowMillis by remember(startedAtMillis) { mutableStateOf(System.currentTimeMillis()) }
-
-    LaunchedEffect(isBusy, startedAtMillis) {
-        while (isBusy && startedAtMillis != null) {
-            nowMillis = System.currentTimeMillis()
-            delay(1_000)
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (isBusy) {
-            Icon(
-                Icons.Default.Circle,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.size(8.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        Text(
-            text = status,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            modifier = Modifier.weight(1f)
-        )
-        if (isBusy && startedAtMillis != null) {
-            Text(
-                text = formatElapsed(nowMillis - startedAtMillis),
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        if (isBusy) {
-            Box {
-                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.MoreHoriz,
-                        contentDescription = stringResource(R.string.chat_interrupt_agent),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_interrupt_agent)) },
-                        leadingIcon = { Icon(Icons.Default.Stop, contentDescription = null, tint = StopRed) },
-                        onClick = {
-                            menuExpanded = false
-                            onAbort()
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun formatElapsed(elapsedMillis: Long): String {
-    val seconds = (elapsedMillis.coerceAtLeast(0L) / 1_000L).toInt()
-    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 private enum class WaveformMode { Idle, Active, Generating }

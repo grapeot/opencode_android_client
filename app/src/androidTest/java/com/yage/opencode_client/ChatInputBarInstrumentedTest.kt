@@ -18,14 +18,11 @@ class ChatInputBarInstrumentedTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun busyInputShowsQuietStatusAndKeepsSendEnabled() {
+    fun inputKeepsSendAndSpeakEnabledWhenIdle() {
         composeRule.setContent {
             MaterialTheme {
                 ChatInputBar(
                     text = "hello",
-                    isBusy = true,
-                    agentActivityText = null,
-                    agentStartedAtMillis = null,
                     isRecording = false,
                     isTranscribing = false,
                     hasPreservedSpeechAudio = false,
@@ -37,7 +34,6 @@ class ChatInputBarInstrumentedTest {
                     onSend = {},
                     onAddImages = {},
                     onRemoveImage = {},
-                    onAbort = {},
                     onAbortSpeech = {},
                     onRetrySpeech = {},
                     onDiscardSpeech = {},
@@ -46,8 +42,6 @@ class ChatInputBarInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText("Agent running").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Interrupt agent").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Send").assertIsEnabled()
         composeRule.onNodeWithContentDescription("Tap to speak").assertIsEnabled()
     }
@@ -61,9 +55,6 @@ class ChatInputBarInstrumentedTest {
             MaterialTheme {
                 ChatInputBar(
                     text = "hello",
-                    isBusy = false,
-                    agentActivityText = null,
-                    agentStartedAtMillis = null,
                     isRecording = false,
                     isTranscribing = false,
                     hasPreservedSpeechAudio = false,
@@ -75,7 +66,6 @@ class ChatInputBarInstrumentedTest {
                     onSend = { sendClicks++ },
                     onAddImages = {},
                     onRemoveImage = {},
-                    onAbort = {},
                     onAbortSpeech = {},
                     onRetrySpeech = {},
                     onDiscardSpeech = {},
@@ -92,14 +82,11 @@ class ChatInputBarInstrumentedTest {
     }
 
     @Test
-    fun transcribingShowsStopWaitAndAgentMenuSeparately() {
+    fun transcribingShowsStopWaitAndKeepsSendDisabled() {
         composeRule.setContent {
             MaterialTheme {
                 ChatInputBar(
                     text = "partial transcript",
-                    isBusy = true,
-                    agentActivityText = null,
-                    agentStartedAtMillis = null,
                     isRecording = false,
                     isTranscribing = true,
                     hasPreservedSpeechAudio = false,
@@ -111,7 +98,6 @@ class ChatInputBarInstrumentedTest {
                     onSend = {},
                     onAddImages = {},
                     onRemoveImage = {},
-                    onAbort = {},
                     onAbortSpeech = {},
                     onRetrySpeech = {},
                     onDiscardSpeech = {},
@@ -120,9 +106,7 @@ class ChatInputBarInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText("Agent running · Transcribing").assertIsDisplayed()
         composeRule.onNodeWithText("Stop transcription wait").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Interrupt agent").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Send").assertIsNotEnabled()
     }
 
@@ -132,9 +116,6 @@ class ChatInputBarInstrumentedTest {
             MaterialTheme {
                 ChatInputBar(
                     text = "",
-                    isBusy = false,
-                    agentActivityText = null,
-                    agentStartedAtMillis = null,
                     isRecording = false,
                     isTranscribing = false,
                     hasPreservedSpeechAudio = true,
@@ -146,7 +127,6 @@ class ChatInputBarInstrumentedTest {
                     onSend = {},
                     onAddImages = {},
                     onRemoveImage = {},
-                    onAbort = {},
                     onAbortSpeech = {},
                     onRetrySpeech = {},
                     onDiscardSpeech = {},

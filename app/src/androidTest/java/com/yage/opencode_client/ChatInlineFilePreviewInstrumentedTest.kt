@@ -62,7 +62,6 @@ class ChatInlineFilePreviewInstrumentedTest {
                     }
                     ChatInputBar(
                         text = "steer this",
-                        isBusy = false,
                         isRecording = false,
                         isTranscribing = false,
                         hasPreservedSpeechAudio = false,
@@ -74,7 +73,6 @@ class ChatInlineFilePreviewInstrumentedTest {
                         onSend = { sendClicks++ },
                         onAddImages = {},
                         onRemoveImage = {},
-                        onAbort = {},
                         onAbortSpeech = {},
                         onRetrySpeech = {},
                         onDiscardSpeech = {},
@@ -118,7 +116,6 @@ class ChatInlineFilePreviewInstrumentedTest {
                     }
                     ChatInputBar(
                         text = "hello",
-                        isBusy = false,
                         isRecording = true,
                         isTranscribing = false,
                         hasPreservedSpeechAudio = false,
@@ -130,7 +127,6 @@ class ChatInlineFilePreviewInstrumentedTest {
                         onSend = {},
                         onAddImages = {},
                         onRemoveImage = {},
-                        onAbort = {},
                         onAbortSpeech = {},
                         onRetrySpeech = {},
                         onDiscardSpeech = {},

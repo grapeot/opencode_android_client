@@ -84,8 +84,9 @@ data class SessionStats(rounds: Int?, toolCalls: Int?, totalTokens: Int?, cacheH
 
 ### UI 层
 
-- `ui/chat/SessionStatusRow.kt`（新文件）：`compactTokenCount(Long)`（iOS 口径逐字移植）+ `SessionStatusRow(stats)` composable，`testTag` 可加，四段 `·` 分隔，样式对齐 `QuietComposerStatus`（labelMedium / onSurfaceVariant / 单行）。图标用 Material Icons `Refresh` / `Construction`（依赖已有 `material-icons-extended`）；tok 与 cache hit 为纯文本（对齐 iOS 放弃易误读图标的决定）。
-- 挂载：`ChatScreen.kt` 内 `if (sessionStats != null && sessionStats.hasVisibleSegments) { SessionStatusRow(...) }`，位于 `ChatInputBar` 之前（messages 区是 `weight(1f)`，固定行自然钉在 composer 上方）。
+- `ui/chat/ComposerStatusBar.kt`（新文件）：`compactTokenCount(Long)`（iOS 口径逐字移植）+ `ComposerStatusBar(...)` composable，**单行两段**：左侧常驻计数段（`Refresh`/`Construction` 图标 + 数字、`1.11M tok`、`96% cache hit`，`·` 分隔），右侧临时活动段（busy 时 gold 点 + 活动文案 + `mm:ss` 计时 + `⋮` 中断菜单；语音状态与活动文案按旧规则 `·` 拼接，如 `Agent running · Transcribing`）。两侧都空时整行不组合。上边距 4dp / 下边距 2dp，样式 labelMedium / onSurfaceVariant。
+- 挂载：`ChatScreen.kt` 内 `if (state.currentSessionId != null) { ComposerStatusBar(...) }`，位于 `ChatInputBar` 之前（messages 区是 `weight(1f)`，固定行自然钉在 composer 上方）。原嵌在 `ChatInputBar` 内部的 `QuietComposerStatus` 临时行已删除并并入此栏（Android 与 iOS 的两行布局有意不同：iOS 保持两行，Android 合并为一行——计数左、活动右，busy/语音行为不变）。
+- tok 与 cache hit 为纯文本（对齐 iOS 放弃易误读图标的决定）；图标用 Material Icons（依赖已有 `material-icons-extended`）。
 
 ### i18n
 
@@ -103,7 +104,7 @@ data class SessionStats(rounds: Int?, toolCalls: Int?, totalTokens: Int?, cacheH
 
 - 持久化后端：SharedPreferences(JSON) vs UserDefaults，语义一致。
 - 图标：Material Icons vs SF Symbols；tok / cache hit 同样是纯文本。
-- Android 下行（Thinking/语音/耗时）复用现有 `ChatInputBar` 内 `composerStatus`，不新建临时行。
+- 行数：iOS 是两行（常驻计数行 + 临时活动行），Android 合并为一行（计数左、活动右）；内容口径一致。
 - Context 弹窗（`ContextUsageDialog`）保持 `%,d` 全量数字，与 iOS 弹窗行为一致。
 - master 分支的 SSE 数据通路是「事件触发 REST 刷新」（SSE payload 直写是另一条 feature 分支的工作），所以 rounds/tools 的增量记录挂在 `handleIncomingSseEvent` 的既有事件分支上，不依赖 payload 直写；两分支合流后口径不变（seen 集合去重）。
 - 无 stepTimings 持久化（iOS 侧的独立附带项，不属于本 feature）。
