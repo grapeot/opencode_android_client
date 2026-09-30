@@ -11,6 +11,7 @@ import com.yage.opencode_client.ssh.SSHKeyManager
 import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ssh.TunnelResult
 import com.yage.opencode_client.util.SettingsManager
+import com.yage.opencode_client.util.SessionStatsStore
 import com.yage.opencode_client.util.LanguageMode
 import com.yage.opencode_client.util.OpenCodeDeepLink
 import com.yage.opencode_client.util.OpenCodeDeepLinkParseResult
@@ -70,6 +71,7 @@ data class AppState(
     val expandedSessionIds: Set<String> = emptySet(),
     val currentSessionId: String? = null,
     val sessionStatuses: Map<String, SessionStatus> = emptyMap(),
+    val currentSessionCounts: SessionCounts? = null,
     val messages: List<MessageWithParts> = emptyList(),
     val messageLimit: Int = 30,
     val isLoadingMessages: Boolean = false,
@@ -145,6 +147,27 @@ data class AppState(
         val totalOutputTokens: Int,
         val totalGenerationSeconds: Double?
     )
+
+    /** Persisted round/tool counters for the current session (null before the
+     *  first window load has seeded the store). */
+    data class SessionCounts(
+        val rounds: Int,
+        val toolCalls: Int
+    )
+
+    /** Session-level status line data. `totalTokens`/`cacheHitRate` cover the
+     *  main session plus all descendant subagent sessions; `rounds`/
+     *  `toolCalls` stay at the main-session view (matching the message list).
+     *  Null overall when the main session's token baseline is unknowable. */
+    data class SessionStats(
+        val rounds: Int?,
+        val toolCalls: Int?,
+        val totalTokens: Int?,
+        val cacheHitRate: Float?
+    ) {
+        val hasVisibleSegments: Boolean
+            get() = rounds != null || toolCalls != null || totalTokens != null || cacheHitRate != null
+    }
 
     data class ConnectionState(
         val isConnected: Boolean = false,
@@ -407,6 +430,88 @@ data class AppState(
             )
         }
 
+    /** Session status line. Token/cache-hit numbers roll up the whole
+     *  subagent tree (server aggregates are self-only, so summing
+     *  `parentID`-linked descendants is additive and needs no extra
+     *  requests); rounds/tool calls read the persisted counters.
+     *
+     *  Main-session baseline: the session aggregate when the host provides
+     *  it, otherwise the assistant-token window sum when the window is known
+     *  to be complete (fewer messages than the requested limit). When the
+     *  baseline is unknowable the whole row is hidden — counts included. */
+    val sessionStats: SessionStats?
+        get() {
+            val sessionId = currentSessionId ?: return null
+            val group = sessionGroupIds(sessions, sessionId)
+            val main = group.firstOrNull { it.id == sessionId } ?: return null
+
+            var total = 0
+            var freshInput = 0
+            var cacheRead = 0
+            var mainKnown = false
+            val mainAggregate = main.tokens
+            if (mainAggregate != null) {
+                mainKnown = true
+                total = tokenTotal(mainAggregate) ?: 0
+                freshInput = mainAggregate.input ?: 0
+                cacheRead = mainAggregate.cache?.read ?: 0
+            } else if (messages.size < messageLimit) {
+                mainKnown = true
+                for (m in messages) {
+                    if (!m.info.isAssistant) continue
+                    val tokens = m.info.tokens ?: continue
+                    total += tokenTotal(tokens) ?: 0
+                    freshInput += tokens.input ?: 0
+                    cacheRead += tokens.cache?.read ?: 0
+                }
+            }
+            if (!mainKnown) return null
+
+            for (child in group) {
+                if (child.id == sessionId) continue
+                val childAggregate = child.tokens ?: continue
+                val childTotal = tokenTotal(childAggregate) ?: 0
+                if (childTotal <= 0) continue
+                total += childTotal
+                freshInput += childAggregate.input ?: 0
+                cacheRead += childAggregate.cache?.read ?: 0
+            }
+
+            val cacheHitRate = if (freshInput + cacheRead > 0) {
+                cacheRead.toFloat() / (freshInput + cacheRead).toFloat()
+            } else {
+                null
+            }
+
+            val counts = currentSessionCounts
+            return SessionStats(
+                rounds = counts?.rounds,
+                toolCalls = counts?.toolCalls,
+                totalTokens = total.takeIf { it > 0 },
+                cacheHitRate = cacheHitRate
+            )
+        }
+
+    /** Cycle-safe BFS over `parentID` links: the root session first, then all
+     *  descendant subagent sessions present in the loaded list. */
+    private fun sessionGroupIds(sessions: List<Session>, rootId: String): List<Session> {
+        val root = sessions.firstOrNull { it.id == rootId } ?: return emptyList()
+        val children = sessions.groupBy { it.parentId }
+        val seen = mutableSetOf(rootId)
+        val out = mutableListOf(root)
+        val queue = ArrayDeque(listOf(root))
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            for (child in children[current.id].orEmpty()) {
+                if (seen.add(child.id)) {
+                    out += child
+                    queue += child
+                }
+            }
+        }
+        return out
+    }
+
     private fun tokenTotal(tokens: Message.TokenInfo?): Int? {
         if (tokens == null) return null
         tokens.total?.takeIf { it > 0 }?.let { return it }
@@ -429,6 +534,7 @@ class MainViewModel @Inject constructor(
     private val hostProfileStore: HostProfileStore,
     private val tunnelManager: TunnelManager,
     private val sshKeyManager: SSHKeyManager,
+    private val sessionStatsStore: SessionStatsStore,
     private val aiUsageClient: AIUsageClient = AIUsageClient()
 ) : ViewModel() {
 
@@ -1403,6 +1509,7 @@ class MainViewModel @Inject constructor(
             }
         }
         selectSessionState(_state, settingsManager, sessionId)
+        publishCurrentSessionCounts()
         _state.update {
             it.copy(
                 isRecording = false,
@@ -1556,6 +1663,7 @@ class MainViewModel @Inject constructor(
                 expandedSessionIds = emptySet(),
                 currentSessionId = null,
                 sessionStatuses = emptyMap(),
+                currentSessionCounts = null,
                 messages = emptyList(),
                 streamingPartTexts = emptyMap(),
                 streamingReasoningPart = null,
@@ -1587,7 +1695,36 @@ class MainViewModel @Inject constructor(
             if (_state.value.pendingNfcAction != null) {
                 consumePendingNfcAction()
             }
+            reconcileSessionCounts(sessionId)
         }
+    }
+
+    /** Push the persisted counters of the current session into state so the
+     *  status line recomposes. No-op when the store has no entry yet. */
+    private fun publishCurrentSessionCounts() {
+        val sessionId = _state.value.currentSessionId ?: return
+        val entry = sessionStatsStore.entry(sessionId) ?: return
+        _state.update {
+            it.copy(
+                currentSessionCounts = AppState.SessionCounts(
+                    rounds = entry.rounds,
+                    toolCalls = entry.toolCalls
+                )
+            )
+        }
+    }
+
+    /** Seed/reconcile the persisted counters from the freshly loaded window.
+     *  Add-only; a revert resets the entry first so the reseed is clean. */
+    private fun reconcileSessionCounts(sessionId: String) {
+        if (sessionId != _state.value.currentSessionId) return
+        val messages = _state.value.messages
+        val userMessageIds = messages.filter { it.info.isUser }.map { it.info.id }.toSet()
+        val toolPartIds = messages
+            .flatMap { m -> m.parts.filter { it.isTool }.map { it.id } }
+            .toSet()
+        sessionStatsStore.seedOrReconcile(sessionId, userMessageIds, toolPartIds)
+        publishCurrentSessionCounts()
     }
 
     /** Load messages with delay when triggered by SSE/send (server may need time to persist). */
@@ -1597,7 +1734,9 @@ class MainViewModel @Inject constructor(
 
     fun loadMoreMessages() {
         val sessionId = _state.value.currentSessionId ?: return
-        launchLoadMoreMessages(hostRuntimeScope, repository, _state, sessionId)
+        launchLoadMoreMessages(hostRuntimeScope, repository, _state, sessionId) {
+            reconcileSessionCounts(sessionId)
+        }
     }
 
     private fun loadAgents() {
@@ -1807,6 +1946,9 @@ class MainViewModel @Inject constructor(
                         )
                     }
                     settingsManager.setDraftText(sessionId, draft)
+                    // Revert truncates history, so the add-only counters would
+                    // overcount; drop the entry so the reload reseeds it.
+                    sessionStatsStore.reset(sessionId)
                     loadMessages(sessionId)
                     loadSessions()
                 }
@@ -2039,7 +2181,15 @@ class MainViewModel @Inject constructor(
             onRefreshMessages = ::loadMessagesWithRetry,
             onRefreshSessions = ::loadSessions,
             onLoadPendingPermissions = ::loadPendingPermissions,
-            onNonFatalIssue = { message -> reportNonFatalIssue(TAG, message) }
+            onNonFatalIssue = { message -> reportNonFatalIssue(TAG, message) },
+            onRecordUserMessage = { sessionId, messageId ->
+                sessionStatsStore.recordUserMessage(sessionId, messageId)
+                publishCurrentSessionCounts()
+            },
+            onRecordToolPart = { sessionId, partId ->
+                sessionStatsStore.recordToolPart(sessionId, partId)
+                publishCurrentSessionCounts()
+            }
         )
     }
 

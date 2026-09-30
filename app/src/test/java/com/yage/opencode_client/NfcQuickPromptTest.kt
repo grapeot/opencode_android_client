@@ -125,7 +125,8 @@ class NfcQuickPromptTest {
             microphone,
             hostProfileStore,
             tunnelManager,
-            sshKeyManager
+            sshKeyManager,
+            testSessionStatsStore()
         )
     }
 

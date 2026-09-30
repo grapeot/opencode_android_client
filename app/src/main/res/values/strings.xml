@@ -129,6 +129,10 @@
     <string name="chat_context_cost">Cost</string>
     <string name="chat_context_no_cost">No cost data</string>
     <string name="chat_context_unknown">Unknown</string>
+    <string name="chat_status_rounds">rounds</string>
+    <string name="chat_status_tool_calls">tool calls</string>
+    <string name="chat_status_tokens">tok</string>
+    <string name="chat_status_cache_hit">cache hit</string>
     <string name="ai_usage_title">Usage &amp; Limits</string>
     <string name="ai_usage_refresh">Refresh</string>
     <string name="ai_usage_loading">Loading cached quota data…</string>

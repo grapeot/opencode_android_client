@@ -120,7 +120,7 @@ class ForkSessionTest {
     }
 
     private fun createViewModel(): MainViewModel {
-        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone, hostProfileStore, tunnelManager, sshKeyManager)
+        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone, hostProfileStore, tunnelManager, sshKeyManager, testSessionStatsStore())
     }
 
     @Test

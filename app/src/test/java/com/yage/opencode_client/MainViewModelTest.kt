@@ -159,7 +159,7 @@ class MainViewModelTest {
     }
 
     private fun createViewModel(): MainViewModel {
-        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone, hostProfileStore, tunnelManager, sshKeyManager)
+        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone, hostProfileStore, tunnelManager, sshKeyManager, testSessionStatsStore())
     }
 
     private fun updateState(viewModel: MainViewModel, transform: (AppState) -> AppState) {
