@@ -21,6 +21,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -56,6 +60,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,6 +85,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.rememberMarkdownState
 import com.yage.opencode_client.R
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
@@ -111,30 +118,46 @@ internal fun ChatMessageList(
     listState: LazyListState = rememberLazyListState()
 ) {
     val layoutInfo = listState.layoutInfo
-    var shouldAutoScroll by remember(listState) {
-        mutableStateOf(listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 24)
+    // Stick until the user drags away. Layout-driven offset changes must not
+    // release it: those are the scroll jumps, and treating them as "user left
+    // the bottom" is what stopped follow.
+    var stickToBottom by remember(listState) { mutableStateOf(true) }
+    val releaseFollow = remember(listState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.UserInput && !restingAtBottom(listState)) {
+                    stickToBottom = false
+                }
+                return Offset.Zero
+            }
+        }
     }
-    val contentVersion = remember(messages, streamingPartTexts, streamingReasoningPart, isLoading) {
-        messages.size +
-            messages.sumOf { it.parts.size } +
-            streamingPartTexts.hashCode() +
-            (if (streamingReasoningPart != null) 1 else 0) +
-            (if (isLoading) 1 else 0)
-    }
-
     LaunchedEffect(listState) {
         snapshotFlow {
-            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 24
-        }.collect { atBottom ->
-            shouldAutoScroll = atBottom
+            // Offset drifts above 24 while the latest row grows. That is not
+            // the user leaving. Re-stick whenever the latest row is still the
+            // one on screen and the finger is up.
+            !listState.isScrollInProgress && listState.firstVisibleItemIndex == 0
+        }.collect { onLatest ->
+            if (onLatest) stickToBottom = true
+        }
+    }
+    // Pin before draw. animateScrollToItem per token restarts a spring and
+    // flashes; requestScrollToItem applies in the same frame as the growth.
+    SideEffect {
+        if (
+            stickToBottom &&
+            (messages.isNotEmpty() || streamingReasoningPart != null) &&
+            (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
+        ) {
+            listState.requestScrollToItem(0)
         }
     }
 
-    LaunchedEffect(contentVersion) {
-        if (shouldAutoScroll && (messages.isNotEmpty() || streamingReasoningPart != null)) {
-            listState.animateScrollToItem(0)
-        }
-    }
 
     // remember keys prevent stale-closure: isLoading/messages/messageLimit are plain values, not State.
     // reverseLayout=true: highest index = visual top (oldest). lastVisible >= total-3 fires there.
@@ -186,23 +209,13 @@ internal fun ChatMessageList(
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().nestedScroll(releaseFollow),
         reverseLayout = true,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
     ) {
-        if (streamingReasoningPart != null) {
-            val streamingKey = "${streamingReasoningPart.messageId}:${streamingReasoningPart.id}"
-            val streamingText = streamingPartTexts[streamingKey] ?: ""
-            item(key = "streaming-reasoning") {
-                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-                    ReasoningCard(
-                        text = streamingText,
-                        title = streamingReasoningPart.toolReason,
-                        isStreaming = true
-                    )
-                }
-            }
-        }
+        // Reasoning stays in the message row. A separate bottom streaming card
+        // appears and disappears against that tile on every part.updated, which
+        // is the single-card vs streaming flicker.
         items(interleaved.reversed(), key = {
             when (it) {
                 is ChatItem.Message -> it.message.info.id
@@ -251,6 +264,15 @@ internal fun ChatMessageList(
     }
 }
 
+private fun shownMarkdown(resolved: String?, normalized: String): String {
+    val current = resolved ?: return normalized
+    return if (current.length >= normalized.length) current else normalized
+}
+
+private fun restingAtBottom(listState: LazyListState): Boolean {
+    return listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 24
+}
+
 internal fun copyableMessageText(parts: List<Part>): String = parts
     .asSequence()
     .filter { it.isText }
@@ -288,17 +310,19 @@ private fun MessageRow(
             while (i < message.parts.size) {
                 val part = message.parts[i]
                 val streamingText = streamingPartTexts["${message.info.id}:${part.id}"]
-                PartView(
-                    part = part,
-                    isUser = isUser,
-                    streamingTextOverride = streamingText,
-                    repository = repository,
-                    workspaceDirectory = workspaceDirectory,
-                    onFileClick = onFileClick,
-                    onMarkdownLinkClick = onMarkdownLinkClick,
-                    onOpenChildSession = onOpenChildSession,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                key(part.id) {
+                    PartView(
+                        part = part,
+                        isUser = isUser,
+                        streamingTextOverride = streamingText,
+                        repository = repository,
+                        workspaceDirectory = workspaceDirectory,
+                        onFileClick = onFileClick,
+                        onMarkdownLinkClick = onMarkdownLinkClick,
+                        onOpenChildSession = onOpenChildSession,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 i += 1
             }
         } else {
@@ -355,23 +379,30 @@ private fun MessageRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         chunk.forEach { tile ->
-                            when (tile) {
-                                is ThinkingTile -> ReasoningCard(
-                                    text = tile.streamingText ?: tile.part.text ?: "",
-                                    title = tile.part.toolReason,
-                                    isStreaming = false,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                is ToolCallTile -> ToolCallsRow(
-                                    parts = tile.parts,
-                                    onFileClick = onFileClick,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                is FileTile -> FileCard(
-                                    part = tile.part,
-                                    onFileClick = onFileClick,
-                                    modifier = Modifier.weight(1f)
-                                )
+                            val tileKey = when (tile) {
+                                is ThinkingTile -> tile.part.id
+                                is FileTile -> tile.part.id
+                                is ToolCallTile -> tile.parts.first().id
+                            }
+                            key(tileKey) {
+                                when (tile) {
+                                    is ThinkingTile -> ReasoningCard(
+                                        text = displayedStreamingText(tile.streamingText, tile.part.text),
+                                        title = tile.part.toolReason,
+                                        isStreaming = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    is ToolCallTile -> ToolCallsRow(
+                                        parts = tile.parts,
+                                        onFileClick = onFileClick,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    is FileTile -> FileCard(
+                                        part = tile.part,
+                                        onFileClick = onFileClick,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                         }
                         if (chunk.size == 1) Spacer(modifier = Modifier.weight(1f))
@@ -380,17 +411,19 @@ private fun MessageRow(
             }
 
             contentBlocks.forEach { block ->
-                PartView(
-                    part = block.part,
-                    isUser = false,
-                    streamingTextOverride = block.streamingText,
-                    repository = repository,
-                    workspaceDirectory = workspaceDirectory,
-                    onFileClick = onFileClick,
-                    onMarkdownLinkClick = onMarkdownLinkClick,
-                    onOpenChildSession = onOpenChildSession,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                key(block.part.id) {
+                    PartView(
+                        part = block.part,
+                        isUser = false,
+                        streamingTextOverride = block.streamingText,
+                        repository = repository,
+                        workspaceDirectory = workspaceDirectory,
+                        onFileClick = onFileClick,
+                        onMarkdownLinkClick = onMarkdownLinkClick,
+                        onOpenChildSession = onOpenChildSession,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
         Row(
@@ -498,6 +531,14 @@ private data class FileTile(val part: Part) : CardTile()
 /** Full-width content block rendered after the card grid (text / attachment). */
 private data class ContentBlock(val part: Part, val streamingText: String?)
 
+/** Longer of the live overlay and the persisted part text. A one-token overlay
+ *  must not hide text the row already rendered. */
+internal fun displayedStreamingText(override: String?, partText: String?): String {
+    val streamed = override.orEmpty()
+    val persisted = partText.orEmpty()
+    return if (streamed.length >= persisted.length) streamed else persisted
+}
+
 @Composable
 private fun PartView(
     part: Part,
@@ -510,7 +551,7 @@ private fun PartView(
     onOpenChildSession: (String) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
-    val displayedText = streamingTextOverride ?: part.text ?: ""
+    val displayedText = displayedStreamingText(streamingTextOverride, part.text)
     val taskNotification = if (part.isText) TaskNotificationParser.notificationFor(part, displayedText) else null
     when {
         taskNotification != null -> TaskNotificationCard(
@@ -862,7 +903,12 @@ private fun TextPart(
             val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
             SelectionContainer {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-                    Markdown(content = normalizedText, typography = markdownTypographyCompact(), modifier = innerModifier, imageTransformer = DataUriImageTransformer)
+                    Markdown(
+                        markdownState = rememberMarkdownState(content = normalizedText, retainState = true),
+                        typography = markdownTypographyCompact(),
+                        modifier = innerModifier,
+                        imageTransformer = DataUriImageTransformer
+                    )
                 }
             }
         }
@@ -877,17 +923,20 @@ internal fun ResolvedMarkdownText(
     onMarkdownLinkClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var resolvedText by remember(text, workspaceDirectory) { mutableStateOf<String?>(null) }
+    // Do not key this on text. A new token used to reset resolvedText to null,
+    // the block collapsed, and reverseLayout jumped the viewport. Keep the
+    // last resolved body until the new resolve finishes.
+    var resolvedText by remember(workspaceDirectory) { mutableStateOf<String?>(null) }
     val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
 
     LaunchedEffect(normalizedText, workspaceDirectory, repository) {
-        resolvedText = null
-        resolvedText = MarkdownImageResolver.resolveImages(
+        val resolved = MarkdownImageResolver.resolveImages(
             text = normalizedText,
             workspaceDirectory = workspaceDirectory,
             fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
         )
-        val finalText = resolvedText ?: normalizedText
+        resolvedText = resolved
+        val finalText = resolved
         val httpsUrls = """!\[[^\]]*\]\((https?://[^)]+)\)""".toRegex().findAll(finalText).map { it.groupValues[1] }.toList().distinct()
         for (url in httpsUrls) {
             HttpImageHolder.prefetch(url)
@@ -897,7 +946,7 @@ internal fun ResolvedMarkdownText(
     SelectionContainer {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
             WorkspaceLinkMarkdown(
-                content = resolvedText ?: normalizedText,
+                content = shownMarkdown(resolvedText, normalizedText),
                 modifier = modifier,
                 onLinkClick = onMarkdownLinkClick
             )
@@ -912,11 +961,9 @@ private fun ReasoningCard(
     isStreaming: Boolean = false,
     modifier: Modifier = Modifier.fillMaxWidth()
 ) {
-    var expanded by remember { mutableStateOf(isStreaming) }
-
-    LaunchedEffect(isStreaming) {
-        if (isStreaming) expanded = true
-    }
+    // Thinking defaults to collapsed, including the live streaming card: the
+    // header conveys the state, and the body only appears on explicit expand.
+    var expanded by remember { mutableStateOf(false) }
 
     // Always a half-width tile (weight(1f) slot of the shared 2-up card grid) once
     // the thinking lands in a message; the list-level streaming item is the only
@@ -958,12 +1005,12 @@ private fun ReasoningCard(
                 )
             }
         }
-        if ((expanded || isStreaming) && text.isNotBlank()) {
+        if (expanded && text.isNotBlank()) {
             val normalizedText = remember(text) { MarkdownImageResolver.normalizeStandaloneImageBlocks(text) }
             SelectionContainer {
                 CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
                     Markdown(
-                        content = normalizedText,
+                        markdownState = rememberMarkdownState(content = normalizedText, retainState = true),
                         typography = markdownTypographyCompact(),
                         modifier = Modifier.padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 8.dp),
                         imageTransformer = DataUriImageTransformer

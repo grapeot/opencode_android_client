@@ -26,6 +26,7 @@ import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.MainViewModelTimings
 import com.yage.opencode_client.ui.effectiveSelectedAgent
 import com.yage.opencode_client.ui.ModelPresets
 import com.yage.opencode_client.ui.encodeShortlist
@@ -47,6 +48,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.runs
+import io.mockk.slot
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -149,7 +151,7 @@ class MainViewModelTest {
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
-        every { repository.connectSSE() } returns emptyFlow()
+        every { repository.connectSSE(any()) } returns emptyFlow()
         coEvery { repository.getSessions(any()) } returns Result.success(emptyList())
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
@@ -189,6 +191,26 @@ class MainViewModelTest {
         val method = MainViewModel::class.java.getDeclaredMethod("handleSSEEvent", SSEEvent::class.java)
         method.isAccessible = true
         method.invoke(viewModel, event)
+    }
+
+    private fun invokePrivateNoArgs(viewModel: MainViewModel, name: String) {
+        val method = MainViewModel::class.java.getDeclaredMethod(name)
+        method.isAccessible = true
+        method.invoke(viewModel)
+    }
+
+    private fun setSseLastFrameAtMs(viewModel: MainViewModel, value: Long) {
+        val field = MainViewModel::class.java.getDeclaredField("sseLastFrameAtMs")
+        field.isAccessible = true
+        field.setLong(viewModel, value)
+    }
+
+    /** The watchdog loop is infinite; cancel it before the test ends or
+     *  runTest's final idle flush spins forever re-running its 5s delay. */
+    private fun cancelSseWatchdog(viewModel: MainViewModel) {
+        val field = MainViewModel::class.java.getDeclaredField("watchdogJob")
+        field.isAccessible = true
+        (field.get(viewModel) as? Job)?.cancel()
     }
 
     private fun loadAgents(viewModel: MainViewModel) {
@@ -959,28 +981,31 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `message created SSE refreshes session list for incoming assistant activity`() = runTest {
-        val refreshedSessions = listOf(
-            com.yage.opencode_client.data.model.Session(
-                id = "session-2",
-                directory = "/tmp/project",
-                title = "New Activity",
-                time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 2_000)
-            ),
-            com.yage.opencode_client.data.model.Session(
-                id = "session-1",
-                directory = "/tmp/project",
-                title = "Current",
-                time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 1_000)
+    fun `message created SSE on other session triggers no rest refresh`() = runTest {
+        coEvery { repository.getSessions(400) } returns Result.success(
+            listOf(
+                com.yage.opencode_client.data.model.Session(id = "session-2", directory = "/tmp/project"),
+                com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project")
             )
         )
-        coEvery { repository.getSessions(400) } returns Result.success(refreshedSessions)
-
         val viewModel = createViewModel()
         updateState(viewModel) {
             it.copy(
                 currentSessionId = "session-1",
-                sessions = listOf(refreshedSessions[1], refreshedSessions[0])
+                sessions = listOf(
+                    com.yage.opencode_client.data.model.Session(
+                        id = "session-2",
+                        directory = "/tmp/project",
+                        title = "New Activity",
+                        time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 2_000)
+                    ),
+                    com.yage.opencode_client.data.model.Session(
+                        id = "session-1",
+                        directory = "/tmp/project",
+                        title = "Current",
+                        time = com.yage.opencode_client.data.model.Session.TimeInfo(updated = 1_000)
+                    )
+                )
             )
         }
 
@@ -995,18 +1020,23 @@ class MainViewModelTest {
                 )
             )
         )
+        advanceTimeBy(1000)
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(400) }
-        assertEquals("session-2", viewModel.state.value.sessions.first().id)
+        // Other-session message events refresh the session list; the chained
+        // current-session messages refresh is a loadSessions side effect.
+        coVerify { repository.getSessions(any()) }
+        coVerify(exactly = 0) { repository.getMessages("session-2", any()) }
+        assertEquals(listOf("session-2", "session-1"), viewModel.state.value.sessions.map { it.id })
     }
 
     @Test
-    fun `message updated SSE refreshes current messages and sessions`() = runTest {
+    fun `message updated SSE without info falls back to messages refresh only`() = runTest {
+        val messages = listOf(MessageWithParts(info = Message(id = "a1", role = "assistant")))
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
         coEvery { repository.getSessions(400) } returns Result.success(
             listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
         )
-
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(currentSessionId = "session-1") }
 
@@ -1021,10 +1051,12 @@ class MainViewModelTest {
                 )
             )
         )
+        advanceTimeBy(1000)
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(400) }
-        coVerify { repository.getMessages("session-1", 30) }
+        // No parseable info payload: fall back to both REST refreshes.
+        coVerify { repository.getSessions(any()) }
+        assertEquals(messages, viewModel.state.value.messages)
     }
 
     @Test
@@ -1416,7 +1448,9 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        coVerify(atLeast = 3) { repository.getSessions(800) }
+        // session.updated + session.status idle refresh the session list;
+        // message.updated on a non-current session no longer does.
+        coVerify(atLeast = 2) { repository.getSessions(800) }
         coVerify(exactly = 0) { repository.getSessions(400) }
         assertEquals(800, viewModel.state.value.loadedSessionLimit)
         assertTrue(viewModel.state.value.sessions.any { it.id == "session-650" })
@@ -2400,7 +2434,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `handleSSEEvent missing delta clears streaming state and refreshes messages`() = runTest {
+    fun `handleSSEEvent gated part without payload falls back to rest refresh`() = runTest {
         val messages = listOf(MessageWithParts(info = Message(id = "a2", role = "assistant")))
         coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
         val viewModel = createViewModel()
@@ -2409,6 +2443,47 @@ class MainViewModelTest {
                 currentSessionId = "session-1",
                 streamingPartTexts = mapOf("message-1:part-1" to "partial"),
                 streamingReasoningPart = Part(id = "part-1", messageId = "message-1", sessionId = "session-1", type = "reasoning")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.updated",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        // Parseable but gate-incomplete: tool part without state
+                        // and no top-level delta -> REST fallback.
+                        put(
+                            "part",
+                            buildJsonObject {
+                                put("id", JsonPrimitive("part-1"))
+                                put("messageID", JsonPrimitive("message-1"))
+                                put("type", JsonPrimitive("tool"))
+                            }
+                        )
+                    }
+                )
+            )
+        )
+        advanceTimeBy(1000)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.streamingPartTexts.isEmpty())
+        assertNull(viewModel.state.value.streamingReasoningPart)
+        assertEquals(messages, viewModel.state.value.messages)
+    }
+
+    @Test
+    fun `handleSSEEvent malformed part without id falls back to rest refresh`() = runTest {
+        val messages = listOf(MessageWithParts(info = Message(id = "a2", role = "assistant")))
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                streamingPartTexts = mapOf("message-1:part-1" to "partial")
             )
         }
 
@@ -2428,7 +2503,6 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.state.value.streamingPartTexts.isEmpty())
-        assertNull(viewModel.state.value.streamingReasoningPart)
         assertEquals(messages, viewModel.state.value.messages)
     }
 
@@ -2933,13 +3007,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `handleSSEEvent message created refreshes messages for current session`() = runTest {
-        val messages = listOf(MessageWithParts(info = Message(id = "m1", role = "assistant")))
-        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
-        coEvery { repository.getSessions(400) } returns Result.success(
-            listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
-        )
-
+    fun `handleSSEEvent message created upserts info without rest`() = runTest {
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(currentSessionId = "session-1") }
 
@@ -2950,6 +3018,13 @@ class MainViewModelTest {
                     type = "message.created",
                     properties = buildJsonObject {
                         put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "info",
+                            buildJsonObject {
+                                put("id", JsonPrimitive("m1"))
+                                put("role", JsonPrimitive("assistant"))
+                            }
+                        )
                     }
                 )
             )
@@ -2957,7 +3032,11 @@ class MainViewModelTest {
         advanceTimeBy(400)
         advanceUntilIdle()
 
-        assertEquals(messages, viewModel.state.value.messages)
+        val row = viewModel.state.value.messages.single()
+        assertEquals("m1", row.info.id)
+        assertEquals("assistant", row.info.role)
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        coVerify(exactly = 0) { repository.getSessions(any()) }
     }
 
     @Test
@@ -3030,6 +3109,536 @@ class MainViewModelTest {
         )
 
         assertEquals(listOf("question-2"), viewModel.state.value.pendingQuestions.map { it.id })
+    }
+
+    @Test
+    fun `handleSSEEvent full tool part upserts locally without rest`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        val sendPart = { status: String ->
+            handleSse(
+                viewModel,
+                SSEEvent(
+                    payload = SSEPayload(
+                        type = "message.part.updated",
+                        properties = buildJsonObject {
+                            put("sessionID", JsonPrimitive("session-1"))
+                            put(
+                                "part",
+                                buildJsonObject {
+                                    put("id", JsonPrimitive("part-1"))
+                                    put("messageID", JsonPrimitive("message-1"))
+                                    put("type", JsonPrimitive("tool"))
+                                    put("tool", JsonPrimitive("bash"))
+                                    put(
+                                        "state",
+                                        buildJsonObject { put("status", JsonPrimitive(status)) }
+                                    )
+                                }
+                            )
+                        }
+                    )
+                )
+            )
+        }
+        sendPart("pending")
+        sendPart("running")
+        sendPart("completed")
+
+        val row = viewModel.state.value.messages.single()
+        assertEquals("message-1", row.info.id)
+        assertEquals("assistant", row.info.role)
+        assertEquals(1, row.parts.size)
+        assertEquals("completed", row.parts[0].state?.displayString)
+        assertEquals("tool", viewModel.state.value.partTypeIndex["part-1"])
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent part delta appends streaming text`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                partTypeIndex = mapOf("part-1" to "text")
+            )
+        }
+
+        repeat(3) { i ->
+            handleSse(
+                viewModel,
+                SSEEvent(
+                    payload = SSEPayload(
+                        type = "message.part.delta",
+                        properties = buildJsonObject {
+                            put("sessionID", JsonPrimitive("session-1"))
+                            put("messageID", JsonPrimitive("message-1"))
+                            put("partID", JsonPrimitive("part-1"))
+                            put("field", JsonPrimitive("text"))
+                            put("delta", JsonPrimitive("tok$i"))
+                        }
+                    )
+                )
+            )
+        }
+
+        assertEquals("tok0tok1tok2", viewModel.state.value.streamingPartTexts["message-1:part-1"])
+        assertNull(viewModel.state.value.streamingReasoningPart)
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent reasoning part delta updates streaming reasoning part`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                partTypeIndex = mapOf("part-r" to "reasoning")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.delta",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put("messageID", JsonPrimitive("message-1"))
+                        put("partID", JsonPrimitive("part-r"))
+                        put("field", JsonPrimitive("text"))
+                        put("delta", JsonPrimitive("thinking"))
+                    }
+                )
+            )
+        )
+
+        assertEquals("thinking", viewModel.state.value.streamingPartTexts["message-1:part-r"])
+        assertEquals("part-r", viewModel.state.value.streamingReasoningPart?.id)
+    }
+
+    @Test
+    fun `handleSSEEvent part delta ignored for other session`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.delta",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-2"))
+                        put("messageID", JsonPrimitive("message-1"))
+                        put("partID", JsonPrimitive("part-1"))
+                        put("field", JsonPrimitive("text"))
+                        put("delta", JsonPrimitive("ignored"))
+                    }
+                )
+            )
+        )
+
+        assertTrue(viewModel.state.value.streamingPartTexts.isEmpty())
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent full text part supersedes streaming text`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                streamingPartTexts = mapOf("message-1:part-t" to "partial"),
+                partTypeIndex = mapOf("part-t" to "text")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.updated",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "part",
+                            buildJsonObject {
+                                put("id", JsonPrimitive("part-t"))
+                                put("messageID", JsonPrimitive("message-1"))
+                                put("type", JsonPrimitive("text"))
+                                put("text", JsonPrimitive("complete text"))
+                            }
+                        )
+                    }
+                )
+            )
+        )
+
+        // Full frame must not wipe the overlay; idle reconcile does that.
+        // Wiping it makes the next delta render as a single token.
+        assertEquals("partial", viewModel.state.value.streamingPartTexts["message-1:part-t"])
+        // Orphan text part (no assistant row yet) does not create a shell row.
+        assertTrue(viewModel.state.value.messages.isEmpty())
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent delta after full part continues from part text`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(
+                        info = Message(id = "message-1", sessionId = "session-1", role = "assistant"),
+                        parts = listOf(
+                            Part(id = "part-t", messageId = "message-1", type = "text", text = "Hello")
+                        )
+                    )
+                ),
+                partTypeIndex = mapOf("part-t" to "text")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.delta",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put("messageID", JsonPrimitive("message-1"))
+                        put("partID", JsonPrimitive("part-t"))
+                        put("field", JsonPrimitive("text"))
+                        put("delta", JsonPrimitive("!"))
+                    }
+                )
+            )
+        )
+
+        assertEquals("Hello!", viewModel.state.value.streamingPartTexts["message-1:part-t"])
+    }
+
+    @Test
+    fun `handleSSEEvent part removed deletes part locally`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(
+                        info = Message(id = "message-1", role = "assistant"),
+                        parts = listOf(
+                            Part(id = "p1", messageId = "message-1", type = "text", text = "a"),
+                            Part(id = "p2", messageId = "message-1", type = "text", text = "b")
+                        )
+                    )
+                ),
+                partTypeIndex = mapOf("p1" to "text"),
+                streamingPartTexts = mapOf("message-1:p1" to "partial")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.removed",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put("messageID", JsonPrimitive("message-1"))
+                        put("partID", JsonPrimitive("p1"))
+                    }
+                )
+            )
+        )
+
+        val row = viewModel.state.value.messages.single()
+        assertEquals(listOf("p2"), row.parts.map { it.id })
+        assertNull(viewModel.state.value.partTypeIndex["p1"])
+        assertNull(viewModel.state.value.streamingPartTexts["message-1:p1"])
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent message removed deletes row and prunes optimistic set`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(info = Message(id = "u1", role = "user")),
+                    MessageWithParts(info = Message(id = "a1", role = "assistant"))
+                ),
+                pendingOptimisticMessageIds = setOf("u1")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.removed",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put("messageID", JsonPrimitive("u1"))
+                    }
+                )
+            )
+        )
+
+        assertEquals(listOf("a1"), viewModel.state.value.messages.map { it.info.id })
+        assertTrue(viewModel.state.value.pendingOptimisticMessageIds.isEmpty())
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent message updated upserts info keeping local parts`() = runTest {
+        val localPart = Part(id = "p1", messageId = "a1", type = "text", text = "local")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(
+                        info = Message(id = "a1", sessionId = "session-1", role = "assistant"),
+                        parts = listOf(localPart)
+                    )
+                )
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.updated",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "info",
+                            buildJsonObject {
+                                put("id", JsonPrimitive("a1"))
+                                put("role", JsonPrimitive("assistant"))
+                                put("modelID", JsonPrimitive("gpt-1"))
+                            }
+                        )
+                    }
+                )
+            )
+        )
+
+        val row = viewModel.state.value.messages.single()
+        assertEquals("gpt-1", row.info.modelId)
+        assertEquals(listOf(localPart), row.parts)
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent message updated unknown message adds empty row`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.updated",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "info",
+                            buildJsonObject {
+                                put("id", JsonPrimitive("m9"))
+                                put("role", JsonPrimitive("assistant"))
+                            }
+                        )
+                    }
+                )
+            )
+        )
+
+        val row = viewModel.state.value.messages.single()
+        assertEquals("m9", row.info.id)
+        assertTrue(row.parts.isEmpty())
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `handleSSEEvent real user part supersedes optimistic temp part`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                messages = listOf(
+                    MessageWithParts(
+                        info = Message(id = "msg-abc", sessionId = "session-1", role = "user"),
+                        parts = listOf(
+                            Part(id = "temp-part-msg-abc", messageId = "msg-abc", type = "text", text = "hello"),
+                            Part(id = "temp-file-1", messageId = "msg-abc", type = "file", mime = "image/png")
+                        )
+                    )
+                ),
+                pendingOptimisticMessageIds = setOf("msg-abc")
+            )
+        }
+
+        handleSse(
+            viewModel,
+            SSEEvent(
+                payload = SSEPayload(
+                    type = "message.part.updated",
+                    properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-1"))
+                        put(
+                            "part",
+                            buildJsonObject {
+                                put("id", JsonPrimitive("prt-real"))
+                                put("messageID", JsonPrimitive("msg-abc"))
+                                put("type", JsonPrimitive("text"))
+                                put("text", JsonPrimitive("hello"))
+                            }
+                        )
+                    }
+                )
+            )
+        )
+
+        val row = viewModel.state.value.messages.single()
+        // The temp text twin is replaced by the real part (no doubled text),
+        // the temp file part stays until the REST reconcile.
+        assertEquals(listOf("temp-file-1", "prt-real"), row.parts.map { it.id })
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+    }
+
+    @Test
+    fun `sendMessage success skips post-send messages refresh while busy`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } returns Result.success(Unit)
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project")),
+                inputText = "hello"
+            )
+        }
+
+        viewModel.sendMessage()
+        advanceTimeBy(MainViewModelTimings.messageRefreshDelayMs + 100)
+        advanceUntilIdle()
+
+        // Optimistic busy is written on ack, so both post-send messages
+        // refreshes are skipped; the idle reconcile is the convergence point.
+        coVerify(exactly = 1) { repository.sendMessage(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        assertTrue(viewModel.state.value.sessionStatuses["session-1"]?.isBusy == true)
+    }
+
+    @Test
+    fun `watchdog skips messages refresh while session is busy`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                sessionStatuses = mapOf("session-1" to SessionStatus(type = "busy"))
+            )
+        }
+        setSseLastFrameAtMs(viewModel, System.currentTimeMillis() - 30_000)
+        invokePrivateNoArgs(viewModel, "startSseWatchdog")
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        // Busy: messages reconcile is skipped, status reconcile still runs.
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        coVerify(exactly = 1) { repository.getSessionStatus() }
+        cancelSseWatchdog(viewModel)
+    }
+
+    @Test
+    fun `watchdog reconciles once after silence beyond threshold`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+        setSseLastFrameAtMs(viewModel, System.currentTimeMillis() - 30_000)
+        invokePrivateNoArgs(viewModel, "startSseWatchdog")
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        coVerify(exactly = 1) { repository.getMessages("session-1", 30) }
+        coVerify(exactly = 1) { repository.getSessionStatus() }
+        cancelSseWatchdog(viewModel)
+    }
+
+    @Test
+    fun `watchdog stays quiet while frames keep arriving`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+        setSseLastFrameAtMs(viewModel, System.currentTimeMillis())
+        invokePrivateNoArgs(viewModel, "startSseWatchdog")
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        coVerify(exactly = 0) { repository.getSessionStatus() }
+        cancelSseWatchdog(viewModel)
+    }
+
+    @Test
+    fun `watchdog stays quiet before any frame arrives instead of busy polling`() = runTest {
+        // sseLastFrameAtMs left at 0: with busy polling removed, a busy session
+        // without any SSE frame must not trigger loadMessages.
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                sessionStatuses = mapOf("session-1" to SessionStatus(type = "busy"))
+            )
+        }
+        invokePrivateNoArgs(viewModel, "startSseWatchdog")
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        cancelSseWatchdog(viewModel)
+    }
+
+    @Test
+    fun `startSSE onConnected reconciles messages and status once`() = runTest {
+        val captured = slot<() -> Unit>()
+        coEvery { repository.connectSSE(capture(captured)) } returns emptyFlow()
+        val viewModel = createViewModel()
+        updateState(viewModel) { it.copy(currentSessionId = "session-1") }
+
+        invokePrivateNoArgs(viewModel, "startSSE")
+        runCurrent()
+
+        captured.captured?.invoke()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { repository.getMessages("session-1", 30) }
+        coVerify(exactly = 1) { repository.getSessionStatus() }
+    }
+
+    @Test
+    fun `startSSE onConnected skips messages refresh while session is busy`() = runTest {
+        val captured = slot<() -> Unit>()
+        coEvery { repository.connectSSE(capture(captured)) } returns emptyFlow()
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "session-1",
+                sessionStatuses = mapOf("session-1" to SessionStatus(type = "busy"))
+            )
+        }
+
+        invokePrivateNoArgs(viewModel, "startSSE")
+        runCurrent()
+
+        captured.captured?.invoke()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        coVerify(exactly = 1) { repository.getSessionStatus() }
     }
 
     @org.junit.After

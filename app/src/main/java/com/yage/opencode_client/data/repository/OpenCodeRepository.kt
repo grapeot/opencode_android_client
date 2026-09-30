@@ -237,7 +237,8 @@ class OpenCodeRepository @Inject constructor() {
         api.findFile(query, limit)
     }
 
-    fun connectSSE(): Flow<Result<SSEEvent>> = sseClient.connect(baseUrl, username, password)
+    fun connectSSE(onConnected: (() -> Unit)? = null): Flow<Result<SSEEvent>> =
+        sseClient.connect(baseUrl, username, password, onConnected)
 
     companion object {
         const val DEFAULT_SERVER = "http://localhost:4096"
