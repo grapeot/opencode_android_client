@@ -982,6 +982,12 @@ class MainViewModelTest {
 
     @Test
     fun `message created SSE on other session triggers no rest refresh`() = runTest {
+        coEvery { repository.getSessions(400) } returns Result.success(
+            listOf(
+                com.yage.opencode_client.data.model.Session(id = "session-2", directory = "/tmp/project"),
+                com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project")
+            )
+        )
         val viewModel = createViewModel()
         updateState(viewModel) {
             it.copy(
@@ -1014,17 +1020,23 @@ class MainViewModelTest {
                 )
             )
         )
+        advanceTimeBy(1000)
         advanceUntilIdle()
 
-        // Message events no longer refresh the session list (session.created /
-        // session.updated own it) and never refresh another session's messages.
-        coVerify(exactly = 0) { repository.getSessions(any()) }
-        coVerify(exactly = 0) { repository.getMessages(any(), any()) }
+        // Other-session message events refresh the session list; the chained
+        // current-session messages refresh is a loadSessions side effect.
+        coVerify { repository.getSessions(any()) }
+        coVerify(exactly = 0) { repository.getMessages("session-2", any()) }
         assertEquals(listOf("session-2", "session-1"), viewModel.state.value.sessions.map { it.id })
     }
 
     @Test
     fun `message updated SSE without info falls back to messages refresh only`() = runTest {
+        val messages = listOf(MessageWithParts(info = Message(id = "a1", role = "assistant")))
+        coEvery { repository.getMessages("session-1", 30) } returns Result.success(messages)
+        coEvery { repository.getSessions(400) } returns Result.success(
+            listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/project"))
+        )
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(currentSessionId = "session-1") }
 
@@ -1039,12 +1051,12 @@ class MainViewModelTest {
                 )
             )
         )
+        advanceTimeBy(1000)
         advanceUntilIdle()
 
-        // No parseable info payload: fall back to the messages refresh, but
-        // never to a session list refresh.
-        coVerify(exactly = 0) { repository.getSessions(any()) }
-        coVerify { repository.getMessages("session-1", 30) }
+        // No parseable info payload: fall back to both REST refreshes.
+        coVerify { repository.getSessions(any()) }
+        assertEquals(messages, viewModel.state.value.messages)
     }
 
     @Test

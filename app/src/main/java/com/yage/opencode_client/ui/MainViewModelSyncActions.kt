@@ -144,30 +144,34 @@ internal fun handleIncomingSseEvent(
         "message.created" -> {
             val sessionId = event.payload.getString("sessionID")
             if (sessionId != null) {
-                onRefreshSessions()
                 if (sessionId == state.value.currentSessionId) {
                     recordUserMessageForStats(state, event, sessionId, onRecordUserMessage)
                     val info = parseMessageInfoFromEvent(event)
                     if (info != null) {
                         upsertMessageInfo(state, info)
                     } else {
+                        onRefreshSessions()
                         onRefreshMessages(sessionId, true)
                     }
+                } else {
+                    onRefreshSessions()
                 }
             }
         }
         "message.updated" -> {
             val sessionId = event.payload.getString("sessionID")
             if (sessionId != null) {
-                onRefreshSessions()
                 if (sessionId == state.value.currentSessionId) {
                     recordUserMessageForStats(state, event, sessionId, onRecordUserMessage)
                     val info = parseMessageInfoFromEvent(event)
                     if (info != null) {
                         upsertMessageInfo(state, info)
                     } else {
+                        onRefreshSessions()
                         onRefreshMessages(sessionId, false)
                     }
+                } else {
+                    onRefreshSessions()
                 }
             }
         }
@@ -204,14 +208,14 @@ internal fun handleIncomingSseEvent(
         "message.part.updated" -> {
             val sessionId = event.payload.getString("sessionID")
             if (sessionId != null && sessionId == state.value.currentSessionId) {
+                val deltaEvent = parseMessagePartDeltaEvent(event)
+                if (deltaEvent != null && deltaEvent.partType == "tool" && deltaEvent.partId != null) {
+                    onRecordToolPart(sessionId, deltaEvent.partId)
+                }
                 val part = parseMessagePartUpdatedFull(event)
                 when (partUpdatedUpsertDecision(part, event.payload.getString("delta") != null)) {
                     PartUpdatedDecision.ShimDelta -> {
-                        val deltaEvent = parseMessagePartDeltaEvent(event)
                         if (deltaEvent != null && deltaEvent.sessionId == state.value.currentSessionId) {
-                            if (deltaEvent.partType == "tool" && deltaEvent.partId != null) {
-                                onRecordToolPart(deltaEvent.sessionId, deltaEvent.partId)
-                            }
                             if (
                                 deltaEvent.messageId != null &&
                                 deltaEvent.partId != null &&
@@ -244,9 +248,6 @@ internal fun handleIncomingSseEvent(
                     }
                     PartUpdatedDecision.Upsert -> {
                         val fullPart = part ?: return
-                        if (fullPart.type == "tool") {
-                            onRecordToolPart(sessionId, fullPart.id)
-                        }
                         state.update { current ->
                             val (nextMessages, nextPartTypeIndex) = upsertMessagePartInMessages(
                                 current.messages,
