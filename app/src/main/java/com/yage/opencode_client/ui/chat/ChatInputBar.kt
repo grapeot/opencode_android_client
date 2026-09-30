@@ -107,7 +107,7 @@ internal fun ChatInputBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 8.dp)
         ) {
             VoiceRail(
                 isRecording = isRecording,
