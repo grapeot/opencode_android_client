@@ -312,6 +312,11 @@ fun ChatScreen(
             }
         }
 
+        val sessionStats = state.sessionStats
+        if (sessionStats != null && sessionStats.hasVisibleSegments) {
+            SessionStatusRow(stats = sessionStats)
+        }
+
         if (state.currentSessionId != null) {
             ChatInputBar(
                 text = state.inputText,
