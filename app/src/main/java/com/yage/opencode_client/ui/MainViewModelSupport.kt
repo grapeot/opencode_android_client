@@ -1,6 +1,8 @@
 package com.yage.opencode_client.ui
 
 import android.util.Log
+import com.yage.opencode_client.data.model.Message
+import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.QuestionRequest
 import com.yage.opencode_client.data.model.SSEEvent
@@ -17,7 +19,8 @@ internal object MainViewModelTimings {
     const val sessionPageSize = 400
     const val messageRetryDelayMs = 400L
     const val messageRefreshDelayMs = 1200L
-    const val busyPollingIntervalMs = 2000L
+    const val watchdogCheckMs = 5000L
+    const val watchdogSilenceMs = 20000L
 }
 
 internal data class SessionCreatedEvent(
@@ -159,6 +162,124 @@ internal fun parseSessionStatusEvent(event: SSEEvent): SessionStatusEvent? {
         )
     }.getOrNull()
 }
+
+/** Part types that mark a message as assistant-owned; these may create a shell
+ *  row before the message info arrives. text/file parts never do (role unknown). */
+internal val assistantShellPartTypes = setOf("tool", "reasoning", "step-finish", "patch")
+
+internal enum class PartUpdatedDecision {
+    /** Shim shape (top-level `delta`): keep the existing streaming/REST path. */
+    ShimDelta,
+    /** Complete native part: upsert into local messages without REST. */
+    Upsert,
+    /** Unrecognized/malformed: fall back to the existing REST refresh. */
+    RestFallback
+}
+
+/**
+ * Payload-completeness gate for `message.part.updated`. Decisions short-circuit
+ * top to bottom: a top-level `delta` is the dsh-shim shape (unchanged behavior);
+ * a tool part carrying `state` or a text/reasoning part carrying `text` is
+ * complete enough to upsert in place; anything else falls back to REST, which
+ * is exactly today's behavior (safe direction).
+ */
+internal fun partUpdatedUpsertDecision(part: Part?, hasTopLevelDelta: Boolean): PartUpdatedDecision {
+    if (hasTopLevelDelta) return PartUpdatedDecision.ShimDelta
+    val p = part ?: return PartUpdatedDecision.RestFallback
+    if (p.messageId == null) return PartUpdatedDecision.RestFallback
+    return when {
+        p.type == "tool" && p.state != null -> PartUpdatedDecision.Upsert
+        (p.type == "text" || p.type == "reasoning") && p.text != null -> PartUpdatedDecision.Upsert
+        else -> PartUpdatedDecision.RestFallback
+    }
+}
+
+internal fun parseMessagePartUpdatedFull(event: SSEEvent): Part? {
+    val partObj = event.payload.getJsonObject("part") ?: return null
+    return runCatching {
+        lenientJson.decodeFromString<Part>(partObj.toString())
+    }.getOrNull()
+}
+
+internal fun parseMessageInfoFromEvent(event: SSEEvent): Message? {
+    val infoObj = event.payload.getJsonObject("info") ?: return null
+    return runCatching {
+        lenientJson.decodeFromString<Message>(infoObj.toString())
+    }.getOrNull()
+}
+
+/** Shell row info for an assistant part that arrives before its message info.
+ *  Overwritten by the later `message.updated` info upsert; the REST reconcile
+ * is the final convergence. */
+internal fun shellInfo(messageId: String, sessionId: String?): Message =
+    Message(id = messageId, sessionId = sessionId, role = "assistant")
+
+internal fun upsertMessagePartInMessages(
+    messages: List<MessageWithParts>,
+    partTypeIndex: Map<String, String>,
+    part: Part
+): Pair<List<MessageWithParts>, Map<String, String>> {
+    val messageId = part.messageId ?: return messages to partTypeIndex
+    val index = messages.indexOfFirst { it.info.id == messageId }
+    val nextMessages = if (index >= 0) {
+        val row = messages[index]
+        val parts = row.parts.toMutableList()
+        // A real part supersedes the optimistic temp twin of the same type
+        // (the user text part that just landed for a message sent moments
+        // ago), so the row never renders the text twice before the REST
+        // reconcile.
+        if (!part.id.startsWith("temp-")) {
+            parts.removeAll { it.id.startsWith("temp-") && it.type == part.type }
+        }
+        val partIndex = parts.indexOfFirst { it.id == part.id }
+        if (partIndex >= 0) parts[partIndex] = part else parts.add(part)
+        messages.toMutableList().also { it[index] = row.copy(parts = parts) }
+    } else if (part.type in assistantShellPartTypes) {
+        messages + MessageWithParts(info = shellInfo(messageId, part.sessionId), parts = listOf(part))
+    } else {
+        messages
+    }
+    // First-write-wins: the type index only feeds the delta branch's
+    // text-vs-reasoning distinction, and a part's type never changes.
+    val nextPartTypeIndex = if (partTypeIndex.containsKey(part.id)) {
+        partTypeIndex
+    } else {
+        partTypeIndex + (part.id to part.type)
+    }
+    return nextMessages to nextPartTypeIndex
+}
+
+/** Info upsert by id: replace the row's info, keep local parts (server info is
+ *  authoritative for metadata; parts converge on the next REST reconcile). */
+internal fun upsertMessageInfoInMessages(
+    messages: List<MessageWithParts>,
+    info: Message
+): List<MessageWithParts> {
+    val index = messages.indexOfFirst { it.info.id == info.id }
+    return if (index >= 0) {
+        messages.toMutableList().also { it[index] = it[index].copy(info = info) }
+    } else {
+        messages + MessageWithParts(info = info, parts = emptyList())
+    }
+}
+
+internal fun removePartFromMessages(
+    messages: List<MessageWithParts>,
+    messageId: String,
+    partId: String
+): List<MessageWithParts> {
+    val index = messages.indexOfFirst { it.info.id == messageId }
+    if (index < 0) return messages
+    val row = messages[index]
+    return messages.toMutableList().also {
+        it[index] = row.copy(parts = row.parts.filterNot { p -> p.id == partId })
+    }
+}
+
+internal fun removeMessageFromMessages(
+    messages: List<MessageWithParts>,
+    messageId: String
+): List<MessageWithParts> = messages.filterNot { it.info.id == messageId }
 
 internal fun parseMessagePartDeltaEvent(event: SSEEvent): MessagePartDeltaEvent? {
     val sessionId = event.payload.getString("sessionID") ?: return null

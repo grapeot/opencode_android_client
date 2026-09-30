@@ -1,6 +1,6 @@
 # Plan: SSE 事件数据通路（SSE 作为消息状态的数据通路 + 移除 busy polling）
 
-Status: implementation-ready（step 2 调研完成，所有file:line基于当前树`docs/sse-event-data-path`复核；可开工）
+Status: implemented（PR #121，含 live 验证）
 
 姊妹文档：`opencode_ios_client/docs/features/sse_event_data_path/design.md`（同一设计的服务器端契约完整版本与iOS实现规范）。本文档专门针对Android实现进行描述；服务端的详细契约仅列出与Android相关的部分，其余细节参考iOS文档。
 
@@ -248,3 +248,30 @@ scope.launch {
 2. **dsh shim host 的 `server.heartbeat` 是否存在**：未验证；退化行为已设计（4.4）。
 3. **服务端是否为 user message 的 parts 发 `part.updated` 事件**：未验证；两种情况都被 optimistic 收敛逻辑覆盖（4.1）。
 4. **onOpen 首连与 `testConnection → loadInitialData` 的重叠是否加跳过标记**：实现时按网络面板观察定。
+
+## 11. 实现笔记（live 验证中发现的额外修复）
+
+以下问题在 live 验收时暴露，不属于原始 plan 的设计范围，但在合并前必须修复：
+
+### 11.1 Markdown 渲染闪屏（根因）
+
+mikepenz-markdown 库的 string 重载 `Markdown(content = ...)` 内部使用 `retainState = false`：每次 content 变化触发 `State.Loading`（已渲染文档替换为空 `Box`），再重新 parse 回 `State.Success`。流式期间每个 delta 都触发一次这个高度塌缩/恢复循环，在 `reverseLayout` 的 `LazyColumn` 上表现为明显的闪屏。
+
+**修复**：三处 `Markdown` 调用改用 `rememberMarkdownState(content = ..., retainState = true)`。保留已解析文档直到新文档就绪，消除 Loading 中间态。
+
+涉及位置：
+- `WorkspaceLinkMarkdown.kt`（`ResolvedMarkdownText` 路径，长文本回复）
+- `ChatMessageContent.kt` PartView 内联路径（短文本 / 无 workspace 时）
+- `ChatMessageContent.kt` `ReasoningCard`（展开的 thinking）
+
+### 11.2 REST 对账覆盖流式状态（busy guard）
+
+`launchLoadMessages` 有多个调用方在 SSE 流式期间仍然触发（`loadSessions` 成功链、watchdog、`onConnected` bootstrap、post-send 双补刷）。REST 全量替换 `messages` 后，SSE 已推进的流式文本被旧快照覆盖，UI 闪回。
+
+**修复**：`launchLoadMessages` 入口拦截：当前 session busy 且 messages 非空且正在显示该 session → skip。切 session（messages 已清空）不受影响。
+
+### 11.3 Compose 组合稳定性
+
+`MessageRow` 内部 `contentBlocks.forEach` / `tiles.chunked(2).forEach` 产生的子组合在 parts 列表结构变化时 slot identity 不稳定，`remember` 状态丢失。
+
+**修复**：每个 part/tile 用 `key(part.id)` 钉住 slot identity，parts 增删时其余 slot 的 `remember` 状态不丢失。

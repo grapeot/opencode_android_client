@@ -106,7 +106,7 @@ class ForkSessionTest {
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
-        every { repository.connectSSE() } returns emptyFlow()
+        every { repository.connectSSE(any()) } returns emptyFlow()
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         coEvery { repository.getPendingPermissions() } returns Result.success(emptyList())

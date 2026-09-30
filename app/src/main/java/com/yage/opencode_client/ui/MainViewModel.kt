@@ -94,6 +94,7 @@ data class AppState(
     val filePreviewOriginRoute: String? = null,
     val streamingPartTexts: Map<String, String> = emptyMap(),
     val streamingReasoningPart: Part? = null,
+    val partTypeIndex: Map<String, String> = emptyMap(),
     val isRecording: Boolean = false,
     val isTranscribing: Boolean = false,
     val hasPreservedSpeechAudio: Boolean = false,
@@ -542,7 +543,10 @@ class MainViewModel @Inject constructor(
     val state: StateFlow<AppState> = _state.asStateFlow()
 
     private var sseJob: Job? = null
-    private var pollJob: Job? = null
+    private var watchdogJob: Job? = null
+    /** Epoch millis of the last SSE frame of any type (0 = none yet). The
+     *  watchdog treats 0 as "stream not established" and never fires. */
+    private var sseLastFrameAtMs = 0L
     private var speechHeartbeatJob: Job? = null
     private var speechAudioLevelJob: Job? = null
     private var speechTranscriptionJob: Job? = null
@@ -1448,7 +1452,7 @@ class MainViewModel @Inject constructor(
                     if (health.healthy) {
                         loadInitialData()
                         startSSE()
-                        startBusyPolling()
+                        startSseWatchdog()
                         processPendingDeepLinkIfPossible()
                     }
                 }
@@ -1649,7 +1653,8 @@ class MainViewModel @Inject constructor(
         hostRuntimeJob.cancel()
         hostRuntimeJob = SupervisorJob(viewModelScope.coroutineContext[Job])
         sseJob = null
-        pollJob = null
+        watchdogJob = null
+        sseLastFrameAtMs = 0L
         _state.update {
             it.copy(
                 isConnected = false,
@@ -1667,6 +1672,7 @@ class MainViewModel @Inject constructor(
                 messages = emptyList(),
                 streamingPartTexts = emptyMap(),
                 streamingReasoningPart = null,
+                partTypeIndex = emptyMap(),
                 isLoadingMessages = false,
                 inputText = "",
                 imageAttachments = emptyList(),
@@ -2163,18 +2169,45 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(filePathToShowInFiles = null, filePreviewOriginRoute = null) }
     }
 
-    /** Poll loadMessages every 2s when session is busy, as SSE fallback. */
-    private fun startBusyPolling() {
-        pollJob?.cancel()
-        pollJob = launchBusyPolling(hostRuntimeScope, _state, ::loadMessages)
+    /** Watchdog replacing busy polling: checks every 5s, and only when no SSE
+     *  frame of any type arrived for 20s (2 heartbeat periods) runs one
+     *  loadMessages + loadSessionStatus reconcile for the current session. */
+    private fun startSseWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = launchSseWatchdog(
+            hostRuntimeScope,
+            _state,
+            onLoadMessages = ::loadMessages,
+            onLoadSessionStatus = ::loadSessionStatus,
+            lastFrameAtMs = { sseLastFrameAtMs },
+            touchLastFrameAtMs = { sseLastFrameAtMs = it }
+        )
     }
 
     private fun startSSE() {
         sseJob?.cancel()
-        sseJob = launchSseCollection(hostRuntimeScope, repository, _state, ::handleSSEEvent)
+        sseJob = launchSseCollection(
+            hostRuntimeScope,
+            repository,
+            _state,
+            onEvent = ::handleSSEEvent,
+            onConnected = {
+                // Reconnect bootstrap: OkHttp fires onOpen on every fresh
+                // (re)connect, so this also reconciles anything missed while
+                // the stream was down. loadMessages guards against session
+                // switches racing the callback.
+                val current = _state.value
+                val sessionId = current.currentSessionId
+                if (sessionId != null && current.sessionStatuses[sessionId]?.isBusy != true) {
+                    loadMessages(sessionId, false)
+                }
+                loadSessionStatus()
+            }
+        )
     }
 
     private fun handleSSEEvent(event: SSEEvent) {
+        sseLastFrameAtMs = System.currentTimeMillis()
         handleIncomingSseEvent(
             state = _state,
             event = event,
@@ -2195,7 +2228,7 @@ class MainViewModel @Inject constructor(
 
     override fun onCleared() {
         sseJob?.cancel()
-        pollJob?.cancel()
+        watchdogJob?.cancel()
         speechHeartbeatJob?.cancel()
         speechTranscriptionJob?.cancel()
         speechCleanupJob?.cancel()

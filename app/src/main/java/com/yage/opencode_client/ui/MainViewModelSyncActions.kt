@@ -1,5 +1,6 @@
 package com.yage.opencode_client.ui
 
+import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.SSEEvent
 import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.data.repository.OpenCodeRepository
@@ -13,30 +14,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
-internal fun launchBusyPolling(
-    scope: CoroutineScope,
-    state: MutableStateFlow<AppState>,
-    onLoadMessages: (String, Boolean) -> Unit
-): Job {
-    return scope.launch {
-        while (true) {
-            delay(MainViewModelTimings.busyPollingIntervalMs)
-            val sessionId = state.value.currentSessionId ?: continue
-            if (state.value.isLoadingMessages) continue
-            if (!state.value.isCurrentSessionBusy) continue
-            onLoadMessages(sessionId, false)
-        }
-    }
-}
-
 internal fun launchSseCollection(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
-    onEvent: (SSEEvent) -> Unit
+    onEvent: (SSEEvent) -> Unit,
+    onConnected: (() -> Unit)? = null
 ): Job {
     return scope.launch {
-        repository.connectSSE()
+        repository.connectSSE(onConnected)
             .catch { error ->
                 state.update { it.copy(error = "SSE Error: ${error.message}") }
             }
@@ -62,6 +48,43 @@ private fun recordUserMessageForStats(
     val info = parseMessageInfo(event) ?: return
     if (info.role == "user") {
         onRecordUserMessage(sessionId, info.id)
+    }
+}
+
+/**
+ * Watchdog that replaces the old busy polling. Every 5s it checks whether any
+ * SSE frame arrived within the last 20s (two heartbeat periods; the server
+ * hard-codes a 10s heartbeat on `/global/event`). `lastFrameAtMs == 0` means
+ * no frame ever arrived, in which case it never fires — reconnect bootstrap
+ * (onConnected) owns that case. When silence is detected it runs exactly one
+ * reconcile (loadMessages + loadSessionStatus) for the current session and
+ * touches the timestamp so the next check is a no-op.
+ */
+internal fun launchSseWatchdog(
+    scope: CoroutineScope,
+    state: MutableStateFlow<AppState>,
+    onLoadMessages: (String, Boolean) -> Unit,
+    onLoadSessionStatus: () -> Unit,
+    lastFrameAtMs: () -> Long,
+    touchLastFrameAtMs: (Long) -> Unit,
+    clock: () -> Long = { System.currentTimeMillis() }
+): Job {
+    return scope.launch {
+        while (true) {
+            delay(MainViewModelTimings.watchdogCheckMs)
+            val last = lastFrameAtMs()
+            if (last == 0L) continue
+            val now = clock()
+            if (now - last > MainViewModelTimings.watchdogSilenceMs) {
+                touchLastFrameAtMs(now)
+                state.value.currentSessionId?.let { sessionId ->
+                    if (state.value.sessionStatuses[sessionId]?.isBusy != true) {
+                        onLoadMessages(sessionId, false)
+                    }
+                    onLoadSessionStatus()
+                }
+            }
+        }
     }
 }
 
@@ -102,11 +125,13 @@ internal fun handleIncomingSseEvent(
                         sessionStatuses = it.sessionStatuses + (statusEvent.sessionId to statusEvent.status)
                     )
                 }
+
                 if (statusEvent.sessionId == state.value.currentSessionId && !statusEvent.status.isBusy) {
                     state.update {
                         it.copy(
                             streamingPartTexts = emptyMap(),
-                            streamingReasoningPart = null
+                            streamingReasoningPart = null,
+                            partTypeIndex = emptyMap()
                         )
                     }
                     onRefreshSessions()
@@ -122,7 +147,12 @@ internal fun handleIncomingSseEvent(
                 onRefreshSessions()
                 if (sessionId == state.value.currentSessionId) {
                     recordUserMessageForStats(state, event, sessionId, onRecordUserMessage)
-                    onRefreshMessages(sessionId, true)
+                    val info = parseMessageInfoFromEvent(event)
+                    if (info != null) {
+                        upsertMessageInfo(state, info)
+                    } else {
+                        onRefreshMessages(sessionId, true)
+                    }
                 }
             }
         }
@@ -132,41 +162,153 @@ internal fun handleIncomingSseEvent(
                 onRefreshSessions()
                 if (sessionId == state.value.currentSessionId) {
                     recordUserMessageForStats(state, event, sessionId, onRecordUserMessage)
-                    onRefreshMessages(sessionId, false)
+                    val info = parseMessageInfoFromEvent(event)
+                    if (info != null) {
+                        upsertMessageInfo(state, info)
+                    } else {
+                        onRefreshMessages(sessionId, false)
+                    }
                 }
             }
         }
+        "message.part.delta" -> {
+            // Native-server streaming text. text and reasoning both use
+            // field:"text", so partTypeIndex (populated by message.part.updated
+            // upserts) is what distinguishes them.
+            val sessionId = event.payload.getString("sessionID") ?: return
+            if (sessionId != state.value.currentSessionId) return
+            if (event.payload.getString("field") != "text") return
+            val messageId = event.payload.getString("messageID") ?: return
+            val partId = event.payload.getString("partID") ?: return
+            val delta = event.payload.getString("delta") ?: return
+            if (delta.isBlank()) return
+            val key = "$messageId:$partId"
+            // Seed from the part already in the row. A part.updated frame can
+            // land between deltas; starting the overlay from "" would flash
+            // the UI down to just this token.
+            val previous = state.value.streamingPartTexts[key]
+                ?: existingPartText(state.value.messages, messageId, partId)
+                ?: ""
+            val isReasoning = state.value.partTypeIndex[partId] == "reasoning"
+            state.update {
+                it.copy(
+                    streamingPartTexts = it.streamingPartTexts + (key to (previous + delta)),
+                    streamingReasoningPart = if (isReasoning) {
+                        reasoningPartOrNull("reasoning", partId, messageId, sessionId)
+                    } else {
+                        it.streamingReasoningPart
+                    }
+                )
+            }
+        }
         "message.part.updated" -> {
-            val deltaEvent = parseMessagePartDeltaEvent(event) ?: return
-            if (deltaEvent.sessionId == state.value.currentSessionId) {
-                if (deltaEvent.partType == "tool" && deltaEvent.partId != null) {
-                    onRecordToolPart(deltaEvent.sessionId, deltaEvent.partId)
-                }
-                if (
-                    deltaEvent.messageId != null &&
-                    deltaEvent.partId != null &&
-                    !deltaEvent.delta.isNullOrBlank()
-                ) {
-                    val key = "${deltaEvent.messageId}:${deltaEvent.partId}"
-                    val previousValue = state.value.streamingPartTexts[key] ?: ""
-                    state.update {
-                        it.copy(
-                            streamingPartTexts = it.streamingPartTexts + (key to (previousValue + deltaEvent.delta)),
-                            streamingReasoningPart = reasoningPartOrNull(
-                                partType = deltaEvent.partType,
-                                partId = deltaEvent.partId,
-                                messageId = deltaEvent.messageId,
-                                sessionId = deltaEvent.sessionId
-                            ) ?: it.streamingReasoningPart
-                        )
+            val sessionId = event.payload.getString("sessionID")
+            if (sessionId != null && sessionId == state.value.currentSessionId) {
+                val part = parseMessagePartUpdatedFull(event)
+                when (partUpdatedUpsertDecision(part, event.payload.getString("delta") != null)) {
+                    PartUpdatedDecision.ShimDelta -> {
+                        val deltaEvent = parseMessagePartDeltaEvent(event)
+                        if (deltaEvent != null && deltaEvent.sessionId == state.value.currentSessionId) {
+                            if (deltaEvent.partType == "tool" && deltaEvent.partId != null) {
+                                onRecordToolPart(deltaEvent.sessionId, deltaEvent.partId)
+                            }
+                            if (
+                                deltaEvent.messageId != null &&
+                                deltaEvent.partId != null &&
+                                !deltaEvent.delta.isNullOrBlank()
+                            ) {
+                                val key = "${deltaEvent.messageId}:${deltaEvent.partId}"
+                                val previousValue = state.value.streamingPartTexts[key] ?: ""
+                                state.update {
+                                    it.copy(
+                                        streamingPartTexts = it.streamingPartTexts + (key to (previousValue + deltaEvent.delta)),
+                                        streamingReasoningPart = reasoningPartOrNull(
+                                            partType = deltaEvent.partType,
+                                            partId = deltaEvent.partId,
+                                            messageId = deltaEvent.messageId,
+                                            sessionId = deltaEvent.sessionId
+                                        ) ?: it.streamingReasoningPart
+                                    )
+                                }
+                            } else {
+                                state.update {
+                                    it.copy(
+                                        streamingPartTexts = emptyMap(),
+                                        streamingReasoningPart = null,
+                                        partTypeIndex = emptyMap()
+                                    )
+                                }
+                                onRefreshMessages(deltaEvent.sessionId, false)
+                            }
+                        }
                     }
-                } else {
-                    state.update {
-                        it.copy(streamingPartTexts = emptyMap(), streamingReasoningPart = null)
+                    PartUpdatedDecision.Upsert -> {
+                        val fullPart = part ?: return
+                        if (fullPart.type == "tool") {
+                            onRecordToolPart(sessionId, fullPart.id)
+                        }
+                        state.update { current ->
+                            val (nextMessages, nextPartTypeIndex) = upsertMessagePartInMessages(
+                                current.messages,
+                                current.partTypeIndex,
+                                fullPart
+                            )
+                            current.copy(
+                                messages = nextMessages,
+                                partTypeIndex = nextPartTypeIndex
+                                // Keep the streaming overlay. Clearing it here
+                                // makes the next delta render as a single token
+                                // until the following full frame, which is the
+                                // single-vs-streaming flicker. Idle reconcile
+                                // clears the overlay once the turn is done.
+                            )
+                        }
                     }
-                    onRefreshMessages(deltaEvent.sessionId, false)
+                    PartUpdatedDecision.RestFallback -> {
+                        state.update {
+                            it.copy(
+                                streamingPartTexts = emptyMap(),
+                                streamingReasoningPart = null,
+                                partTypeIndex = emptyMap()
+                            )
+                        }
+                        onRefreshMessages(sessionId, false)
+                    }
                 }
             }
+        }
+        "message.part.removed" -> {
+            val sessionId = event.payload.getString("sessionID") ?: return
+            if (sessionId != state.value.currentSessionId) return
+            val messageId = event.payload.getString("messageID") ?: return
+            val partId = event.payload.getString("partID") ?: return
+            state.update {
+                it.copy(
+                    messages = removePartFromMessages(it.messages, messageId, partId),
+                    partTypeIndex = it.partTypeIndex - partId,
+                    streamingPartTexts = it.streamingPartTexts - "$messageId:$partId",
+                    streamingReasoningPart = if (it.streamingReasoningPart?.id == partId) {
+                        null
+                    } else {
+                        it.streamingReasoningPart
+                    }
+                )
+            }
+        }
+        "message.removed" -> {
+            val sessionId = event.payload.getString("sessionID") ?: return
+            if (sessionId != state.value.currentSessionId) return
+            val messageId = event.payload.getString("messageID") ?: return
+            state.update {
+                it.copy(
+                    messages = removeMessageFromMessages(it.messages, messageId),
+                    pendingOptimisticMessageIds = it.pendingOptimisticMessageIds - messageId
+                )
+            }
+        }
+        "server.heartbeat" -> {
+            // No action needed: the watchdog's frame timestamp is stamped in
+            // handleSSEEvent before dispatch, so every frame counts.
         }
         "permission.asked" -> {
             onLoadPendingPermissions()
@@ -236,5 +378,28 @@ internal fun handleIncomingSseEvent(
                 onRefreshMessages(sessionId, false)
             }
         }
+    }
+}
+
+/** Info upsert by id (server info authoritative for metadata, local parts kept
+ *  until the next REST reconcile). Prunes the optimistic set on hit, matching
+ *  `mergePendingOptimisticMessages` semantics. */
+private fun existingPartText(
+    messages: List<com.yage.opencode_client.data.model.MessageWithParts>,
+    messageId: String,
+    partId: String
+): String? {
+    return messages.firstOrNull { it.info.id == messageId }
+        ?.parts
+        ?.firstOrNull { it.id == partId }
+        ?.text
+}
+
+private fun upsertMessageInfo(state: MutableStateFlow<AppState>, info: Message) {
+    state.update {
+        it.copy(
+            messages = upsertMessageInfoInMessages(it.messages, info),
+            pendingOptimisticMessageIds = it.pendingOptimisticMessageIds - info.id
+        )
     }
 }
