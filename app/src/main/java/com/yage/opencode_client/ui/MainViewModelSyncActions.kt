@@ -49,13 +49,31 @@ internal fun launchSseCollection(
     }
 }
 
+/** Records a user-message SSE event for the round counter when the payload
+ *  carries an `info` object with a user role. Dedup happens downstream
+ *  (seen-ID sets), so calling on both created and updated is safe. */
+private fun recordUserMessageForStats(
+    state: MutableStateFlow<AppState>,
+    event: SSEEvent,
+    sessionId: String,
+    onRecordUserMessage: (String, String) -> Unit
+) {
+    if (sessionId != state.value.currentSessionId) return
+    val info = parseMessageInfo(event) ?: return
+    if (info.role == "user") {
+        onRecordUserMessage(sessionId, info.id)
+    }
+}
+
 internal fun handleIncomingSseEvent(
     state: MutableStateFlow<AppState>,
     event: SSEEvent,
     onRefreshMessages: (String, Boolean) -> Unit,
     onRefreshSessions: () -> Unit,
     onLoadPendingPermissions: () -> Unit,
-    onNonFatalIssue: (String) -> Unit
+    onNonFatalIssue: (String) -> Unit,
+    onRecordUserMessage: (String, String) -> Unit = { _, _ -> },
+    onRecordToolPart: (String, String) -> Unit = { _, _ -> }
 ) {
     when (event.payload.type) {
         "session.created" -> {
@@ -103,6 +121,7 @@ internal fun handleIncomingSseEvent(
             if (sessionId != null) {
                 onRefreshSessions()
                 if (sessionId == state.value.currentSessionId) {
+                    recordUserMessageForStats(state, event, sessionId, onRecordUserMessage)
                     onRefreshMessages(sessionId, true)
                 }
             }
@@ -112,6 +131,7 @@ internal fun handleIncomingSseEvent(
             if (sessionId != null) {
                 onRefreshSessions()
                 if (sessionId == state.value.currentSessionId) {
+                    recordUserMessageForStats(state, event, sessionId, onRecordUserMessage)
                     onRefreshMessages(sessionId, false)
                 }
             }
@@ -119,6 +139,9 @@ internal fun handleIncomingSseEvent(
         "message.part.updated" -> {
             val deltaEvent = parseMessagePartDeltaEvent(event) ?: return
             if (deltaEvent.sessionId == state.value.currentSessionId) {
+                if (deltaEvent.partType == "tool" && deltaEvent.partId != null) {
+                    onRecordToolPart(deltaEvent.sessionId, deltaEvent.partId)
+                }
                 if (
                     deltaEvent.messageId != null &&
                     deltaEvent.partId != null &&

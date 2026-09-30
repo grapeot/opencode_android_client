@@ -128,6 +128,10 @@
     <string name="chat_context_cost">成本</string>
     <string name="chat_context_no_cost">无成本数据</string>
     <string name="chat_context_unknown">未知</string>
+    <string name="chat_status_rounds">轮数</string>
+    <string name="chat_status_tool_calls">工具调用</string>
+    <string name="chat_status_tokens">token</string>
+    <string name="chat_status_cache_hit">缓存命中</string>
     <string name="ai_usage_title">用量与限额</string>
     <string name="ai_usage_refresh">刷新</string>
     <string name="ai_usage_loading">正在加载缓存的 quota 数据…</string>

@@ -16,7 +16,9 @@ data class Session(
     val time: TimeInfo? = null,
     val share: ShareInfo? = null,
     val summary: SummaryInfo? = null,
-    val revert: RevertInfo? = null
+    val revert: RevertInfo? = null,
+    val tokens: Message.TokenInfo? = null,
+    val cost: Double? = null
 ) {
     /** Display name for UI: title, or last path segment of directory, or id */
     val displayName: String

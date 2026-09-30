@@ -29,6 +29,18 @@ internal data class SessionStatusEvent(
     val status: SessionStatus
 )
 
+internal data class ParsedMessageInfo(
+    val id: String,
+    val role: String
+)
+
+internal fun parseMessageInfo(event: SSEEvent): ParsedMessageInfo? {
+    val info = event.payload.getJsonObject("info") ?: return null
+    val id = (info["id"] as? JsonPrimitive)?.content ?: return null
+    val role = (info["role"] as? JsonPrimitive)?.content ?: return null
+    return ParsedMessageInfo(id = id, role = role)
+}
+
 internal data class MessagePartDeltaEvent(
     val sessionId: String,
     val messageId: String?,

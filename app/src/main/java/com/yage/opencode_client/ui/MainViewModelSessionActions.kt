@@ -173,6 +173,7 @@ internal fun selectSessionState(
     state.update {
         it.copy(
             currentSessionId = sessionId,
+            currentSessionCounts = null,
             messages = emptyList(),
             pendingOptimisticMessageIds = emptySet(),
             streamingPartTexts = emptyMap(),
@@ -315,7 +316,8 @@ internal fun launchLoadMoreMessages(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
-    sessionId: String
+    sessionId: String,
+    onMessagesLoaded: (() -> Unit)? = null
 ) {
     if (state.value.isLoadingMessages) return
     val newLimit = state.value.messageLimit + 30
@@ -333,6 +335,7 @@ internal fun launchLoadMoreMessages(
                             isLoadingMessages = false
                         )
                     }
+                    onMessagesLoaded?.invoke()
                 } else {
                     state.update { it.copy(isLoadingMessages = false) }
                 }
