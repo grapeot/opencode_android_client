@@ -28,6 +28,13 @@ class SessionStatusFormatterTest {
     }
 
     @Test
+    fun `rounding that overflows a unit carries up`() {
+        assertEquals("1M", compactTokenCount(999_999))
+        assertEquals("1B", compactTokenCount(999_999_999))
+        assertEquals("1T", compactTokenCount(999_999_999_999))
+    }
+
+    @Test
     fun `values of ten or more in a unit use one decimal`() {
         assertEquals("10K", compactTokenCount(10_000))
         assertEquals("10M", compactTokenCount(10_000_000))

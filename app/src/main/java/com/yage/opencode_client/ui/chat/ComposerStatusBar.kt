@@ -40,21 +40,37 @@ import kotlinx.coroutines.delay
 
 /** Compact token count mirroring the iOS status line: < 1000 as-is, then
  *  K/M/B/T with one decimal for values >= 10 and two below, trailing zeros
- *  trimmed ("950", "1K", "85.2K", "1.11M", "2B"). */
+ *  trimmed ("950", "1K", "85.2K", "1.11M", "2B"). Rounding that overflows the
+ *  unit carries up (999_999 -> "1M", 999_999_999_999 -> "1T"). */
 internal fun compactTokenCount(value: Long): String {
     if (value < 1000) return value.toString()
-    val (divisor, suffix) = when {
-        value >= 1_000_000_000_000 -> 1_000_000_000_000L to "T"
-        value >= 1_000_000_000 -> 1_000_000_000L to "B"
-        value >= 1_000_000 -> 1_000_000L to "M"
-        else -> 1_000L to "K"
+    var divisor = when {
+        value >= 1_000_000_000_000 -> 1_000_000_000_000L
+        value >= 1_000_000_000 -> 1_000_000_000L
+        value >= 1_000_000 -> 1_000_000L
+        else -> 1_000L
     }
-    val scaled = value / divisor.toDouble()
-    val text = if (scaled >= 10) {
-        String.format(Locale.US, "%.1f", scaled)
-    } else {
-        String.format(Locale.US, "%.2f", scaled)
+    var suffix = when (divisor) {
+        1_000_000_000_000L -> "T"
+        1_000_000_000L -> "B"
+        1_000_000L -> "M"
+        else -> "K"
     }
+    var scaled = value / divisor.toDouble()
+    var decimals = if (scaled >= 10) 1 else 2
+    // Carry into the next unit when rounding overflows (999_999 -> 1M).
+    val factor = if (decimals == 1) 10.0 else 100.0
+    if (suffix != "T" && (scaled * factor).roundToLong() / factor >= 1000) {
+        divisor *= 1000
+        suffix = when (suffix) {
+            "K" -> "M"
+            "M" -> "B"
+            else -> "T"
+        }
+        scaled = value / divisor.toDouble()
+        decimals = 2
+    }
+    val text = String.format(Locale.US, "%.${decimals}f", scaled)
     return trimTrailingZeros(text) + suffix
 }
 
