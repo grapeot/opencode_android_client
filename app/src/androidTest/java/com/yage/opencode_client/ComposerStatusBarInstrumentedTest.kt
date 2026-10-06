@@ -19,6 +19,8 @@ class ComposerStatusBarInstrumentedTest {
         isBusy: Boolean = false,
         agentActivityText: String? = null,
         isTranscribing: Boolean = false,
+        stopwatchStartedAtMillis: Long? = null,
+        stopwatchEndedAtMillis: Long? = null,
     ) {
         composeRule.setContent {
             MaterialTheme {
@@ -26,7 +28,8 @@ class ComposerStatusBarInstrumentedTest {
                     stats = stats,
                     isBusy = isBusy,
                     agentActivityText = agentActivityText,
-                    agentStartedAtMillis = if (isBusy) System.currentTimeMillis() - 34_000L else null,
+                    stopwatchStartedAtMillis = stopwatchStartedAtMillis,
+                    stopwatchEndedAtMillis = stopwatchEndedAtMillis,
                     isRecording = false,
                     isTranscribing = isTranscribing,
                     hasPreservedSpeechAudio = false,
@@ -39,16 +42,41 @@ class ComposerStatusBarInstrumentedTest {
 
     @Test
     fun busyShowsActivityElapsedAndInterruptMenu() {
-        bar(isBusy = true)
+        // Deterministic frozen pair (no wall-clock race): the reading holds at
+        // a fixed 00:34 while the transient activity row still renders.
+        val start = 1_700_000_000_000L
+        bar(
+            isBusy = true,
+            stopwatchStartedAtMillis = start,
+            stopwatchEndedAtMillis = start + 34_000L,
+        )
 
         composeRule.onNodeWithText("Agent running").assertIsDisplayed()
-        composeRule.onNodeWithText("0:34").assertIsDisplayed()
+        composeRule.onNodeWithText("00:34").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Interrupt agent").assertIsDisplayed()
     }
 
     @Test
+    fun stoppedTurnShowsFrozenStopwatchWithoutActivityOrMenu() {
+        // Frozen at a fixed start/end: the reading holds and the transient
+        // activity row is absent (agent not busy).
+        val start = 1_000_000L
+        bar(stopwatchStartedAtMillis = start, stopwatchEndedAtMillis = start + 221_000L)
+
+        composeRule.onNodeWithText("03:41").assertIsDisplayed()
+        composeRule.onNodeWithText("Agent running").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Interrupt agent").assertDoesNotExist()
+    }
+
+    @Test
     fun busyAndTranscribingJoinWithMiddot() {
-        bar(isBusy = true, isTranscribing = true)
+        val start = 1_700_000_000_000L
+        bar(
+            isBusy = true,
+            isTranscribing = true,
+            stopwatchStartedAtMillis = start,
+            stopwatchEndedAtMillis = start + 34_000L,
+        )
 
         composeRule.onNodeWithText("Agent running · Transcribing").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Interrupt agent").assertIsDisplayed()
