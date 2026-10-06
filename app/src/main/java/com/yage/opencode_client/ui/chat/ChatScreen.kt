@@ -166,6 +166,32 @@ fun ChatScreen(
         )
     }
 
+    // Stopwatch end: while the latest turn runs it is null (follows now), once
+    // it stops it freezes at that turn's completion instant. Match by the
+    // latest user message id so a just-sent prompt reads as running from zero
+    // rather than briefly flashing the previous turn's value. If the session
+    // is idle but the latest turn has no completed activity (aborted/errored
+    // before any assistant output), freeze at the turn's own start so the
+    // reading holds at 00:00 instead of ticking forever.
+    val turnStopwatchEndMillis = remember(
+        state.currentSessionId,
+        state.visibleMessages,
+        currentSessionIsRunning,
+        completedTurnActivities,
+    ) {
+        val lastUser = state.currentSessionId?.let { sid ->
+            state.visibleMessages.lastOrNull { it.info.sessionId == sid && it.info.isUser }
+        }
+        val completedEnd = completedTurnActivities.lastOrNull()
+            ?.takeIf { it.id == lastUser?.info?.id }
+            ?.endedAtMillis
+        turnStopwatchFrozenEnd(
+            completedTurnEndMillis = completedEnd,
+            isRunning = currentSessionIsRunning,
+            lastUserCreatedMillis = lastUser?.info?.time?.created,
+        )
+    }
+
     val validDockedRequest = dockedPreviewRequest?.takeIf {
         it.belongsTo(state.currentHostProfileId, state.currentSessionId, state.currentSession?.directory)
     }
@@ -317,7 +343,8 @@ fun ChatScreen(
                 stats = state.sessionStats,
                 isBusy = currentSessionIsRunning,
                 agentActivityText = currentActivity?.text,
-                agentStartedAtMillis = currentActivity?.startedAtMillis,
+                stopwatchStartedAtMillis = currentActivity?.startedAtMillis,
+                stopwatchEndedAtMillis = turnStopwatchEndMillis,
                 isRecording = state.isRecording,
                 isTranscribing = state.isTranscribing,
                 hasPreservedSpeechAudio = state.hasPreservedSpeechAudio,

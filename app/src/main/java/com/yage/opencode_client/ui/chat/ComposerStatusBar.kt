@@ -84,23 +84,60 @@ private fun StatusSeparator(style: androidx.compose.ui.text.TextStyle, color: an
     Text("·", style = style, color = color)
 }
 
-private fun formatElapsed(elapsedMillis: Long): String {
-    val seconds = (elapsedMillis.coerceAtLeast(0L) / 1_000L).toInt()
-    return "%d:%02d".format(seconds / 60, seconds % 60)
+/** Zero-padded turn stopwatch for the persistent status line: `MM:SS` below
+ *  an hour, `HH:MM:SS` at or above. It counts up while the agent works and
+ *  holds at the completion instant once the turn stops (the caller freezes
+ *  the end time). Negative input (clock skew) clamps to `00:00`. Hours are not
+ *  capped or truncated, so a long-lived session reads `49:23:10` in full. */
+internal fun formatTurnStopwatch(elapsedMillis: Long): String {
+    val total = (elapsedMillis.coerceAtLeast(0L) / 1_000L).toInt()
+    val hours = total / 3600
+    val minutes = (total % 3600) / 60
+    val seconds = total % 60
+    return if (hours > 0) {
+        String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
+}
+
+/** End millis for the turn stopwatch: the frozen completion instant when the
+ *  turn has stopped, otherwise `nowMillis` so it keeps counting while busy. */
+internal fun turnStopwatchEnd(frozenEndMillis: Long?, nowMillis: Long): Long =
+    frozenEndMillis ?: nowMillis
+
+/** Frozen end for the current turn, or null while it is still running.
+ *  Preference order: the turn's completion instant when the turn stopped;
+ *  null (follow `now`) while it runs; and, if the session is idle yet the turn
+ *  has no completion instant (aborted/errored before any assistant output),
+ *  the turn's own start so the reading holds at 00:00 instead of ticking on. */
+internal fun turnStopwatchFrozenEnd(
+    completedTurnEndMillis: Long?,
+    isRunning: Boolean,
+    lastUserCreatedMillis: Long?,
+): Long? = when {
+    completedTurnEndMillis != null -> completedTurnEndMillis
+    isRunning -> null
+    else -> lastUserCreatedMillis
 }
 
 /** Single status bar shown directly above the composer. Left side: the
  *  persistent session counters (rounds / tool calls / total tokens / cache
- *  hit rate, segments with no data omitted). Right side: the transient agent
- *  activity (dot + activity + elapsed + interrupt menu) and voice status,
- *  joined with middots exactly as the old in-composer row did. The row is
- *  not composed when neither side has anything to show. */
+ *  hit rate, segments with no data omitted) followed by the turn stopwatch.
+ *  Right side: the transient agent activity (dot + activity + interrupt menu)
+ *  and voice status, joined with middots exactly as the old in-composer row
+ *  did. The row is not composed when there is nothing to show.
+ *
+ *  The stopwatch is visible persistently once a session has a user message:
+ *  it counts up while the agent works, freezes at the completion instant once
+ *  the turn stops, and resets to zero when a new message moves the anchor. */
 @Composable
 internal fun ComposerStatusBar(
     stats: AppState.SessionStats?,
     isBusy: Boolean,
     agentActivityText: String?,
-    agentStartedAtMillis: Long?,
+    stopwatchStartedAtMillis: Long?,
+    stopwatchEndedAtMillis: Long?,
     isRecording: Boolean,
     isTranscribing: Boolean,
     hasPreservedSpeechAudio: Boolean,
@@ -116,16 +153,19 @@ internal fun ComposerStatusBar(
     }
     val activityStatus = if (isBusy) agentActivityText ?: stringResource(R.string.chat_agent_running) else null
     val status = listOfNotNull(activityStatus, voiceStatus).joinToString(" · ").takeIf { it.isNotEmpty() }
-    val hasCounters = stats?.hasVisibleSegments == true
-    if (!hasCounters && status == null) return
+    val visibleStats = stats?.takeIf { it.hasVisibleSegments }
+    val showCountersRow = visibleStats != null || stopwatchStartedAtMillis != null
+    if (!showCountersRow && status == null) return
 
     val labelStyle = MaterialTheme.typography.labelMedium
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     var menuExpanded by remember { mutableStateOf(false) }
-    var nowMillis by remember(agentStartedAtMillis) { mutableStateOf(System.currentTimeMillis()) }
+    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(isBusy, agentStartedAtMillis) {
-        while (isBusy && agentStartedAtMillis != null) {
+    // Tick once per second while the stopwatch is running (anchor present and
+    // not yet frozen); once frozen the value is pinned, so no ticking needed.
+    LaunchedEffect(stopwatchStartedAtMillis, stopwatchEndedAtMillis) {
+        while (stopwatchStartedAtMillis != null && stopwatchEndedAtMillis == null) {
             nowMillis = System.currentTimeMillis()
             delay(1_000)
         }
@@ -137,52 +177,67 @@ internal fun ComposerStatusBar(
             .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (hasCounters && stats != null) {
+        if (showCountersRow) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 var hasPrevious = false
 
-                stats.rounds?.let { rounds ->
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = stringResource(R.string.chat_status_rounds),
-                        tint = color,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(text = rounds.toString(), style = labelStyle, color = color)
-                    hasPrevious = true
+                if (visibleStats != null) {
+                    visibleStats.rounds?.let { rounds ->
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = stringResource(R.string.chat_status_rounds),
+                            tint = color,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(text = rounds.toString(), style = labelStyle, color = color)
+                        hasPrevious = true
+                    }
+
+                    visibleStats.toolCalls?.let { toolCalls ->
+                        if (hasPrevious) StatusSeparator(labelStyle, color)
+                        Icon(
+                            Icons.Default.Construction,
+                            contentDescription = stringResource(R.string.chat_status_tool_calls),
+                            tint = color,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(text = toolCalls.toString(), style = labelStyle, color = color)
+                        hasPrevious = true
+                    }
+
+                    visibleStats.totalTokens?.let { totalTokens ->
+                        if (hasPrevious) StatusSeparator(labelStyle, color)
+                        Text(
+                            text = "${compactTokenCount(totalTokens.toLong())} ${stringResource(R.string.chat_status_tokens)}",
+                            style = labelStyle,
+                            color = color
+                        )
+                        hasPrevious = true
+                    }
+
+                    visibleStats.cacheHitRate?.let { rate ->
+                        if (hasPrevious) StatusSeparator(labelStyle, color)
+                        val percent = (rate * 100f).roundToLong().coerceIn(0L, 100L)
+                        Text(
+                            text = "$percent% ${stringResource(R.string.chat_status_cache_hit)}",
+                            style = labelStyle,
+                            color = color
+                        )
+                        hasPrevious = true
+                    }
                 }
 
-                stats.toolCalls?.let { toolCalls ->
-                    if (hasPrevious) StatusSeparator(labelStyle, color)
-                    Icon(
-                        Icons.Default.Construction,
-                        contentDescription = stringResource(R.string.chat_status_tool_calls),
-                        tint = color,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(text = toolCalls.toString(), style = labelStyle, color = color)
-                    hasPrevious = true
-                }
-
-                stats.totalTokens?.let { totalTokens ->
+                stopwatchStartedAtMillis?.let { startedAt ->
                     if (hasPrevious) StatusSeparator(labelStyle, color)
                     Text(
-                        text = "${compactTokenCount(totalTokens.toLong())} ${stringResource(R.string.chat_status_tokens)}",
+                        text = formatTurnStopwatch(
+                            turnStopwatchEnd(stopwatchEndedAtMillis, nowMillis) - startedAt
+                        ),
                         style = labelStyle,
-                        color = color
-                    )
-                    hasPrevious = true
-                }
-
-                stats.cacheHitRate?.let { rate ->
-                    if (hasPrevious) StatusSeparator(labelStyle, color)
-                    val percent = (rate * 100f).roundToLong().coerceIn(0L, 100L)
-                    Text(
-                        text = "$percent% ${stringResource(R.string.chat_status_cache_hit)}",
-                        style = labelStyle,
+                        fontFamily = FontFamily.Monospace,
                         color = color
                     )
                 }
@@ -190,7 +245,7 @@ internal fun ComposerStatusBar(
         }
 
         status?.let {
-            if (hasCounters) Spacer(modifier = Modifier.width(8.dp))
+            if (showCountersRow) Spacer(modifier = Modifier.width(8.dp))
             if (isBusy) {
                 Icon(
                     Icons.Default.Circle,
@@ -205,17 +260,8 @@ internal fun ComposerStatusBar(
                 style = labelStyle,
                 color = color,
                 maxLines = 1,
-                modifier = if (hasCounters) Modifier.weight(1f) else Modifier
+                modifier = if (showCountersRow) Modifier.weight(1f) else Modifier
             )
-            if (isBusy && agentStartedAtMillis != null) {
-                Text(
-                    text = formatElapsed(nowMillis - agentStartedAtMillis),
-                    style = labelStyle,
-                    fontFamily = FontFamily.Monospace,
-                    color = color.copy(alpha = 0.7f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
             if (isBusy) {
                 Box {
                     IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {

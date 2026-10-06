@@ -4,11 +4,12 @@
 
 ## Bottom Line
 
-在 `ChatInputBar` 上方加一行常驻状态行，为当前 session 显示四段：`⟳ rounds · 🔧 tool calls · 1.07M tok · 96% cache hit`（无数据段隐藏）。这是 iOS 同功能（`opencode_ios_client/docs/features/session_status_bar/design.md`，已上线）的 Android 移植，口径逐条对齐：
+在 `ChatInputBar` 上方加一行常驻状态行，为当前 session 显示四段：`⟳ rounds · 🔧 tool calls · 1.07M tok · 96% cache hit`（无数据段隐藏），再加一段「本轮秒表」（见下）。这是 iOS 同功能的 Android 移植，口径逐条对齐：
 
 - **tokens / cache hit**：服务端 session 对象自带 `tokens`/`cost` 累计值（`/session` 列表与 `session.updated` SSE 都有，iOS 已在 live server 实测确认）。Android 侧只需给 `Session` 模型补解析（此前反序列化丢弃了这两个字段），数据经既有两条通路（REST `getSessions`、SSE `session.updated` upsert）自动流入 `AppState.sessions`，零新增网络请求。subagent 子 session 用量按 `parentID` 递归并入主数字（父聚合是 self-only，客户端求和即正确）。
 - **rounds / tool calls**：服务端无现成聚合，照 iOS 方案本地持久化「计数 + 已见 ID 集合」（`SessionStatsStore`，SharedPreferences 后端），增量来自 SSE 事件，每次 `loadMessages` 用 message 窗口对账，revert 后重 seed。
-- 挂载点：`ChatScreen.kt` 根 `Column` 内、`ChatInputBar` 之前；现有 `composerStatus`（Thinking/语音/耗时）保持原样作为下行。
+- **本轮秒表**：常驻显示「当前这一轮 agent 工作了多久」，零填充 `MM:SS`（<1h）/ `HH:MM:SS`（≥1h）。锚点是当前 session 最后一条 user message 的 `time.created`；终点是「这一轮的完成时刻」——agent 工作时跟 `now`（数字持续走），agent 一停冻结在该轮 assistant 完成时刻（数字停住），发新消息后锚点切到新 user message、从 `00:00` 重走。复用 `TurnActivity.endedAtMillis`（running 为 null、completed 为冻结值）+ 纯函数 `turnStopwatchEnd(frozenEndMillis, nowMillis)`；按最后一条 user message 的 ID 匹配完成时刻，发送后 status 尚未 busy 的窗口期按 running 处理，不闪回上一轮旧值。
+- 挂载点：`ChatScreen.kt` 根 `Column` 内、`ChatInputBar` 之前；现有 `composerStatus`（Thinking/语音）保持原样作为下行右侧（耗时已上移到常驻计数行的尾部，不再在右侧重复）。
 
 ## iOS 是怎么做的（口径基准）
 
@@ -84,8 +85,8 @@ data class SessionStats(rounds: Int?, toolCalls: Int?, totalTokens: Int?, cacheH
 
 ### UI 层
 
-- `ui/chat/ComposerStatusBar.kt`（新文件）：`compactTokenCount(Long)`（iOS 口径逐字移植）+ `ComposerStatusBar(...)` composable，**单行两段**：左侧常驻计数段（`Refresh`/`Construction` 图标 + 数字、`1.11M tok`、`96% cache hit`，`·` 分隔），右侧临时活动段（busy 时 gold 点 + 活动文案 + `mm:ss` 计时 + `⋮` 中断菜单；语音状态与活动文案按旧规则 `·` 拼接，如 `Agent running · Transcribing`）。两侧都空时整行不组合。上边距 4dp / 下边距 2dp，样式 labelMedium / onSurfaceVariant。
-- 挂载：`ChatScreen.kt` 内 `if (state.currentSessionId != null) { ComposerStatusBar(...) }`，位于 `ChatInputBar` 之前（messages 区是 `weight(1f)`，固定行自然钉在 composer 上方）。原嵌在 `ChatInputBar` 内部的 `QuietComposerStatus` 临时行已删除并并入此栏（Android 与 iOS 的两行布局有意不同：iOS 保持两行，Android 合并为一行——计数左、活动右，busy/语音行为不变）。
+- `ui/chat/ComposerStatusBar.kt`（新文件）：`compactTokenCount(Long)`（iOS 口径逐字移植）+ `formatTurnStopwatch(Long)` / `turnStopwatchEnd(Long?, Long)` 纯函数 + `ComposerStatusBar(...)` composable，**单行两段**：左侧常驻段（`Refresh`/`Construction` 图标 + 数字、`1.11M tok`、`96% cache hit`、尾部的本轮 `MM:SS` 秒表，`·` 分隔），右侧临时活动段（busy 时 gold 点 + 活动文案 + `⋮` 中断菜单；语音状态与活动文案按旧规则 `·` 拼接，如 `Agent running · Transcribing`）。左侧只要有计数或有秒表锚点就显示；两侧都空时整行不组合。秒表只在 running（锚点存在且未冻结）时每秒 tick（`LaunchedEffect` + `delay(1_000)`），冻结后不再刷新。上边距 4dp / 下边距 2dp，样式 labelMedium / onSurfaceVariant。
+- 挂载：`ChatScreen.kt` 内 `if (state.currentSessionId != null) { ComposerStatusBar(...) }`，位于 `ChatInputBar` 之前（messages 区是 `weight(1f)`，固定行自然钉在 composer 上方）。`turnStopwatchEndMillis` 在 `ChatScreen` 由 `completedTurnActivities` 按最后一条 user message ID 匹配得出（未匹配到即 running，传 null）。原嵌在 `ChatInputBar` 内部的 `QuietComposerStatus` 临时行已删除并并入此栏（Android 与 iOS 的两行布局有意不同：iOS 保持两行，Android 合并为一行——计数左、活动右，busy/语音行为不变）。
 - tok 与 cache hit 为纯文本（对齐 iOS 放弃易误读图标的决定）；图标用 Material Icons（依赖已有 `material-icons-extended`）。
 
 ### i18n
@@ -94,7 +95,8 @@ data class SessionStats(rounds: Int?, toolCalls: Int?, totalTokens: Int?, cacheH
 
 ### 测试（`./gradlew testDebugUnitTest`，449 全绿）
 
-- `SessionStatusFormatterTest`：`compactTokenCount` 边界（0/950/999/1K/1.01K/9.54K/进位 10K/85.2K/1.11M/9.99M/10M/2.1B/1.23T）。
+- `SessionStatusFormatterTest`：`compactTokenCount` 边界（0/950/999/1K/1.01K/9.54K/进位 10K/85.2K/1.11M/9.99M/10M/2.1B/1.23T）；`formatTurnStopwatch` 边界（`00:00` / `00:07` / `03:41` / `59:59` / `01:00:00` / `02:03:41` / `49:23:10` / 负值钳制 `00:00`）；`turnStopwatchEnd`（running 跟 `now`、stopped 冻结）。
+- `ComposerStatusBarInstrumentedTest`（仪器测试）：busy 显示活动 + 秒表 + 中断菜单；stopped 冻结秒表且无活动/菜单；语音与活动 `·` 拼接；计数段渲染；整行空时不组合。
 - `SessionStatsStoreTest`（`FakeSharedPreferences` 内存 fake，`testSessionStatsStore()` 共享 helper）：seed 幂等、record 去重、对账只增未见、reset 重 seed、per-session 隔离、跨 store 重建存活（重启模拟）。
 - `AppStateSessionStatsTest`：子树求和、整树 cache 分母、聚合缺失+窗口不完整整行隐藏、完整窗口回退、fresh session 零聚合只显示计数、input 无 cache = 0%、`parentID` 成环终止、无关 session 不并入、current session 不在列表/无 current session 隐藏、`hasVisibleSegments`。
 - `SseSessionStatsHooksTest`：`handleIncomingSseEvent` 直测——user 事件（created/updated）记录、assistant 不记录、非当前 session 忽略、tool part 记录而 text/reasoning 不记录、缺 `info` payload 静默忽略。
@@ -123,5 +125,5 @@ data class SessionStats(rounds: Int?, toolCalls: Int?, totalTokens: Int?, cacheH
 - `OpenCodeClient/Views/Chat/ChatTabView.swift` — `sessionStats` 组装、`cacheHitRateText`、状态行挂载与段拼接。
 - `OpenCodeClient/Views/Chat/MessageRowView.swift` — `compactTokenCount` 紧凑格式化。
 - `OpenCodeClient/Stores/SessionStatsStore.swift` — 持久化计数字段与规则。
-- `OpenCodeClientTests/SessionStatusStatsTests.swift` — 格式化与求和/隐藏口径的全部边界用例（移植测试时逐条对照）。
-- `docs/features/session_status_bar/design.md` — iOS 完整设计（含 live server 实测事实与时间线）。
+- `OpenCodeClientTests/SessionStatusStatsTests.swift` — 格式化、求和/隐藏口径与秒表（`elapsedStatusText` / `turnStopwatchEnd`）的全部边界用例（移植测试时逐条对照）。
+- iOS 侧的完整设计（含 live server 实测事实与时间线）已转为本地 `tmp_*` 草稿，不进公开仓库；本文件即 Android 侧的权威口径。
