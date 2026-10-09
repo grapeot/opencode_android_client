@@ -1,7 +1,9 @@
 package com.yage.opencode_client.ui.chat
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Construction
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -136,6 +140,8 @@ internal fun ComposerStatusBar(
     stats: AppState.SessionStats?,
     isBusy: Boolean,
     agentActivityText: String?,
+    backgroundTaskLabel: String?,
+    onOpenBackgroundTask: () -> Unit,
     stopwatchStartedAtMillis: Long?,
     stopwatchEndedAtMillis: Long?,
     isRecording: Boolean,
@@ -155,7 +161,8 @@ internal fun ComposerStatusBar(
     val status = listOfNotNull(activityStatus, voiceStatus).joinToString(" · ").takeIf { it.isNotEmpty() }
     val visibleStats = stats?.takeIf { it.hasVisibleSegments }
     val showCountersRow = visibleStats != null || stopwatchStartedAtMillis != null
-    if (!showCountersRow && status == null) return
+    val hasBackgroundTasks = backgroundTaskLabel != null
+    if (!showCountersRow && status == null && !hasBackgroundTasks) return
 
     val labelStyle = MaterialTheme.typography.labelMedium
     val color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -171,12 +178,20 @@ internal fun ComposerStatusBar(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 1.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (hasBackgroundTasks) {
+            BackgroundTasksRow(
+                label = backgroundTaskLabel!!,
+                onOpen = onOpenBackgroundTask
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 1.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
         if (showCountersRow) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -284,5 +299,46 @@ internal fun ComposerStatusBar(
                 }
             }
         }
+        }
+    }
+}
+
+/** Delegated work still in flight while the current session is idle. Rendered on
+ *  its own line, visually apart from the session's own "Agent running" state:
+ *  a branch icon, the subagent title (or a count), and a chevron. Tap opens the
+ *  running subagent session. Deliberately no stopwatch and no interrupt control —
+ *  those belong to the subagent's own session, not this turn's clock. */
+@Composable
+private fun BackgroundTasksRow(
+    label: String,
+    onOpen: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            Icons.Default.AccountTree,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }

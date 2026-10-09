@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yage.opencode_client.data.model.*
+import com.yage.opencode_client.ui.session.descendantBusyCountsBySession
+import com.yage.opencode_client.ui.session.runningDescendantSessions
 import com.yage.opencode_client.data.api.AIUsageClient
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
@@ -331,6 +333,24 @@ data class AppState(
 
     val isCurrentSessionBusy: Boolean
         get() = currentSessionStatus?.isBusy == true
+
+    /** Running descendant subagent sessions per session, derived from the global
+     *  status map along `parentID` links; a session's own busy state is never
+     *  counted. Drives the session-list subordinate "subagents running" signal. */
+    val sessionDescendantBusyCounts: Map<String, Int>
+        get() = descendantBusyCountsBySession(sessions, sessionStatuses)
+
+    /** Running descendant subagent sessions of the current session, most
+     *  recently updated first. Drives the composer "background tasks" segment.
+     *  Empty while the current session is itself busy/retrying: its own activity
+     *  line already covers the turn. */
+    val runningBackgroundSubagents: List<Session>
+        get() {
+            val sessionId = currentSessionId ?: return emptyList()
+            val current = currentSessionStatus
+            if (current?.isBusy == true || current?.isRetry == true) return emptyList()
+            return runningDescendantSessions(sessions, sessionStatuses, sessionId)
+        }
 
     val canLoadMoreSessions: Boolean
         get() = hasMoreSessions && !isLoadingMoreSessions

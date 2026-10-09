@@ -231,6 +231,7 @@ fun ChatScreen(
                 currentSessionId = state.currentSessionId,
                 sessionStatuses = state.sessionStatuses,
                 attentionSessionIds = state.attentionSessionIds,
+                descendantBusyCounts = state.sessionDescendantBusyCounts,
                 hasMoreSessions = state.hasMoreSessions,
                 isLoadingMoreSessions = state.isLoadingMoreSessions,
                 isRefreshingSessions = state.isRefreshingSessions,
@@ -339,10 +340,21 @@ fun ChatScreen(
         }
 
         if (state.currentSessionId != null) {
+            val backgroundSubagents = state.runningBackgroundSubagents
             ComposerStatusBar(
                 stats = state.sessionStats,
                 isBusy = currentSessionIsRunning,
                 agentActivityText = currentActivity?.text,
+                backgroundTaskLabel = when {
+                    backgroundSubagents.isEmpty() -> null
+                    backgroundSubagents.size == 1 && backgroundSubagents.first().displayName.isNotBlank() ->
+                        backgroundSubagents.first().displayName
+                    backgroundSubagents.size == 1 -> stringResource(R.string.chat_background_tasks_one)
+                    else -> stringResource(R.string.chat_background_tasks_many, backgroundSubagents.size)
+                },
+                onOpenBackgroundTask = {
+                    backgroundSubagents.firstOrNull()?.let { viewModel.openChildSession(it.id) }
+                },
                 stopwatchStartedAtMillis = currentActivity?.startedAtMillis,
                 stopwatchEndedAtMillis = turnStopwatchEndMillis,
                 isRecording = state.isRecording,

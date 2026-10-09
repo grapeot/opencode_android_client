@@ -1,5 +1,13 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-08 — 主会话 idle 时后台 subagent 仍运行，UI 不显示
+
+- 派给 background subagent 后，父会话这轮结束变 `idle`，subagent 在自己的子会话里 `busy`。列表父行显示 Idle，聊天页也没有进行中的迹象。
+- 状态按会话（runner）存，父 idle 与子 busy 并存；`sessionStatuses` 是全局 map，子的 busy 拿得到，但呈现只到单会话一层。
+- 客户端派生「对话树聚合活动」，零服务端改动。`descendantBusyCountsBySession` 沿 `parentID` 把 busy 后代往上计数（不含自身），照抄 attention 聚合机位。列表父行在自身非 busy、无 attention 时显示次级信号（`AccountTree` 图标 + 中性色 +「N 个子代理运行中」），并让这类树冒到列表顶部。
+- 聊天页在自身 idle 且有 busy 后代时，状态栏加一条独立「子代理正在运行」段：单条显示子会话标题、多条显示计数，点按 `openChildSession` 跳到该子会话；不占用 turn stopwatch 与 interrupt。文案经 AGY（gemini-3.8-flash-high）起草。
+- 验证：`./gradlew testDebugUnitTest` 绿（`SessionTreeTest` 新增 6 条）。
+
 ## 2026-09-27 — Background task notification card
 
 - synthetic text part 且能解析成 `<task>` 信封时渲染回执卡片，不再进用户气泡。解析失败或没有 `synthetic` 时维持原渲染。
