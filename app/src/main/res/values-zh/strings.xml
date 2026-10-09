@@ -94,6 +94,8 @@
     <string name="sessions_status_retrying">重试中</string>
     <string name="sessions_status_idle">空闲</string>
     <string name="sessions_status_need_attention">需要关注</string>
+    <string name="sessions_subagents_running_one">1 个子代理运行中</string>
+    <string name="sessions_subagents_running_many">%d 个子代理运行中</string>
     <string name="sessions_rename_title">重命名会话</string>
     <string name="sessions_title_label">会话标题</string>
     <string name="sessions_rename_action">重命名</string>
@@ -161,6 +163,9 @@
     <string name="chat_discard_audio">丢弃音频</string>
     <string name="chat_interrupt_agent">中断智能体</string>
     <string name="chat_agent_running">智能体运行中</string>
+    <string name="chat_background_tasks_one">子代理正在运行</string>
+    <string name="chat_background_tasks_many">%d 个子代理正在运行</string>
+    <string name="chat_background_tasks_accessibility">后台子代理正在运行，轻点打开子代理会话</string>
     <string name="chat_turn_completed">已完成</string>
     <string name="chat_more_options">更多操作</string>
     <string name="chat_copy_message">复制整条消息</string>

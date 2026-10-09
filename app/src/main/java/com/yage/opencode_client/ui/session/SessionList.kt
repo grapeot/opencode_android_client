@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
@@ -99,6 +100,13 @@ private fun sessionStatusColor(status: SessionStatus?, attentionCount: Int): Col
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
+/** Label for the subordinate "subagents running" signal shown in place of the
+ *  idle status word when a session has running descendant subagents. */
+@Composable
+private fun descendantBusyLabel(count: Int): String =
+    if (count == 1) stringResource(R.string.sessions_subagents_running_one)
+    else stringResource(R.string.sessions_subagents_running_many, count)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeRevealRow(
@@ -114,6 +122,7 @@ private fun SwipeRevealRow(
     updatedTime: Long? = null,
     status: SessionStatus? = null,
     attentionCount: Int = 0,
+    busyDescendantCount: Int = 0,
     onSelect: () -> Unit,
     depth: Int = 0,
     hasChildren: Boolean = false,
@@ -132,6 +141,9 @@ private fun SwipeRevealRow(
         isBusy -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurface
     }
+    // The row falls back to the descendant-subagent signal only when it has no
+    // stronger state of its own (attention > own busy/retry > descendants).
+    val showsDescendantBusy = attentionCount == 0 && !isBusy && busyDescendantCount > 0
     val dragFlingBehavior = AnchoredDraggableDefaults.flingBehavior(
         state = dragState,
         positionalThreshold = { total: Float -> total * 0.5f }
@@ -192,7 +204,7 @@ private fun SwipeRevealRow(
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     color = titleColor
                 )
-                if (updatedTime != null || status != null || attentionCount > 0) {
+                if (updatedTime != null || status != null || attentionCount > 0 || showsDescendantBusy) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (updatedTime != null) {
                             Text(
@@ -201,10 +213,27 @@ private fun SwipeRevealRow(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if ((status != null || attentionCount > 0) && updatedTime != null) {
+                        val showStatus = status != null || attentionCount > 0
+                        if ((showStatus || showsDescendantBusy) && updatedTime != null) {
                             Text("  ", style = MaterialTheme.typography.bodySmall)
                         }
-                        if (status != null || attentionCount > 0) {
+                        if (showsDescendantBusy) {
+                            // Delegated work still in flight under an idle session:
+                            // a heterogeneous signal (branch icon + neutral color) so
+                            // it reads apart from the session's own Running (primary).
+                            Icon(
+                                Icons.Default.AccountTree,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = descendantBusyLabel(busyDescendantCount),
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else if (showStatus) {
                             Text(
                                 text = sessionStatusLabel(status, attentionCount) ?: "",
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
@@ -283,6 +312,7 @@ fun SessionList(
     currentSessionId: String?,
     sessionStatuses: Map<String, SessionStatus> = emptyMap(),
     attentionSessionIds: List<String> = emptyList(),
+    descendantBusyCounts: Map<String, Int> = emptyMap(),
     hasMoreSessions: Boolean = false,
     isLoadingMoreSessions: Boolean = false,
     isRefreshingSessions: Boolean = false,
@@ -303,11 +333,11 @@ fun SessionList(
     }
     val activeSessions = remember(sessions) { sessions.filter { !it.isArchived } }
     val archivedSessions = remember(sessions) { sessions.filter { it.isArchived } }
-    val activeTree = remember(activeSessions, attentionCounts) {
-        prioritizeAttention(buildSessionTree(activeSessions), attentionCounts)
+    val activeTree = remember(activeSessions, attentionCounts, descendantBusyCounts) {
+        prioritizeAttention(buildSessionTree(activeSessions), attentionCounts, descendantBusyCounts)
     }
-    val archivedTree = remember(archivedSessions, attentionCounts) {
-        prioritizeAttention(buildSessionTree(archivedSessions), attentionCounts)
+    val archivedTree = remember(archivedSessions, attentionCounts, descendantBusyCounts) {
+        prioritizeAttention(buildSessionTree(archivedSessions), attentionCounts, descendantBusyCounts)
     }
     val activeRows = remember(activeTree, expandedSessionIds) { flattenVisibleTree(activeTree, expandedSessionIds) }
     var archivedExpanded by remember { mutableStateOf(false) }
@@ -382,6 +412,7 @@ fun SessionList(
                         currentSessionId = currentSessionId,
                         sessionStatuses = sessionStatuses,
                         attentionCounts = attentionCounts,
+                        descendantBusyCounts = descendantBusyCounts,
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = false,
@@ -412,6 +443,7 @@ fun SessionList(
                         currentSessionId = currentSessionId,
                         sessionStatuses = sessionStatuses,
                         attentionCounts = attentionCounts,
+                        descendantBusyCounts = descendantBusyCounts,
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = true,
@@ -470,6 +502,7 @@ private fun SessionRowItem(
     currentSessionId: String?,
     sessionStatuses: Map<String, SessionStatus>,
     attentionCounts: Map<String, Int>,
+    descendantBusyCounts: Map<String, Int>,
     listIsScrolling: Boolean,
     expandedSessionIds: Set<String>,
     isArchived: Boolean,
@@ -510,6 +543,7 @@ private fun SessionRowItem(
             updatedTime = session.time?.updated,
             status = sessionStatuses[session.id],
             attentionCount = attentionCounts.getOrDefault(session.id, 0),
+            busyDescendantCount = descendantBusyCounts.getOrDefault(session.id, 0),
             onSelect = { onSelectSession(session.id) },
             depth = depth,
             hasChildren = hasChildren,

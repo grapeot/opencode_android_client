@@ -28,6 +28,8 @@ class ComposerStatusBarInstrumentedTest {
                     stats = stats,
                     isBusy = isBusy,
                     agentActivityText = agentActivityText,
+                    backgroundTaskLabel = null,
+                    onOpenBackgroundTask = {},
                     stopwatchStartedAtMillis = stopwatchStartedAtMillis,
                     stopwatchEndedAtMillis = stopwatchEndedAtMillis,
                     isRecording = false,
