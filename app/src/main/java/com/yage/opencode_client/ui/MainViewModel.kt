@@ -381,7 +381,14 @@ data class AppState(
     val isSelectedModelQuotaStale: Boolean
         get() {
             val snapshot = aiUsageQuotaSnapshot ?: return false
-            return isQuotaSnapshotStale(snapshot.fetchedAtMs, System.currentTimeMillis(), aiUsageError != null)
+            val nowMs = System.currentTimeMillis()
+            val hasError = aiUsageError != null
+            val quota = selectedAIUsageQuota
+            return if (quota != null) {
+                isQuotaStale(quota, snapshot, nowMs, hasError)
+            } else {
+                isQuotaSnapshotStale(snapshot.fetchedAtMs, nowMs, hasError)
+            }
         }
 
     private val providerModelsIndex: Map<String, ProviderModel>

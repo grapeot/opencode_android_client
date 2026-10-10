@@ -4,11 +4,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import java.time.OffsetDateTime
 import kotlin.math.roundToInt
 
 @Serializable
@@ -30,10 +32,13 @@ data class AIUsageQuota(
     @SerialName("next_reset_time_ms") val nextResetTimeMs: Long? = null,
     @SerialName("next_reset_iso") val nextResetIso: String? = null,
     val usage: Long? = null,
-    val remaining: Long? = null
+    val remaining: Long? = null,
+    @SerialName("observed_at") val observedAtIso: String? = null,
+    @SerialName("measurement_source") val measurementSource: String? = null
 ) {
     val clampedRemainingPercentage: Int get() = remainingPercentage.coerceIn(0, 100)
     val clampedUsedPercentage: Int get() = 100 - clampedRemainingPercentage
+    @Transient val observedAtMs: Long? = parseObservedAtMs(observedAtIso)
 }
 
 data class AIUsageQuotaSnapshot(
@@ -68,6 +73,26 @@ fun resolveQuota(quotas: List<AIUsageQuota>, key: AIUsageQuotaKey): AIUsageQuota
 fun isQuotaSnapshotStale(fetchedAtMs: Long, nowMs: Long, hasError: Boolean): Boolean {
     if (hasError) return true
     return nowMs - fetchedAtMs > QUOTA_STALE_AFTER_MS
+}
+
+fun isQuotaStale(
+    quota: AIUsageQuota,
+    snapshot: AIUsageQuotaSnapshot,
+    nowMs: Long,
+    hasError: Boolean
+): Boolean {
+    if (hasError) return true
+    val observationMs = quota.observedAtMs ?: snapshot.fetchedAtMs
+    return nowMs - observationMs > QUOTA_STALE_AFTER_MS
+}
+
+private fun parseObservedAtMs(iso: String?): Long? {
+    if (iso.isNullOrBlank()) return null
+    return try {
+        OffsetDateTime.parse(iso).toInstant().toEpochMilli()
+    } catch (_: Exception) {
+        null
+    }
 }
 
 fun quotaResetEpochMs(quota: AIUsageQuota): Long? {
