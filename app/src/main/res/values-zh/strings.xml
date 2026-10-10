@@ -147,6 +147,7 @@
     <string name="settings_ai_usage_dashboard">AI 用量面板</string>
     <string name="settings_ai_usage_url">面板地址（可选）</string>
     <string name="settings_ai_usage_description">留空时不显示 quota 界面。打开详情只读取缓存；手动刷新会等待服务商数据完整更新。</string>
+    <string name="settings_ai_usage_partial">部分 provider 未刷新</string>
     <string name="chat_add_image">添加图片</string>
     <string name="chat_remove_image">移除图片</string>
     <string name="chat_send">发送</string>

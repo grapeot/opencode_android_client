@@ -11,6 +11,7 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import java.time.OffsetDateTime
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @Serializable
@@ -44,7 +45,18 @@ data class AIUsageQuota(
 data class AIUsageQuotaSnapshot(
     val generatedAt: String?,
     val fetchedAtMs: Long,
-    val quotas: List<AIUsageQuota>
+    val quotas: List<AIUsageQuota>,
+    val failedKeys: Set<AIUsageQuotaKey> = emptySet()
+)
+
+data class QuotaFetchResult(
+    val snapshot: AIUsageQuotaSnapshot,
+    val failedKeys: Set<AIUsageQuotaKey>
+)
+
+data class AppliedQuotaFetch(
+    val snapshot: AIUsageQuotaSnapshot?,
+    val error: String?
 )
 
 data class AIUsageQuotaKey(val provider: String, val label: String)
@@ -60,6 +72,65 @@ fun primaryQuotaKey(providerId: String?): AIUsageQuotaKey? = when (providerId) {
 const val QUOTA_STALE_AFTER_MS = 3_600_000L
 
 private val quotaLabelPreference = listOf("5h", "7d", "Weekly")
+
+fun AIUsageQuotaKey.matches(other: AIUsageQuotaKey): Boolean =
+    provider.equals(other.provider, ignoreCase = true) &&
+        label.equals(other.label, ignoreCase = true)
+
+fun quotaWindowImpersonatesFailedPreferred(
+    preferred: AIUsageQuotaKey?,
+    resolved: AIUsageQuota?,
+    failedKeys: Set<AIUsageQuotaKey>
+): Boolean {
+    if (preferred == null || resolved == null) return false
+    if (failedKeys.none { it.matches(preferred) }) return false
+    return !AIUsageQuotaKey(resolved.provider, resolved.label).matches(preferred)
+}
+
+fun dedupeQuotaKeys(keys: Iterable<AIUsageQuotaKey>): Set<AIUsageQuotaKey> {
+    val seen = HashSet<Pair<String, String>>()
+    val deduped = LinkedHashSet<AIUsageQuotaKey>()
+    for (key in keys) {
+        val identity = key.provider.lowercase(Locale.ROOT) to key.label.lowercase(Locale.ROOT)
+        if (seen.add(identity)) deduped += key
+    }
+    return deduped
+}
+
+fun mergeQuotaSnapshot(
+    previous: AIUsageQuotaSnapshot?,
+    incoming: AIUsageQuotaSnapshot
+): AIUsageQuotaSnapshot {
+    val failed = dedupeQuotaKeys(incoming.failedKeys)
+    val base = if (failed == incoming.failedKeys) incoming else incoming.copy(failedKeys = failed)
+    if (previous == null || failed.isEmpty()) return base
+    val retained = ArrayList<AIUsageQuota>()
+    val retainedIds = HashSet<Pair<String, String>>()
+    for (key in failed) {
+        val old = previous.quotas.firstOrNull { AIUsageQuotaKey(it.provider, it.label).matches(key) } ?: continue
+        val identity = old.provider.lowercase(Locale.ROOT) to old.label.lowercase(Locale.ROOT)
+        if (!retainedIds.add(identity)) continue
+        val alreadyIncoming = base.quotas.any {
+            AIUsageQuotaKey(it.provider, it.label).matches(AIUsageQuotaKey(old.provider, old.label))
+        }
+        if (!alreadyIncoming) retained += old
+    }
+    if (retained.isEmpty()) return base
+    return base.copy(quotas = base.quotas + retained)
+}
+
+fun applyQuotaFetchResult(
+    previous: AIUsageQuotaSnapshot?,
+    result: Result<QuotaFetchResult>
+): AppliedQuotaFetch = result.fold(
+    onSuccess = { fetched ->
+        val incoming = fetched.snapshot.copy(failedKeys = fetched.failedKeys)
+        AppliedQuotaFetch(mergeQuotaSnapshot(previous, incoming), error = null)
+    },
+    onFailure = { error ->
+        AppliedQuotaFetch(previous, error.message)
+    }
+)
 
 fun resolveQuota(quotas: List<AIUsageQuota>, key: AIUsageQuotaKey): AIUsageQuota? {
     val matches = quotas.filter { it.provider.equals(key.provider, ignoreCase = true) }
@@ -82,6 +153,8 @@ fun isQuotaStale(
     hasError: Boolean
 ): Boolean {
     if (hasError) return true
+    val key = AIUsageQuotaKey(quota.provider, quota.label)
+    if (snapshot.failedKeys.any { it.matches(key) }) return true
     val observationMs = quota.observedAtMs ?: snapshot.fetchedAtMs
     return nowMs - observationMs > QUOTA_STALE_AFTER_MS
 }

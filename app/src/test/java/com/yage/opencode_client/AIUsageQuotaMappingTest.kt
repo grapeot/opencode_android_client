@@ -5,8 +5,11 @@ import com.yage.opencode_client.data.model.AIUsageQuotaKey
 import com.yage.opencode_client.data.model.AIUsageQuotaSnapshot
 import com.yage.opencode_client.data.model.ModelShortlistItem
 import com.yage.opencode_client.data.model.QUOTA_STALE_AFTER_MS
+import com.yage.opencode_client.data.model.QuotaFetchResult
+import com.yage.opencode_client.data.model.applyQuotaFetchResult
 import com.yage.opencode_client.data.model.isQuotaSnapshotStale
 import com.yage.opencode_client.data.model.isQuotaStale
+import com.yage.opencode_client.data.model.mergeQuotaSnapshot
 import com.yage.opencode_client.data.model.primaryQuotaKey
 import com.yage.opencode_client.data.model.resolveQuota
 import com.yage.opencode_client.ui.AppState
@@ -201,6 +204,191 @@ class AIUsageQuotaMappingTest {
 
         assertTrue(staleFetch.isSelectedModelQuotaStale)
         assertFalse(freshFetch.isSelectedModelQuotaStale)
+    }
+
+    @Test
+    fun `failed key keeps the previous window instead of a fresh sibling`() {
+        val now = System.currentTimeMillis()
+        val oldWeekly = AIUsageQuota(
+            provider = "grok",
+            label = "Weekly",
+            usedPercentage = 40,
+            remainingPercentage = 60,
+            observedAtIso = offsetIso(now - TWO_HOURS_MS)
+        )
+        val newCodex = AIUsageQuota(
+            provider = "codex",
+            label = "5h",
+            usedPercentage = 10,
+            remainingPercentage = 90,
+            observedAtIso = offsetIso(now - 1_000)
+        )
+        val freshSevenDay = AIUsageQuota(
+            provider = "grok",
+            label = "7d",
+            usedPercentage = 5,
+            remainingPercentage = 95,
+            observedAtIso = offsetIso(now - 1_000)
+        )
+        val previous = AIUsageQuotaSnapshot(
+            generatedAt = "old",
+            fetchedAtMs = now - TWO_HOURS_MS,
+            quotas = listOf(oldWeekly)
+        )
+        val incoming = AIUsageQuotaSnapshot(
+            generatedAt = "new",
+            fetchedAtMs = now,
+            quotas = listOf(newCodex, freshSevenDay),
+            failedKeys = setOf(AIUsageQuotaKey("grok", "Weekly"))
+        )
+
+        val applied = applyQuotaFetchResult(previous, Result.success(QuotaFetchResult(incoming, incoming.failedKeys)))
+        val merged = applied.snapshot!!
+
+        assertNull(applied.error)
+        assertEquals(oldWeekly, merged.quotas.single { it.provider == "grok" && it.label == "Weekly" })
+        assertEquals(newCodex, merged.quotas.single { it.provider == "codex" })
+        assertTrue(isQuotaStale(oldWeekly, merged, now, hasError = false))
+        assertFalse(isQuotaStale(newCodex, merged, now, hasError = false))
+        assertEquals(oldWeekly, resolveQuota(merged.quotas, AIUsageQuotaKey("grok", "Weekly")))
+        val selected = AppState(
+            selectedModelIndex = 0,
+            modelShortlist = listOf(ModelShortlistItem("xai", "grok-4.7", "Grok", "Grok")),
+            aiUsageQuotaSnapshot = merged
+        )
+        assertEquals(oldWeekly, selected.selectedAIUsageQuota)
+        assertTrue(selected.isSelectedModelQuotaStale)
+    }
+
+    @Test
+    fun `failed key with no previous value stays unavailable`() {
+        val now = System.currentTimeMillis()
+        val newCodex = AIUsageQuota("codex", "5h", 10, 90, observedAtIso = offsetIso(now - 1_000))
+        val previous = AIUsageQuotaSnapshot("old", now - 1_000, listOf(newCodex))
+        val incoming = AIUsageQuotaSnapshot(
+            generatedAt = "new",
+            fetchedAtMs = now,
+            quotas = listOf(newCodex),
+            failedKeys = setOf(AIUsageQuotaKey("grok", "Weekly"))
+        )
+
+        val merged = mergeQuotaSnapshot(previous, incoming)
+
+        assertNull(resolveQuota(merged.quotas, AIUsageQuotaKey("grok", "Weekly")))
+        assertTrue(merged.quotas.none { it.provider.equals("grok", ignoreCase = true) })
+        assertEquals(90, merged.quotas.single().remainingPercentage)
+    }
+
+    @Test
+    fun `fatal fetch keeps the previous snapshot and marks the selected quota stale`() {
+        val now = System.currentTimeMillis()
+        val previous = snapshot(now, quotas = listOf(quota(observedAtIso = offsetIso(now - 1_000))))
+        val applied = applyQuotaFetchResult(
+            previous,
+            Result.failure(IllegalStateException("AI Usage Dashboard returned HTTP 500"))
+        )
+
+        assertEquals(previous, applied.snapshot)
+        assertEquals("AI Usage Dashboard returned HTTP 500", applied.error)
+        val state = AppState(
+            selectedModelIndex = 0,
+            modelShortlist = listOf(ModelShortlistItem("openai", "gpt-5", "GPT", "GPT")),
+            aiUsageError = applied.error,
+            aiUsageQuotaSnapshot = applied.snapshot
+        )
+        assertTrue(state.isSelectedModelQuotaStale)
+    }
+
+    @Test
+    fun `failed preferred window is stale when resolution falls back to another window`() {
+        val now = System.currentTimeMillis()
+        val sevenDay = AIUsageQuota(
+            provider = "codex",
+            label = "7d",
+            usedPercentage = 12,
+            remainingPercentage = 88,
+            observedAtIso = offsetIso(now - 1_000)
+        )
+        val impersonating = AppState(
+            selectedModelIndex = 0,
+            modelShortlist = listOf(ModelShortlistItem("openai", "gpt-5", "GPT", "GPT")),
+            aiUsageQuotaSnapshot = AIUsageQuotaSnapshot(
+                generatedAt = "new",
+                fetchedAtMs = now,
+                quotas = listOf(sevenDay),
+                failedKeys = setOf(AIUsageQuotaKey("codex", "5h"))
+            )
+        )
+        val complementary = impersonating.copy(
+            aiUsageQuotaSnapshot = impersonating.aiUsageQuotaSnapshot?.copy(failedKeys = emptySet())
+        )
+
+        assertEquals("7d", impersonating.selectedAIUsageQuota?.label)
+        assertTrue(impersonating.isSelectedModelQuotaStale)
+        assertEquals("7d", complementary.selectedAIUsageQuota?.label)
+        assertFalse(complementary.isSelectedModelQuotaStale)
+    }
+
+    @Test
+    fun `retained failed quota stays stale when its observation would otherwise look fresh`() {
+        val now = System.currentTimeMillis()
+        val sibling = AIUsageQuota("codex", "5h", 10, 90, observedAtIso = offsetIso(now - 1_000))
+        val retainedCases = listOf(
+            AIUsageQuota("grok", "Weekly", 40, 60),
+            AIUsageQuota("grok", "Weekly", 40, 60, observedAtIso = "not-a-timestamp"),
+            AIUsageQuota("grok", "Weekly", 40, 60, observedAtIso = offsetIso(now - 60_000))
+        )
+
+        for (oldWeekly in retainedCases) {
+            val merged = mergeQuotaSnapshot(
+                previous = AIUsageQuotaSnapshot("old", now - TWO_HOURS_MS, listOf(oldWeekly)),
+                incoming = AIUsageQuotaSnapshot(
+                    generatedAt = "new",
+                    fetchedAtMs = now,
+                    quotas = listOf(sibling),
+                    failedKeys = setOf(AIUsageQuotaKey("grok", "Weekly"))
+                )
+            )
+            val retained = merged.quotas.single { it.label == "Weekly" }
+            assertEquals(60, retained.remainingPercentage)
+            assertEquals(oldWeekly.observedAtIso, retained.observedAtIso)
+            assertTrue(isQuotaStale(retained, merged, now, hasError = false))
+            assertFalse(isQuotaStale(sibling, merged, now, hasError = false))
+
+            val failedSelection = AppState(
+                selectedModelIndex = 0,
+                modelShortlist = listOf(ModelShortlistItem("xai", "grok-4.7", "Grok", "Grok")),
+                aiUsageQuotaSnapshot = merged
+            )
+            val healthySelection = failedSelection.copy(
+                modelShortlist = listOf(ModelShortlistItem("openai", "gpt-5", "GPT", "GPT"))
+            )
+            assertEquals(retained, failedSelection.selectedAIUsageQuota)
+            assertTrue(failedSelection.isSelectedModelQuotaStale)
+            assertEquals(sibling, healthySelection.selectedAIUsageQuota)
+            assertFalse(healthySelection.isSelectedModelQuotaStale)
+        }
+    }
+
+    @Test
+    fun `case variant failed keys retain a single previous quota`() {
+        val now = System.currentTimeMillis()
+        val oldWeekly = AIUsageQuota("grok", "Weekly", 40, 60, observedAtIso = offsetIso(now - TWO_HOURS_MS))
+        val merged = mergeQuotaSnapshot(
+            previous = AIUsageQuotaSnapshot("old", now - TWO_HOURS_MS, listOf(oldWeekly)),
+            incoming = AIUsageQuotaSnapshot(
+                generatedAt = "new",
+                fetchedAtMs = now,
+                quotas = emptyList(),
+                failedKeys = setOf(
+                    AIUsageQuotaKey("grok", "Weekly"),
+                    AIUsageQuotaKey("GROK", "weekly")
+                )
+            )
+        )
+
+        assertEquals(listOf(oldWeekly), merged.quotas)
+        assertEquals(1, merged.failedKeys.size)
     }
 
     private fun quota(
