@@ -1,0 +1,362 @@
+{
+  "note": "这套 fixtures 是 dashboard producer / Android / iOS decoder 三方对齐的契约样本。dashboard 发布前应把本文件当作 consumer 兼容性检查。iOS 与 dashboard 采用同一 fixtures 是 follow-up，本次只在 Android 落地。数值都是人工构造，不是真实用量快照。provider/label 使用中性名。producer 侧 used_percentage/remaining_percentage 是必需非 null float；observed_at/measurement_source 以及 next_reset_time_ms/usage/remaining 可选。null、缺失、类型漂移、非有限浮点是 consumer 失败边界，不是 producer 应发出的形状。percentage_resolution/pool_id/account_fingerprint 是 producer 可能新增的字段，consumer 必须忽略。",
+  "cases": [
+    {
+      "id": "half_integer_neighbors",
+      "coverage": "partial",
+      "coveredBy": "AIUsageQuotaFormatTest already locks 2.5/97.5 complementary display; 2.499999 and 2.500001 are new",
+      "note": "Android uses kotlin.math.roundToInt: nearest integer, half ties toward +inf (e.g. 2.5 -> 3, 97.5 -> 98). Displayed used is 100 minus clamped remaining, so the pair always sums to 100 even when the independently rounded raw fields do not. Negative half values are out of the producer contract and not asserted here.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-a\",\"label\":\"near\",\"used_percentage\":2.499999,\"remaining_percentage\":97.500001},{\"provider\":\"test-a\",\"label\":\"tie\",\"used_percentage\":2.5,\"remaining_percentage\":97.5},{\"provider\":\"test-a\",\"label\":\"over\",\"used_percentage\":2.500001,\"remaining_percentage\":97.499999}]}",
+      "expect": {
+        "outcome": "success",
+        "items": [
+          {
+            "provider": "test-a",
+            "label": "near",
+            "used": 2,
+            "remaining": 98,
+            "clampedUsed": 2,
+            "clampedRemaining": 98
+          },
+          {
+            "provider": "test-a",
+            "label": "tie",
+            "used": 3,
+            "remaining": 98,
+            "clampedUsed": 2,
+            "clampedRemaining": 98
+          },
+          {
+            "provider": "test-a",
+            "label": "over",
+            "used": 3,
+            "remaining": 97,
+            "clampedUsed": 3,
+            "clampedRemaining": 97
+          }
+        ]
+      }
+    },
+    {
+      "id": "percentage_fields_reject_independently",
+      "coverage": "partial",
+      "coveredBy": "AIUsageClientTest already isolates used_percentage \"oops\" on one item; null/missing/object/boolean and remaining_percentage are new",
+      "note": "Each percentage field is required. A bad value fails only that item when provider and label are readable. Healthy neighbors stay decoded and fresh.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-b\",\"label\":\"5h\",\"used_percentage\":11,\"remaining_percentage\":89,\"observed_at\":\"2023-11-14T22:13:19Z\"},{\"provider\":\"test-a\",\"label\":\"used-null\",\"used_percentage\":null,\"remaining_percentage\":50},{\"provider\":\"test-a\",\"label\":\"rem-null\",\"used_percentage\":50,\"remaining_percentage\":null},{\"provider\":\"test-a\",\"label\":\"used-missing\",\"remaining_percentage\":50},{\"provider\":\"test-a\",\"label\":\"rem-missing\",\"used_percentage\":50},{\"provider\":\"test-a\",\"label\":\"used-object\",\"used_percentage\":{\"x\":1},\"remaining_percentage\":50},{\"provider\":\"test-a\",\"label\":\"rem-object\",\"used_percentage\":50,\"remaining_percentage\":{\"x\":1}},{\"provider\":\"test-a\",\"label\":\"used-bool\",\"used_percentage\":true,\"remaining_percentage\":50},{\"provider\":\"test-a\",\"label\":\"rem-bool\",\"used_percentage\":50,\"remaining_percentage\":false},{\"provider\":\"test-a\",\"label\":\"used-oops\",\"used_percentage\":\"oops\",\"remaining_percentage\":50},{\"provider\":\"test-a\",\"label\":\"rem-oops\",\"used_percentage\":50,\"remaining_percentage\":\"oops\"},{\"provider\":\"test-c\",\"label\":\"7d\",\"used_percentage\":22,\"remaining_percentage\":78,\"observed_at\":\"2023-11-14T22:13:19Z\"}]}",
+      "expect": {
+        "outcome": "success",
+        "assertFresh": true,
+        "items": [
+          {
+            "provider": "test-b",
+            "label": "5h",
+            "used": 11,
+            "remaining": 89,
+            "clampedUsed": 11,
+            "clampedRemaining": 89,
+            "observedAt": "2023-11-14T22:13:19Z"
+          },
+          {
+            "provider": "test-c",
+            "label": "7d",
+            "used": 22,
+            "remaining": 78,
+            "clampedUsed": 22,
+            "clampedRemaining": 78,
+            "observedAt": "2023-11-14T22:13:19Z"
+          }
+        ],
+        "failed": [
+          {
+            "provider": "test-a",
+            "label": "used-null"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-null"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-missing"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-missing"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-object"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-object"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-bool"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-bool"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-oops"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-oops"
+          }
+        ]
+      },
+      "fetchedAtMs": 1700000000000,
+      "nowMs": 1700000001000,
+      "observedAtEpochMs": 1699999999000
+    },
+    {
+      "id": "numeric_string_percentages_accepted",
+      "coverage": "new",
+      "note": "Policy lock: the client Json is ignoreUnknownKeys + isLenient, and quoted numeric percentage strings are accepted then rounded. Do not leave this to a library default.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-a\",\"label\":\"5h\",\"used_percentage\":\"9.6\",\"remaining_percentage\":\"90.4\"}]}",
+      "expect": {
+        "outcome": "success",
+        "items": [
+          {
+            "provider": "test-a",
+            "label": "5h",
+            "used": 10,
+            "remaining": 90,
+            "clampedUsed": 10,
+            "clampedRemaining": 90
+          }
+        ]
+      }
+    },
+    {
+      "id": "non_finite_and_out_of_int_range",
+      "coverage": "new",
+      "note": "2147483648 and 1e100 are finite and fail in RoundedPercentageSerializer (out of range). 1e309, NaN, and Infinity are rejected by the default Json decoder before that serializer's finite guard; the consumer-visible result is still a per-item failedKey, not a fatal fetch. This fixture locks that layer split and does not claim the serializer guard saw NaN.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-b\",\"label\":\"5h\",\"used_percentage\":11,\"remaining_percentage\":89,\"observed_at\":\"2023-11-14T22:13:19Z\"},{\"provider\":\"test-a\",\"label\":\"used-over-int\",\"used_percentage\":2147483648,\"remaining_percentage\":0},{\"provider\":\"test-a\",\"label\":\"rem-over-int\",\"used_percentage\":0,\"remaining_percentage\":2147483648},{\"provider\":\"test-a\",\"label\":\"used-1e100\",\"used_percentage\":1e100,\"remaining_percentage\":0},{\"provider\":\"test-a\",\"label\":\"used-1e309\",\"used_percentage\":1e309,\"remaining_percentage\":0},{\"provider\":\"test-a\",\"label\":\"used-nan\",\"used_percentage\":NaN,\"remaining_percentage\":0},{\"provider\":\"test-a\",\"label\":\"used-inf\",\"used_percentage\":Infinity,\"remaining_percentage\":0},{\"provider\":\"test-a\",\"label\":\"rem-inf\",\"used_percentage\":0,\"remaining_percentage\":Infinity},{\"provider\":\"test-c\",\"label\":\"7d\",\"used_percentage\":22,\"remaining_percentage\":78,\"observed_at\":\"2023-11-14T22:13:19Z\"}]}",
+      "expect": {
+        "outcome": "success",
+        "assertFresh": true,
+        "items": [
+          {
+            "provider": "test-b",
+            "label": "5h",
+            "used": 11,
+            "remaining": 89,
+            "clampedUsed": 11,
+            "clampedRemaining": 89,
+            "observedAt": "2023-11-14T22:13:19Z"
+          },
+          {
+            "provider": "test-c",
+            "label": "7d",
+            "used": 22,
+            "remaining": 78,
+            "clampedUsed": 22,
+            "clampedRemaining": 78,
+            "observedAt": "2023-11-14T22:13:19Z"
+          }
+        ],
+        "failed": [
+          {
+            "provider": "test-a",
+            "label": "used-over-int",
+            "layer": "serializer_range"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-over-int",
+            "layer": "serializer_range"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-1e100",
+            "layer": "serializer_range"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-1e309",
+            "layer": "json_non_finite"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-nan",
+            "layer": "json_non_finite"
+          },
+          {
+            "provider": "test-a",
+            "label": "used-inf",
+            "layer": "json_non_finite"
+          },
+          {
+            "provider": "test-a",
+            "label": "rem-inf",
+            "layer": "json_non_finite"
+          }
+        ]
+      },
+      "fetchedAtMs": 1700000000000,
+      "nowMs": 1700000001000,
+      "observedAtEpochMs": 1699999999000
+    },
+    {
+      "id": "unknown_producer_fields_ignored",
+      "coverage": "new",
+      "note": "percentage_resolution, pool_id, and account_fingerprint are ignored because the client Json sets ignoreUnknownKeys.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-a\",\"label\":\"5h\",\"used_percentage\":11,\"remaining_percentage\":89,\"percentage_resolution\":0.1,\"pool_id\":\"pool-synthetic\",\"account_fingerprint\":\"fp-synthetic\"}]}",
+      "expect": {
+        "outcome": "success",
+        "items": [
+          {
+            "provider": "test-a",
+            "label": "5h",
+            "used": 11,
+            "remaining": 89,
+            "clampedUsed": 11,
+            "clampedRemaining": 89
+          }
+        ]
+      }
+    },
+    {
+      "id": "optional_fields_missing_or_null",
+      "coverage": "partial",
+      "coveredBy": "AIUsageClientTest compact contract already asserts absent observed_at and measurement_source are null; explicit nulls and usage/remaining/next_reset_time_ms are new",
+      "note": "observed_at, measurement_source, next_reset_time_ms, usage, and remaining may be absent or JSON null.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-a\",\"label\":\"missing\",\"used_percentage\":11,\"remaining_percentage\":89},{\"provider\":\"test-a\",\"label\":\"nulls\",\"used_percentage\":11,\"remaining_percentage\":89,\"observed_at\":null,\"measurement_source\":null,\"next_reset_time_ms\":null,\"usage\":null,\"remaining\":null}]}",
+      "expect": {
+        "outcome": "success",
+        "assertNullOptionals": true,
+        "items": [
+          {
+            "provider": "test-a",
+            "label": "missing",
+            "used": 11,
+            "remaining": 89,
+            "clampedUsed": 11,
+            "clampedRemaining": 89
+          },
+          {
+            "provider": "test-a",
+            "label": "nulls",
+            "used": 11,
+            "remaining": 89,
+            "clampedUsed": 11,
+            "clampedRemaining": 89
+          }
+        ]
+      }
+    },
+    {
+      "id": "known_non_percentage_type_drift",
+      "coverage": "new",
+      "note": "A non-numeric string in next_reset_time_ms or usage fails that item only. Numeric strings are a different policy and are not this case.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[{\"provider\":\"test-b\",\"label\":\"5h\",\"used_percentage\":11,\"remaining_percentage\":89,\"observed_at\":\"2023-11-14T22:13:19Z\"},{\"provider\":\"test-a\",\"label\":\"reset-string\",\"used_percentage\":11,\"remaining_percentage\":89,\"next_reset_time_ms\":\"not-millis\"},{\"provider\":\"test-a\",\"label\":\"usage-string\",\"used_percentage\":11,\"remaining_percentage\":89,\"usage\":\"not-a-count\"},{\"provider\":\"test-c\",\"label\":\"7d\",\"used_percentage\":22,\"remaining_percentage\":78,\"observed_at\":\"2023-11-14T22:13:19Z\"}]}",
+      "expect": {
+        "outcome": "success",
+        "assertFresh": true,
+        "items": [
+          {
+            "provider": "test-b",
+            "label": "5h",
+            "used": 11,
+            "remaining": 89,
+            "clampedUsed": 11,
+            "clampedRemaining": 89,
+            "observedAt": "2023-11-14T22:13:19Z"
+          },
+          {
+            "provider": "test-c",
+            "label": "7d",
+            "used": 22,
+            "remaining": 78,
+            "clampedUsed": 22,
+            "clampedRemaining": 78,
+            "observedAt": "2023-11-14T22:13:19Z"
+          }
+        ],
+        "failed": [
+          {
+            "provider": "test-a",
+            "label": "reset-string"
+          },
+          {
+            "provider": "test-a",
+            "label": "usage-string"
+          }
+        ]
+      },
+      "fetchedAtMs": 1700000000000,
+      "nowMs": 1700000001000,
+      "observedAtEpochMs": 1699999999000
+    },
+    {
+      "id": "empty_quotas_succeeds",
+      "coverage": "overlap",
+      "coveredBy": "AIUsageClientTest.empty quotas array still replaces the previous snapshot",
+      "note": "An empty quotas array is a successful snapshot, not a fatal decode.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\",\"quotas\":[]}",
+      "expect": {
+        "outcome": "success"
+      }
+    },
+    {
+      "id": "missing_quotas_is_fatal",
+      "coverage": "new",
+      "note": "A missing quotas field is fatal for the whole response.",
+      "body": "{\"generated_at\":\"2020-01-01T00:00:00\"}",
+      "expect": {
+        "outcome": "fatal",
+        "fatalMessageContains": "not an array"
+      }
+    },
+    {
+      "id": "quotas_not_array_is_fatal",
+      "coverage": "overlap",
+      "coveredBy": "AIUsageClientTest.quotas field that is not an array is a fatal fetch failure",
+      "note": "A quotas object is fatal. Included so the catalog states the non-array contract.",
+      "body": "{\"quotas\":{\"provider\":\"test-a\"}}",
+      "expect": {
+        "outcome": "fatal",
+        "fatalMessageContains": "not an array"
+      }
+    },
+    {
+      "id": "quotas_null_is_fatal",
+      "coverage": "new",
+      "note": "JSON null is not an array, so the fetch is fatal.",
+      "body": "{\"quotas\":null}",
+      "expect": {
+        "outcome": "fatal",
+        "fatalMessageContains": "not an array"
+      }
+    },
+    {
+      "id": "unkeyed_bad_items_are_fatal",
+      "coverage": "overlap",
+      "coveredBy": "AIUsageClientTest.unreadable quota items are a fatal fetch and keep the previous snapshot",
+      "note": "null and {} have no readable provider/label, so they cannot enter failedKeys. If every item is like that, the fetch is fatal.",
+      "body": "{\"quotas\":[null,{}]}",
+      "expect": {
+        "outcome": "fatal",
+        "fatalMessageContains": "could not be decoded"
+      }
+    },
+    {
+      "id": "all_keyed_bad_items_is_partial_success",
+      "coverage": "new",
+      "note": "Every item fails to decode but each has a readable provider/label, so the fetch succeeds with no items and two failed keys. The P1-3 guard only fires when the array is non-empty, nothing decodes, AND no key is readable; a keyed all-bad payload is partial success, not fatal. This distinguishes an empty snapshot, a keyed partial failure (old value can be retained), and a fully unreadable fatal.",
+      "body": "{\"quotas\":[{\"provider\":\"test-a\",\"label\":\"5h\",\"used_percentage\":\"oops\",\"remaining_percentage\":50},{\"provider\":\"test-b\",\"label\":\"7d\",\"used_percentage\":null,\"remaining_percentage\":50}]}",
+      "expect": {
+        "outcome": "success",
+        "failed": [
+          { "provider": "test-a", "label": "5h" },
+          { "provider": "test-b", "label": "7d" }
+        ]
+      }
+    }
+  ]
+}
