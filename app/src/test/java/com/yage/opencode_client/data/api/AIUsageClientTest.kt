@@ -41,7 +41,28 @@ class AIUsageClientTest {
         assertEquals(71, quota.clampedRemainingPercentage)
         assertEquals(1783842841000L, quota.nextResetTimeMs)
         assertNull(quota.nextResetIso)
+        assertNull(quota.observedAtIso)
+        assertNull(quota.measurementSource)
+        assertNull(quota.observedAtMs)
         assertEquals("/api/v1/quotas", server.takeRequest().path)
+    }
+
+    @Test
+    fun `fetch decodes observed_at separately from the transport timestamp`() = runBlocking {
+        server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(
+            """{"generated_at":"2026-10-10T15:49:12","quotas":[{"provider":"codex","label":"5h","used_percentage":29,"remaining_percentage":71,"observed_at":"2026-10-10T08:49:11.527738-07:00","measurement_source":"cache"}]}"""
+        ))
+
+        val before = System.currentTimeMillis()
+        val decoded = client.fetchQuotas(server.url("/").toString()).getOrThrow()
+        val after = System.currentTimeMillis()
+
+        val quota = decoded.quotas.single()
+        assertEquals("2026-10-10T08:49:11.527738-07:00", quota.observedAtIso)
+        assertEquals(1_791_647_351_527L, quota.observedAtMs)
+        assertEquals("cache", quota.measurementSource)
+        assertEquals("2026-10-10T15:49:12", decoded.generatedAt)
+        assertTrue(decoded.fetchedAtMs in before..after)
     }
 
     @Test
