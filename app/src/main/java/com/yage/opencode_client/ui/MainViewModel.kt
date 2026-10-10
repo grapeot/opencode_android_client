@@ -384,6 +384,9 @@ data class AppState(
             val nowMs = System.currentTimeMillis()
             val hasError = aiUsageError != null
             val quota = selectedAIUsageQuota
+            if (quotaWindowImpersonatesFailedPreferred(selectedModelQuotaKey, quota, snapshot.failedKeys)) {
+                return true
+            }
             return if (quota != null) {
                 isQuotaStale(quota, snapshot, nowMs, hasError)
             } else {
@@ -769,13 +772,7 @@ class MainViewModel @Inject constructor(
         if (url.isBlank()) return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingAIUsage = true, aiUsageError = null) }
-            aiUsageClient.fetchQuotas(url)
-                .onSuccess { snapshot ->
-                    _state.update { it.copy(aiUsageQuotaSnapshot = snapshot, isLoadingAIUsage = false, aiUsageError = null) }
-                }
-                .onFailure { error ->
-                    _state.update { it.copy(isLoadingAIUsage = false, aiUsageError = error.message) }
-                }
+            publishQuotaFetch(aiUsageClient.fetchQuotas(url), stopRefreshing = false)
         }
     }
 
@@ -791,22 +788,19 @@ class MainViewModel @Inject constructor(
                     }
                     return@launch
                 }
-            aiUsageClient.fetchQuotas(url)
-                .onSuccess { snapshot ->
-                    _state.update {
-                        it.copy(
-                            aiUsageQuotaSnapshot = snapshot,
-                            isLoadingAIUsage = false,
-                            isRefreshingAIUsage = false,
-                            aiUsageError = null
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(isLoadingAIUsage = false, isRefreshingAIUsage = false, aiUsageError = error.message)
-                    }
-                }
+            publishQuotaFetch(aiUsageClient.fetchQuotas(url), stopRefreshing = true)
+        }
+    }
+
+    private fun publishQuotaFetch(result: Result<QuotaFetchResult>, stopRefreshing: Boolean) {
+        _state.update { state ->
+            val applied = applyQuotaFetchResult(state.aiUsageQuotaSnapshot, result)
+            state.copy(
+                aiUsageQuotaSnapshot = applied.snapshot,
+                isLoadingAIUsage = false,
+                isRefreshingAIUsage = if (stopRefreshing) false else state.isRefreshingAIUsage,
+                aiUsageError = applied.error
+            )
         }
     }
 

@@ -148,6 +148,7 @@
     <string name="settings_ai_usage_dashboard">AI Usage Dashboard</string>
     <string name="settings_ai_usage_url">Dashboard URL (optional)</string>
     <string name="settings_ai_usage_description">Leave blank for no quota UI. Opening the sheet reads cached data; Refresh waits for a full provider update.</string>
+    <string name="settings_ai_usage_partial">Some providers were not refreshed</string>
     <string name="chat_add_image">Add image</string>
     <string name="chat_remove_image">Remove image</string>
     <string name="chat_send">Send</string>

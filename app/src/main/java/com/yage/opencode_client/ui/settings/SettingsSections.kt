@@ -364,6 +364,9 @@ internal fun AIUsageDashboardSection(
     when {
         saveMessage != null -> ResultCard(TestResult(success = true, message = saveMessage))
         state.aiUsageError != null -> ResultCard(TestResult(success = false, message = state.aiUsageError))
+        state.aiUsageQuotaSnapshot?.failedKeys?.isNotEmpty() == true -> ResultCard(
+            TestResult(success = true, message = stringResource(R.string.settings_ai_usage_partial))
+        )
         state.aiUsageQuotaSnapshot != null -> ResultCard(
             TestResult(success = true, message = stringResource(R.string.settings_connected_successfully))
         )
