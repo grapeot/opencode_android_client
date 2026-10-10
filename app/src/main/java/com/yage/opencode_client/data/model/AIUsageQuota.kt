@@ -32,8 +32,8 @@ data class AIUsageQuota(
     val usage: Long? = null,
     val remaining: Long? = null
 ) {
-    val clampedUsedPercentage: Int get() = usedPercentage.coerceIn(0, 100)
     val clampedRemainingPercentage: Int get() = remainingPercentage.coerceIn(0, 100)
+    val clampedUsedPercentage: Int get() = 100 - clampedRemainingPercentage
 }
 
 data class AIUsageQuotaSnapshot(
