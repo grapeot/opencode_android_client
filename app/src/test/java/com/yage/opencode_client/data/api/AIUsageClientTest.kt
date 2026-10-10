@@ -45,6 +45,32 @@ class AIUsageClientTest {
     }
 
     @Test
+    fun `fetch decodes fractional and float-formatted whole percentages`() = runBlocking {
+        server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(
+            """{"generated_at":"2020-01-01T00:00:00","quotas":[
+              {"provider":"test-a","label":"5h","used_percentage":9.6,"remaining_percentage":90.4},
+              {"provider":"test-b","label":"7d","used_percentage":2.555555,"remaining_percentage":97.444445},
+              {"provider":"codex","label":"5h","used_percentage":29.0,"remaining_percentage":71.0}
+            ]}"""
+        ))
+
+        val result = client.fetchQuotas(server.url("/").toString())
+
+        assertTrue(result.isSuccess)
+        val quotas = result.getOrThrow().quotas
+        assertEquals(3, quotas.size)
+        // rounding is locked on the raw fields: 9.6 rounds up to 10, 90.4 rounds down to 90
+        assertEquals(10, quotas[0].usedPercentage)
+        assertEquals(90, quotas[0].remainingPercentage)
+        // long decimals parse and round: 2.555555 -> 3, 97.444445 -> 97
+        assertEquals(3, quotas[1].usedPercentage)
+        assertEquals(97, quotas[1].remainingPercentage)
+        // a whole number written in float form still decodes
+        assertEquals(29, quotas[2].usedPercentage)
+        assertEquals(71, quotas[2].remainingPercentage)
+    }
+
+    @Test
     fun `manual refresh can run update before quota fetch`() = runBlocking {
         server.enqueue(MockResponse().setBody("{}"))
         server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody(
