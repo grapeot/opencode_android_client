@@ -1,6 +1,7 @@
 package com.yage.opencode_client
 
 import android.util.Log
+import com.yage.opencode_client.data.api.SSEClient
 import com.yage.opencode_client.data.model.AgentInfo
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
@@ -33,6 +34,7 @@ import com.yage.opencode_client.ui.encodeShortlist
 import com.yage.opencode_client.ui.seedShortlistFromPresets
 import com.yage.opencode_client.ui.session.buildSessionTree
 import com.yage.opencode_client.util.SettingsManager
+import com.yage.opencode_client.util.SessionReadStateStore
 import com.yage.opencode_client.util.ThemeMode
 import com.yage.voiceflowkit.VoiceFlowClient
 import com.yage.voiceflowkit.VoiceFlowMicrophone
@@ -69,6 +71,10 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import okhttp3.OkHttpClient
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
+import okhttp3.sse.EventSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -110,7 +116,7 @@ class MainViewModelTest {
         tunnelManager = mockk(relaxed = true)
         sshKeyManager = mockk(relaxed = true)
 
-        val defaultProfile = HostProfile.defaultDirect("http://server.test")
+        val defaultProfile = HostProfile.defaultDirect("http://server.test").copy(id = "test-host")
         every { hostProfileStore.currentProfile() } returns defaultProfile
         every { hostProfileStore.profiles() } returns listOf(defaultProfile)
 
@@ -151,7 +157,7 @@ class MainViewModelTest {
         every { settingsManager.getAgentForSession(any()) } returns null
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
-        every { repository.connectSSE(any()) } returns emptyFlow()
+        every { repository.connectSSE(any(), any()) } returns emptyFlow()
         coEvery { repository.getSessions(any()) } returns Result.success(emptyList())
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
@@ -160,8 +166,170 @@ class MainViewModelTest {
         coEvery { repository.getProviderRegistry() } returns Result.success(ProviderRegistryResponse())
     }
 
-    private fun createViewModel(): MainViewModel {
-        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone, hostProfileStore, tunnelManager, sshKeyManager, testSessionStatsStore())
+    private fun createViewModel(readStateStore: SessionReadStateStore = testSessionReadStateStore()): MainViewModel {
+        return MainViewModel(repository, settingsManager, voiceFlowClient, microphone, hostProfileStore, tunnelManager, sshKeyManager, testSessionStatsStore(), readStateStore)
+    }
+
+    private fun indicatorEvent(sessionId: String, status: String? = null) = SSEEvent(
+        payload = SSEPayload(
+            type = if (status == null) "session.error" else "session.status",
+            properties = buildJsonObject {
+                put("sessionID", JsonPrimitive(sessionId))
+                if (status != null) put("status", buildJsonObject { put("type", JsonPrimitive(status)) })
+            }
+        )
+    )
+
+    @Test
+    fun `indicator errors from other sessions settle only after idle and successful turns clear them`() = runTest {
+        val store = testSessionReadStateStore()
+        val viewModel = createViewModel(store)
+        updateState(viewModel) { it.copy(currentSessionId = "current") }
+        handleSse(viewModel, indicatorEvent("other"))
+        assertNotNull(viewModel.state.value.pendingSessionErrorAt["other"])
+        assertNull(store.failedAt("other"))
+        handleSse(viewModel, indicatorEvent("other", "retry"))
+        assertTrue(viewModel.state.value.pendingSessionErrorAt.isEmpty())
+        handleSse(viewModel, indicatorEvent("other", "idle"))
+        assertNull(store.failedAt("other"))
+        handleSse(viewModel, indicatorEvent("other"))
+        val errorAt = viewModel.state.value.pendingSessionErrorAt["other"]
+        handleSse(viewModel, indicatorEvent("other", "idle"))
+        assertEquals(errorAt, store.failedAt("other"))
+        assertEquals(errorAt, viewModel.state.value.sessionReadStates["other"]?.failedAt)
+        assertTrue(viewModel.state.value.pendingSessionErrorAt.isEmpty())
+        // Idle snapshots alone must not clear a previously recorded failure.
+        handleSse(viewModel, indicatorEvent("other", "idle"))
+        assertEquals(errorAt, store.failedAt("other"))
+        handleSse(viewModel, indicatorEvent("other", "busy"))
+        handleSse(viewModel, indicatorEvent("other", "idle"))
+        assertNull(store.failedAt("other"))
+        assertNull(viewModel.state.value.sessionReadStates["other"]?.failedAt)
+    }
+
+    @Test
+    fun `status poll settles missing active sessions and preserves failures on idle snapshots`() = runTest {
+        val store = testSessionReadStateStore()
+        store.markFailed("snapshot", 10L)
+        store.markFailed("success", 20L)
+        val viewModel = createViewModel(store)
+        updateState(viewModel) {
+            it.copy(sessionStatuses = mapOf("failed" to SessionStatus("retry"), "success" to SessionStatus("busy")))
+        }
+        handleSse(viewModel, indicatorEvent("failed"))
+        val errorAt = viewModel.state.value.pendingSessionErrorAt["failed"]
+        coEvery { repository.getSessionStatus() } returns Result.success(mapOf("snapshot" to SessionStatus("idle")))
+        invokePrivateNoArgs(viewModel, "loadSessionStatus")
+        advanceUntilIdle()
+        assertEquals(errorAt, store.failedAt("failed"))
+        assertNull(store.failedAt("success"))
+        assertEquals(10L, store.failedAt("snapshot"))
+        assertTrue(viewModel.state.value.sessionStatuses["failed"]!!.isIdle)
+        assertTrue(viewModel.state.value.sessionStatuses["success"]!!.isIdle)
+        assertTrue(viewModel.state.value.pendingSessionErrorAt.isEmpty())
+    }
+
+    @Test
+    fun `cold restore preserves read timestamps but selecting marks outgoing and incoming viewed`() = runTest {
+        val store = testSessionReadStateStore()
+        store.markViewed("old", 10L)
+        store.markFailed("old", 20L)
+        every { settingsManager.currentSessionId } returns "old"
+        val viewModel = createViewModel(store)
+        assertEquals("old", viewModel.state.value.currentSessionId)
+        assertEquals(10L, viewModel.state.value.sessionReadStates["old"]?.lastViewedAt)
+        viewModel.selectSession("new")
+        advanceUntilIdle()
+        assertTrue(store.lastViewedAt("old")!! > 20L)
+        assertEquals(store.lastViewedAt("old"), store.lastViewedAt("new"))
+        assertEquals(store.all(), viewModel.state.value.sessionReadStates)
+    }
+
+    @Test
+    fun `deleting current session removes read state after selecting replacement`() = runTest {
+        val store = testSessionReadStateStore()
+        store.markFailed("old", 10L)
+        val viewModel = createViewModel(store)
+        updateState(viewModel) { it.copy(currentSessionId = "old", sessions = listOf(
+            Session("old", directory = "/tmp"), Session("new", directory = "/tmp")
+        ), pendingSessionErrorAt = mapOf("old" to 20L)) }
+        coEvery { repository.deleteSession("old") } returns Result.success(Unit)
+        viewModel.deleteSession("old")
+        advanceUntilIdle()
+        assertEquals("new", viewModel.state.value.currentSessionId)
+        assertFalse(store.all().containsKey("old"))
+        assertFalse(viewModel.state.value.pendingSessionErrorAt.containsKey("old"))
+        assertEquals(store.all(), viewModel.state.value.sessionReadStates)
+    }
+
+    @Test
+    fun `restoring session selects it and marks it viewed`() = runTest {
+        val store = testSessionReadStateStore()
+        val viewModel = createViewModel(store)
+        val restored = Session("restored", directory = "/tmp")
+        updateState(viewModel) { it.copy(sessions = listOf(restored.copy(time = Session.TimeInfo(archived = 1L)))) }
+        coEvery { repository.updateSessionArchived("restored", any()) } returns Result.success(restored)
+        viewModel.restoreSession("restored")
+        advanceUntilIdle()
+        assertEquals("restored", viewModel.state.value.currentSessionId)
+        assertNotNull(store.lastViewedAt("restored"))
+        assertEquals(store.all(), viewModel.state.value.sessionReadStates)
+    }
+
+    @Test
+    fun `SSE disconnect and host switch discard tentative errors`() = runTest {
+        val listener = slot<EventSourceListener>()
+        val source = mockk<EventSource>(relaxed = true)
+        val factory = mockk<EventSource.Factory>()
+        mockkStatic(EventSources::class)
+        every { EventSources.createFactory(any()) } returns factory
+        every { factory.newEventSource(any(), capture(listener)) } returns source
+        val client = SSEClient(OkHttpClient())
+        every { repository.connectSSE(any(), any()) } answers {
+            client.connect("http://server.test", onConnected = firstArg(), onDisconnected = secondArg())
+        }
+        val store = testSessionReadStateStore()
+        val viewModel = createViewModel(store)
+        updateState(viewModel) { it.copy(sessionStatuses = mapOf("other" to SessionStatus("busy"))) }
+        invokePrivateNoArgs(viewModel, "startSSE")
+        runCurrent()
+        listener.captured.onEvent(source, null, null,
+            """{"payload":{"type":"session.error","properties":{"sessionID":"other"}}}""")
+        runCurrent()
+        assertNotNull(viewModel.state.value.pendingSessionErrorAt["other"])
+
+        listener.captured.onFailure(source, IllegalStateException("disconnected"), null)
+        runCurrent()
+        assertTrue(viewModel.state.value.pendingSessionErrorAt.isEmpty())
+        // Poll while the real SSEClient retry loop is still in its 1s backoff.
+        invokePrivateNoArgs(viewModel, "loadSessionStatus")
+        runCurrent()
+        assertNull(store.failedAt("other"))
+        assertTrue(viewModel.state.value.sessionStatuses["other"]!!.isIdle)
+        advanceTimeBy(999)
+        runCurrent()
+        verify(exactly = 1) { factory.newEventSource(any(), any()) }
+        handleSse(viewModel, indicatorEvent("other"))
+        invokePrivateNoArgs(viewModel, "resetRuntimeForHostSwitch")
+        runCurrent()
+        assertTrue(viewModel.state.value.pendingSessionErrorAt.isEmpty())
+    }
+
+    @Test
+    fun `init and active host refresh publish only that hosts read state`() = runTest {
+        val store = testSessionReadStateStore()
+        store.markViewed("shared", 10L)
+        store.selectHost("other-host")
+        store.markFailed("shared", 20L)
+        val viewModel = createViewModel(store)
+        assertEquals(10L, viewModel.state.value.sessionReadStates["shared"]?.lastViewedAt)
+        assertNull(viewModel.state.value.sessionReadStates["shared"]?.failedAt)
+        every { hostProfileStore.currentProfile() } returns
+            HostProfile.defaultDirect("http://other.test").copy(id = "other-host")
+        invokePrivateNoArgs(viewModel, "refreshHostProfileState")
+        assertEquals("other-host", viewModel.state.value.currentHostProfileId)
+        assertNull(viewModel.state.value.sessionReadStates["shared"]?.lastViewedAt)
+        assertEquals(20L, viewModel.state.value.sessionReadStates["shared"]?.failedAt)
     }
 
     private fun updateState(viewModel: MainViewModel, transform: (AppState) -> AppState) {
@@ -3605,7 +3773,7 @@ class MainViewModelTest {
     @Test
     fun `startSSE onConnected reconciles messages and status once`() = runTest {
         val captured = slot<() -> Unit>()
-        coEvery { repository.connectSSE(capture(captured)) } returns emptyFlow()
+        coEvery { repository.connectSSE(capture(captured), any()) } returns emptyFlow()
         val viewModel = createViewModel()
         updateState(viewModel) { it.copy(currentSessionId = "session-1") }
 
@@ -3622,7 +3790,7 @@ class MainViewModelTest {
     @Test
     fun `startSSE onConnected skips messages refresh while session is busy`() = runTest {
         val captured = slot<() -> Unit>()
-        coEvery { repository.connectSSE(capture(captured)) } returns emptyFlow()
+        coEvery { repository.connectSSE(capture(captured), any()) } returns emptyFlow()
         val viewModel = createViewModel()
         updateState(viewModel) {
             it.copy(

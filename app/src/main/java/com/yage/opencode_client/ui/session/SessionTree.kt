@@ -8,6 +8,64 @@ data class SessionNode(
     val children: List<SessionNode>
 )
 
+enum class SessionIndicator { NEEDS_YOU, FAILED, UNREAD }
+
+fun settled(status: SessionStatus?): Boolean = status == null || status.isIdle
+
+fun unreadCountsBySession(
+    sessions: List<Session>,
+    statuses: Map<String, SessionStatus>,
+    lastViewedAt: Map<String, Long>
+): Map<String, Int> = indicatorCountsBySession(
+    sessions,
+    sessions.mapNotNull { session ->
+        session.time?.updated?.takeIf { settled(statuses[session.id]) }?.let { session.id to it }
+    }.toMap(),
+    lastViewedAt
+)
+
+fun failureCountsBySession(
+    sessions: List<Session>,
+    failedAt: Map<String, Long>,
+    lastViewedAt: Map<String, Long>
+): Map<String, Int> = indicatorCountsBySession(sessions, failedAt, lastViewedAt)
+
+private fun indicatorCountsBySession(
+    sessions: List<Session>,
+    sourceTimes: Map<String, Long>,
+    lastViewedAt: Map<String, Long>
+): Map<String, Int> {
+    val sessionsById = sessions.associateBy { it.id }
+    val counts = mutableMapOf<String, Int>()
+    sourceTimes.forEach { (sourceId, time) ->
+        var sessionId: String? = sourceId
+        val visited = mutableSetOf<String>()
+        while (sessionId != null && visited.add(sessionId)) {
+            if (time > (lastViewedAt[sessionId] ?: Long.MIN_VALUE)) {
+                counts[sessionId] = counts.getOrDefault(sessionId, 0) + 1
+            }
+            sessionId = sessionsById[sessionId]?.parentId
+        }
+    }
+    return counts
+}
+
+fun rowIndicator(
+    session: Session,
+    status: SessionStatus?,
+    isCurrent: Boolean,
+    attentionCount: Int,
+    unreadCount: Int,
+    failureCount: Int
+): SessionIndicator? = when {
+    session.isArchived -> null
+    attentionCount > 0 -> SessionIndicator.NEEDS_YOU
+    failureCount > 0 -> SessionIndicator.FAILED
+    !settled(status) || isCurrent -> null
+    unreadCount > 0 -> SessionIndicator.UNREAD
+    else -> null
+}
+
 fun attentionCountsBySession(
     sessions: List<Session>,
     attentionSessionIds: List<String>

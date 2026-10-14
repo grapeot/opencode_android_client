@@ -126,7 +126,8 @@ class NfcQuickPromptTest {
             hostProfileStore,
             tunnelManager,
             sshKeyManager,
-            testSessionStatsStore()
+            testSessionStatsStore(),
+            testSessionReadStateStore()
         )
     }
 

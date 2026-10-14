@@ -7,6 +7,7 @@ import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.ProviderModel
 import com.yage.opencode_client.data.model.ProvidersResponse
+import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
@@ -149,13 +150,24 @@ internal fun launchLoadMoreSessions(
 internal fun launchLoadSessionStatus(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
-    state: MutableStateFlow<AppState>
+    state: MutableStateFlow<AppState>,
+    onReconcileSessionFailure: (String, SessionStatus?, SessionStatus) -> Unit = { _, _, _ -> }
 ) {
     scope.launch {
         repository.getSessionStatus()
             .onSuccess { statuses ->
+                val previous = state.value.sessionStatuses
+                val reconciled = statuses.toMutableMap()
+                previous.forEach { (id, status) ->
+                    if (id !in statuses && (status.isBusy || status.isRetry)) {
+                        reconciled[id] = SessionStatus(type = "idle")
+                    }
+                }
+                reconciled.forEach { (id, status) ->
+                    onReconcileSessionFailure(id, previous[id], status)
+                }
                 state.update { current ->
-                    current.copy(sessionStatuses = statuses)
+                    current.copy(sessionStatuses = reconciled)
                 }
             }
             .onFailure { error ->
@@ -494,7 +506,8 @@ internal fun launchSetSessionArchived(
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
     sessionId: String,
-    archived: Boolean
+    archived: Boolean,
+    onRestored: () -> Unit = {}
 ) {
     scope.launch {
         val archivedValue = if (archived) System.currentTimeMillis() else -1L
@@ -513,6 +526,7 @@ internal fun launchSetSessionArchived(
                     return@launch
                 }
         }
+        if (!archived) onRestored()
     }
 }
 
@@ -530,7 +544,8 @@ internal fun launchDeleteSession(
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
     sessionId: String,
-    onSelectSession: (String) -> Unit
+    onSelectSession: (String) -> Unit,
+    onDeleted: () -> Unit = {}
 ) {
     scope.launch {
         repository.deleteSession(sessionId)
@@ -545,6 +560,7 @@ internal fun launchDeleteSession(
                         state.update { it.copy(currentSessionId = null, messages = emptyList()) }
                     }
                 }
+                onDeleted()
             }
             .onFailure { error ->
                 state.update { it.copy(error = "Failed to delete session: ${errorMessageOrFallback(error, "unknown error")}") }

@@ -6,6 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.yage.opencode_client.data.model.*
 import com.yage.opencode_client.ui.session.descendantBusyCountsBySession
 import com.yage.opencode_client.ui.session.runningDescendantSessions
+import com.yage.opencode_client.ui.session.SessionIndicator
+import com.yage.opencode_client.ui.session.unreadCountsBySession
+import com.yage.opencode_client.ui.session.failureCountsBySession
+import com.yage.opencode_client.util.SessionReadState
+import com.yage.opencode_client.util.SessionReadStateStore
 import com.yage.opencode_client.data.api.AIUsageClient
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
@@ -73,6 +78,8 @@ data class AppState(
     val expandedSessionIds: Set<String> = emptySet(),
     val currentSessionId: String? = null,
     val sessionStatuses: Map<String, SessionStatus> = emptyMap(),
+    val sessionReadStates: Map<String, SessionReadState> = emptyMap(),
+    val pendingSessionErrorAt: Map<String, Long> = emptyMap(),
     val currentSessionCounts: SessionCounts? = null,
     val messages: List<MessageWithParts> = emptyList(),
     val messageLimit: Int = 30,
@@ -331,6 +338,36 @@ data class AppState(
     val attentionSessionIds: List<String>
         get() = pendingPermissions.map { it.sessionId } + pendingQuestions.map { it.sessionId }
 
+    private val lastViewedAt: Map<String, Long>
+        get() = buildMap {
+            sessions.forEach { session ->
+                sessionReadStates[session.id]?.lastViewedAt?.let { put(session.id, it) }
+            }
+        }
+
+    val sessionUnreadCounts: Map<String, Int>
+        get() = unreadCountsBySession(sessions, sessionStatuses, lastViewedAt)
+
+    val sessionFailureCounts: Map<String, Int>
+        get() {
+            val viewed = mutableMapOf<String, Long>()
+            val failed = mutableMapOf<String, Long>()
+            sessions.forEach { session ->
+                val readState = sessionReadStates[session.id]
+                readState?.lastViewedAt?.let { viewed[session.id] = it }
+                readState?.failedAt?.let { failed[session.id] = it }
+            }
+            return failureCountsBySession(sessions, failed, viewed)
+        }
+
+    fun rowIndicator(sessionId: String, attentionCount: Int): SessionIndicator? {
+        val session = sessions.find { it.id == sessionId } ?: return null
+        return com.yage.opencode_client.ui.session.rowIndicator(
+            session, sessionStatuses[sessionId], sessionId == currentSessionId, attentionCount,
+            sessionUnreadCounts.getOrDefault(sessionId, 0), sessionFailureCounts.getOrDefault(sessionId, 0)
+        )
+    }
+
     val isCurrentSessionBusy: Boolean
         get() = currentSessionStatus?.isBusy == true
 
@@ -566,6 +603,7 @@ class MainViewModel @Inject constructor(
     private val tunnelManager: TunnelManager,
     private val sshKeyManager: SSHKeyManager,
     private val sessionStatsStore: SessionStatsStore,
+    private val readStateStore: SessionReadStateStore,
     private val aiUsageClient: AIUsageClient = AIUsageClient()
 ) : ViewModel() {
 
@@ -607,6 +645,7 @@ class MainViewModel @Inject constructor(
 
     private fun loadSettings() {
         applySavedSettings(repository, settingsManager, hostProfileStore, _state)
+        selectReadStateHost(hostProfileStore.currentProfile().id)
         _state.update { it.copy(aiUsageDashboardUrl = settingsManager.aiUsageDashboardUrl) }
     }
 
@@ -678,15 +717,18 @@ class MainViewModel @Inject constructor(
     fun rotateSshKey(): String = sshKeyManager.rotateKey()
 
     private fun refreshHostProfileState() {
+        val currentProfile = hostProfileStore.currentProfile()
+        selectReadStateHost(currentProfile.id)
         _state.update {
             it.copy(
                 hostProfiles = hostProfileStore.profiles(),
-                currentHostProfileId = hostProfileStore.currentProfile().id
+                currentHostProfileId = currentProfile.id
             )
         }
     }
 
     private fun configureRepositoryForProfile(profile: HostProfile, startTunnel: Boolean) {
+        selectReadStateHost(profile.id)
         val password = profile.basicAuth?.passwordId?.let { settingsManager.basicAuthPassword(it) }
         if (profile.transport == HostTransport.SSH_TUNNEL && startTunnel) {
             hostRuntimeScope.launch { configureRepositoryForProfileAsync(profile) }
@@ -696,6 +738,7 @@ class MainViewModel @Inject constructor(
     }
 
     private suspend fun configureRepositoryForProfileAsync(profile: HostProfile): Boolean {
+        selectReadStateHost(profile.id)
         val password = profile.basicAuth?.passwordId?.let { settingsManager.basicAuthPassword(it) }
         val baseUrl = when (profile.transport) {
             HostTransport.DIRECT -> profile.serverUrl
@@ -1519,10 +1562,17 @@ class MainViewModel @Inject constructor(
     }
 
     private fun loadSessionStatus() {
-        launchLoadSessionStatus(hostRuntimeScope, repository, _state)
+        launchLoadSessionStatus(hostRuntimeScope, repository, _state, ::reconcileSessionFailure)
     }
 
     fun selectSession(sessionId: String) {
+        val now = System.currentTimeMillis()
+        _state.value.currentSessionId?.takeIf { it != sessionId }?.let {
+            readStateStore.markViewed(it, now)
+            publishReadStates()
+        }
+        readStateStore.markViewed(sessionId, now)
+        publishReadStates()
         if (_state.value.currentSessionId != sessionId) {
             if (_state.value.isRecording ||
                 (activeSpeechFileOwner != null && !_state.value.isTranscribing && !_state.value.isRetryingSpeech)
@@ -1562,6 +1612,9 @@ class MainViewModel @Inject constructor(
                     }
                     if (_state.value.currentSessionId != session.id) {
                         selectSession(session.id)
+                    } else {
+                        readStateStore.markViewed(session.id, System.currentTimeMillis())
+                        publishReadStates()
                     }
                 }
                 .onFailure { error ->
@@ -1626,6 +1679,9 @@ class MainViewModel @Inject constructor(
                     }
                     if (_state.value.currentSessionId != session.id) {
                         selectSession(session.id)
+                    } else {
+                        readStateStore.markViewed(session.id, System.currentTimeMillis())
+                        publishReadStates()
                     }
                 }
                 .onFailure { error ->
@@ -1689,6 +1745,7 @@ class MainViewModel @Inject constructor(
                 expandedSessionIds = emptySet(),
                 currentSessionId = null,
                 sessionStatuses = emptyMap(),
+                pendingSessionErrorAt = emptyMap(),
                 currentSessionCounts = null,
                 messages = emptyList(),
                 streamingPartTexts = emptyMap(),
@@ -1806,11 +1863,17 @@ class MainViewModel @Inject constructor(
     }
 
     fun restoreSession(sessionId: String) {
-        launchSetSessionArchived(hostRuntimeScope, repository, _state, sessionId, archived = false)
+        launchSetSessionArchived(hostRuntimeScope, repository, _state, sessionId, archived = false) {
+            selectSession(sessionId)
+        }
     }
 
     fun deleteSession(sessionId: String) {
-        launchDeleteSession(hostRuntimeScope, repository, _state, sessionId, ::selectSession)
+        launchDeleteSession(hostRuntimeScope, repository, _state, sessionId, ::selectSession) {
+            readStateStore.remove(sessionId)
+            _state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt - sessionId) }
+            publishReadStates()
+        }
     }
 
     fun sendMessage() {
@@ -2207,12 +2270,14 @@ class MainViewModel @Inject constructor(
 
     private fun startSSE() {
         sseJob?.cancel()
+        _state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
         sseJob = launchSseCollection(
             hostRuntimeScope,
             repository,
             _state,
             onEvent = ::handleSSEEvent,
             onConnected = {
+                _state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
                 // Reconnect bootstrap: OkHttp fires onOpen on every fresh
                 // (re)connect, so this also reconciles anything missed while
                 // the stream was down. loadMessages guards against session
@@ -2243,8 +2308,34 @@ class MainViewModel @Inject constructor(
             onRecordToolPart = { sessionId, partId ->
                 sessionStatsStore.recordToolPart(sessionId, partId)
                 publishCurrentSessionCounts()
-            }
+            },
+            onReconcileSessionFailure = ::reconcileSessionFailure
         )
+    }
+
+    private fun publishReadStates() {
+        _state.update { it.copy(sessionReadStates = readStateStore.all()) }
+    }
+
+    private fun selectReadStateHost(hostProfileId: String) {
+        readStateStore.selectHost(hostProfileId)
+        publishReadStates()
+    }
+
+    private fun reconcileSessionFailure(sessionId: String, previous: SessionStatus?, current: SessionStatus) {
+        if (current.isBusy || current.isRetry) {
+            _state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt - sessionId) }
+        } else if (current.isIdle) {
+            val pending = _state.value.pendingSessionErrorAt[sessionId]
+            if (pending != null) {
+                readStateStore.markFailed(sessionId, pending)
+                publishReadStates()
+            } else if (previous?.isBusy == true || previous?.isRetry == true) {
+                readStateStore.clearFailed(sessionId)
+                publishReadStates()
+            }
+            _state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt - sessionId) }
+        }
     }
 
     override fun onCleared() {

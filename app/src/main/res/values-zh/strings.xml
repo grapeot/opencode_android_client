@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sessions_indicator_needs_you">需要你处理</string>
+    <string name="sessions_indicator_failed">上一轮失败</string>
+    <string name="sessions_indicator_unread">有新内容未读</string>
     <string name="ok">确定</string>
     <string name="app_name">OpenCode Client</string>
     <string name="nav_chat">聊天</string>

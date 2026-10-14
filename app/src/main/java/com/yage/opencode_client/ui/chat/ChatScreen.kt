@@ -232,6 +232,8 @@ fun ChatScreen(
                 sessionStatuses = state.sessionStatuses,
                 attentionSessionIds = state.attentionSessionIds,
                 descendantBusyCounts = state.sessionDescendantBusyCounts,
+                sessionUnreadCounts = state.sessionUnreadCounts,
+                sessionFailureCounts = state.sessionFailureCounts,
                 hasMoreSessions = state.hasMoreSessions,
                 isLoadingMoreSessions = state.isLoadingMoreSessions,
                 isRefreshingSessions = state.isRefreshingSessions,
