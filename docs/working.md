@@ -1,5 +1,13 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-14 — 状态灯按完整文字块居中与尺寸调整
+
+- 列表改为灯列与完整标题/副文字 Column 并列并垂直居中；移除 metadata 灯列 padding。保留原 48dp chevron/Spacer、树缩进、横向位置和点击滑动，无垂直偏移补丁，无灯占位稳定。
+- Android 按较小标题字体比例缩小共享点：绿蓝 5→7.5dp，黄红 6→9dp；列表和 composer 一致。保留 0.40↔1.0、2.6 秒呼吸、绿色 tone、Reduced Motion 和所有状态规则，语义风格与 iOS 一致。
+- 增加 synthetic 布局测试：单/双行完整文字块中心、父子及选中态、chevron 不重叠、无灯对齐；局部放大字体验证尺寸上限，不修改系统显示/字体设置。
+- 验证：`SessionIndicatorTest` 5 项通过，`assembleDebug` 通过；明确指定 emulator 的 `SessionListInstrumentedTest` 15 项通过（0 失败/跳过）。首次冷启动因模拟器存储未挂载未能启动测试，待启动完成后重跑通过。
+- 浅深色截图已更新并读图核验：ignored `app/build/session-indicator-scratch/light.png`、`dark.png`。包含展开父子树、选中父行、单/双行及各灯色。未安装实体设备、未提交；本轮创建的模拟器已关闭。
+
 ## 2026-10-14 — 增强运行灯呼吸幅度
 
 - 根据真机反馈，将列表与 composer 共用的运行灯透明度从 0.75↔1.0 调为 0.40↔1.0；最低值提为 `SessionIndicatorTuning.runningMinOpacity` 常量。

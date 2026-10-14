@@ -30,9 +30,13 @@ abort 只请求中断，之后刷新权威状态；不预写 idle、不把 HTTP 
 
 ## 展示与动效
 
-共享 `SessionIndicatorDot`，保持 chevron、层级、点击和滑动。固定 16dp 灯列；绿蓝 6→9dp，黄红 8→12dp，跟随 fontScale 并 clamp。running 使用独立 token：浅色 `#167C45`，深色 `#4CBF82`，不复用 success。绿灯 2.6 秒透明度 0.40↔1.0，最低值由 `SessionIndicatorTuning.runningMinOpacity` 定义；无缩放、位移、光晕或闪灭。系统关闭动画、后台、离屏时常亮或停止动画。动画状态只在绘制层读取，不触发行图、排序或确认逻辑逐帧重算。
+共享 `SessionIndicatorDot`，保持 chevron、层级、点击和滑动。列表灯列与完整文字 Column（标题及时间/状态副文字）并列，整体垂直居中；无副文字时对标题居中。通过 Row 的布局对齐，不使用垂直 offset 修正。保留 48dp chevron/Spacer、树缩进和原内容横向位置，metadata 无需额外灯列 padding，无灯也保留稳定的 16dp 灯列。
+
+Android 相对较小的标题字体采用更小的点：绿蓝基础 5dp、上限 7.5dp；黄红基础 6dp、上限 9dp，跟随 fontScale 并 clamp。列表与 composer 共用尺寸，语义及轻重分级与 iOS 一致，像素尺寸按平台字体比例调整。running 使用独立 token：浅色 `#167C45`，深色 `#4CBF82`，不复用 success。绿灯 2.6 秒透明度 0.40↔1.0，最低值由 `SessionIndicatorTuning.runningMinOpacity` 定义；无缩放、位移、光晕或闪灭。系统关闭动画、后台、离屏时常亮或停止动画。动画状态只在绘制层读取，不触发行图、排序或确认逻辑逐帧重算。
 
 历史：初版透明度范围为 0.75↔1.0。2026-10-14 根据真机反馈增强呼吸幅度，最低值改为 0.40；周期、尺寸、绿色 tone 和状态规则保持原规格。
+
+后续视觉反馈确认呼吸幅度后，Android 将原绿蓝 6→9dp、黄红 8→12dp 缩小为上述当前尺寸，并把列表的标题行居中改为完整文字块居中；保留已确认的呼吸和状态规则。
 
 列表与 composer 各保留单灯；文字采用中性色。composer 的后台任务导航入口保留，执行摘要仍明确区分自身与后代。状态图按已加载会话 O(N×depth) 生成，逐行读取结果。
 

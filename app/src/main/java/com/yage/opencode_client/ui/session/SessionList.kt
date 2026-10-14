@@ -74,7 +74,6 @@ import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.theme.StopRed
 import com.yage.opencode_client.ui.theme.BrandGold
 import com.yage.opencode_client.ui.theme.BrandPrimary
-import com.yage.opencode_client.ui.theme.SessionIndicatorTuning
 import kotlin.math.roundToInt
 
 private enum class SwipeAnchor { Leading, Center, Trailing }
@@ -192,40 +191,43 @@ private fun SwipeRevealRow(
                     Icon(
                         if (isCollapsed) Icons.Default.ChevronRight else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (isCollapsed) "Expand" else "Collapse",
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(16.dp).testTag("session-chevron-$sessionId")
                     )
                 }
             } else {
                 Spacer(modifier = Modifier.size(48.dp))
             }
-            Column(modifier = Modifier.weight(1f, fill = false).offset(x = (-12).dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SessionIndicatorDot(sessionId, indicator)
+            Row(
+                modifier = Modifier.weight(1f, fill = false).offset(x = (-12).dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SessionIndicatorDot(sessionId, indicator)
+                Column(modifier = Modifier.weight(1f, fill = false).testTag("session-text-$sessionId")) {
                     Text(
                         text = displayName,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                         color = titleColor
                     )
-                }
-                if (updatedTime != null || statusLabel != null || showsDescendantBusy) {
-                    Row(modifier = Modifier.padding(start = SessionIndicatorTuning.columnWidth), verticalAlignment = Alignment.CenterVertically) {
-                        if (updatedTime != null) {
-                            Text(
-                                text = formatRelativeTime(updatedTime),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        val showStatus = statusLabel != null
-                        if ((showStatus || showsDescendantBusy) && updatedTime != null) {
-                            Text("  ", style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (showStatus) {
-                            Text(
-                                text = statusLabel.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                color = sessionStatusColor()
-                            )
+                    if (updatedTime != null || statusLabel != null || showsDescendantBusy) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (updatedTime != null) {
+                                Text(
+                                    text = formatRelativeTime(updatedTime),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val showStatus = statusLabel != null
+                            if ((showStatus || showsDescendantBusy) && updatedTime != null) {
+                                Text("  ", style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (showStatus) {
+                                Text(
+                                    text = statusLabel.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = sessionStatusColor()
+                                )
+                            }
                         }
                     }
                 }

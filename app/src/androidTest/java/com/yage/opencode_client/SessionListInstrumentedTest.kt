@@ -2,6 +2,9 @@ package com.yage.opencode_client
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -27,6 +30,48 @@ class SessionListInstrumentedTest {
 
     @Test fun mixedIndicatorsLight() = mixedIndicators(false)
     @Test fun mixedIndicatorsDark() = mixedIndicators(true)
+
+    @Test fun indicatorCentersOnEntireTextBlock() = assertIndicatorLayout(1f)
+    @Test fun enlargedTextKeepsIndicatorsCenteredAndSizesBounded() = assertIndicatorLayout(2f)
+
+    private fun assertIndicatorLayout(fontScale: Float) {
+        val sessions = listOf(
+            Session("parent", directory = "/fixture", title = "Parent"),
+            Session("child", directory = "/fixture", parentId = "parent", title = "Child"),
+            Session("failure", directory = "/fixture", title = "Failure"),
+            Session("unread", directory = "/fixture", title = "Unread"),
+            Session("quiet", directory = "/fixture", title = "Quiet")
+        )
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                com.yage.opencode_client.ui.theme.OpenCodeTheme {
+                    SessionList(sessions = sessions, currentSessionId = if (fontScale == 1f) "parent" else "child",
+                        expandedSessionIds = setOf("parent"),
+                        sessionStatuses = sessions.associate { it.id to SessionStatus(if (it.id == "parent") "busy" else "idle") },
+                        unreadCounts = mapOf("unread" to 1), failureCounts = mapOf("parent" to 1, "child" to 1, "failure" to 1),
+                        onSelectSession = {}, onCreateSession = {}, onDeleteSession = {})
+                }
+            }
+        }
+        fun bounds(tag: String) = composeRule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val scale = composeRule.density.density
+        for (id in listOf("parent", "child", "failure", "unread")) {
+            val dot = bounds("session-indicator-$id")
+            val text = bounds("session-text-$id")
+            org.junit.Assert.assertEquals("$id vertical center", text.center.y, dot.center.y, 1f)
+            val expectedDp = if (id != "unread") (6f * fontScale).coerceAtMost(9f)
+                else (5f * fontScale).coerceAtMost(7.5f)
+            org.junit.Assert.assertEquals("$id size", expectedDp * scale, dot.width, 1f)
+        }
+        val parent = bounds("session-text-parent")
+        val child = bounds("session-text-child")
+        org.junit.Assert.assertTrue("fixture includes secondary line", parent.height > child.height)
+        org.junit.Assert.assertTrue("chevron does not collide with dot",
+            bounds("session-chevron-parent").right <= bounds("session-indicator-parent").left)
+        org.junit.Assert.assertEquals("child keeps tree indentation", 24f * scale, child.left - parent.left, 1f)
+        org.junit.Assert.assertEquals("empty slot preserves text alignment", parent.left, bounds("session-text-quiet").left, 1f)
+    }
 
     @Test fun disabledSystemAnimationKeepsGreenSteady() {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
@@ -66,6 +111,7 @@ class SessionListInstrumentedTest {
         )
         val presentations = mapOf(
             "parent" to com.yage.opencode_client.ui.session.SessionPresentation(com.yage.opencode_client.ui.session.SessionIndicator.NEEDS_YOU, SessionStatus("busy"), 1, false),
+            "child" to com.yage.opencode_client.ui.session.SessionPresentation(com.yage.opencode_client.ui.session.SessionIndicator.NEEDS_YOU, SessionStatus("idle"), 0, false),
             "running" to com.yage.opencode_client.ui.session.SessionPresentation(com.yage.opencode_client.ui.session.SessionIndicator.RUNNING, SessionStatus("retry"), 0, false),
             "failed" to com.yage.opencode_client.ui.session.SessionPresentation(com.yage.opencode_client.ui.session.SessionIndicator.FAILED, SessionStatus("idle"), 0, false),
             "unread" to com.yage.opencode_client.ui.session.SessionPresentation(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, SessionStatus("idle"), 0, false),
@@ -74,6 +120,7 @@ class SessionListInstrumentedTest {
         composeRule.setContent {
             com.yage.opencode_client.ui.theme.OpenCodeTheme(darkTheme = dark) {
                 SessionList(sessions = sessions, currentSessionId = "parent", presentations = presentations,
+                    expandedSessionIds = setOf("parent"),
                     onSelectSession = {}, onCreateSession = {}, onDeleteSession = {})
             }
         }

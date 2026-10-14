@@ -89,7 +89,7 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 - Active 行 leading swipe 为 Archive；Archived 行 leading swipe 为 Restore；trailing swipe 始终为 Delete。所有 action 使用图标在上、文字在下的克制按钮语言。
 - Archived rows 仍可点击查看，但标题和状态使用弱一级中性色，不画当前选中 accent，避免读起来像当前工作项。
 - Session 分页使用顶部全局 `Load older` action，不再用底部自动 sentinel；这样 Archived 默认折叠时不会为了不可见历史自动连续分页，也不会把加载更多误读成 Archived 专属动作。
-- 保留展开折叠、depth 缩进、点击和滑动。标题中性；状态灯统一黄 > 红 > 绿 > 蓝，自身与后代执行摘要同时保留。绿灯为独立 running token，6→9dp、2.6 秒低幅透明度呼吸；系统关闭动画及后台/离屏不循环。未知状态显示中性“状态待同步”。
+- 保留展开折叠、48dp chevron/Spacer、depth 缩进、点击和滑动。标题中性；状态灯统一黄 > 红 > 绿 > 蓝，自身与后代执行摘要同时保留。点与完整标题+时间/状态文字块并列并垂直居中，不用 y offset；副文字不再额外缩进，无灯保留灯列占位。Android 按标题字体比例采用绿蓝 5→7.5dp、黄红 6→9dp 的有界缩放，列表/composer 共用，语义风格与 iOS 一致。绿灯为独立 running token，2.6 秒、0.40↔1.0 透明度呼吸；系统关闭动画时常亮，后台/离屏不循环。未知状态显示中性“状态待同步”。
 
 ## Settings（`SettingsSections`）
 
