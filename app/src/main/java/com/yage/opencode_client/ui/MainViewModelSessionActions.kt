@@ -153,26 +153,65 @@ internal fun launchLoadSessionStatus(
     state: MutableStateFlow<AppState>,
     onReconcileSessionFailure: (String, SessionStatus?, SessionStatus) -> Unit = { _, _, _ -> }
 ) {
+    val request = synchronized(state) {
+        if (state.value.statusRequestInFlight) return
+        val snapshot = state.value
+        state.update { it.copy(statusRequestInFlight = true) }
+        snapshot
+    }
+    val generation = request.runtimeGeneration
+    val epoch = request.statusEpoch
+    val revision = request.statusRevision
+    val directories = request.sessions.map { it.directory }.toSet()
     scope.launch {
-        repository.getSessionStatus()
+        try {
+            val result = if (directories.isEmpty()) repository.getSessionStatus() else runCatching {
+                buildMap<String, SessionStatus> {
+                    for (directory in directories) putAll(repository.getSessionStatusInDirectory(directory).getOrThrow())
+                }
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (state.value.runtimeGeneration != generation || state.value.statusEpoch != epoch) return@launch
+            result
             .onSuccess { statuses ->
                 val previous = state.value.sessionStatuses
+                val scopedIds = state.value.sessions.filter { it.directory in directories }.map { it.id }.toSet()
                 val reconciled = statuses.toMutableMap()
                 previous.forEach { (id, status) ->
-                    if (id !in statuses && (status.isBusy || status.isRetry)) {
+                    if (state.value.statusRevisions.getOrDefault(id, 0) > revision) {
+                        reconciled[id] = status
+                    } else if (id !in scopedIds) {
+                        reconciled[id] = status
+                    } else if (id !in statuses && (status.isBusy || status.isRetry)) {
                         reconciled[id] = SessionStatus(type = "idle")
                     }
                 }
                 reconciled.forEach { (id, status) ->
-                    onReconcileSessionFailure(id, previous[id], status)
+                    if (state.value.statusRevisions.getOrDefault(id, 0) <= revision &&
+                        id in scopedIds) {
+                        onReconcileSessionFailure(id, previous[id], status)
+                    }
                 }
                 state.update { current ->
-                    current.copy(sessionStatuses = reconciled)
+                    current.copy(sessionStatuses = reconciled, statusSnapshotKnown = true, statusSnapshotDirectories = directories,
+                        statusKnownIds = current.statusKnownIds + request.sessions.map { it.id },
+                        // A changed REST value is now snapshot-derived. An unchanged
+                        // value retains its independent same-connection SSE evidence.
+                        statusSseKnownIds = current.statusSseKnownIds.filterTo(mutableSetOf()) { id ->
+                            id !in scopedIds || current.statusRevisions.getOrDefault(id, 0) > revision ||
+                                previous[id] == reconciled[id] ||
+                                (previous[id]?.isIdle == true && reconciled[id] == null)
+                        },
+                        statusConfirmedAt = System.currentTimeMillis())
                 }
             }
             .onFailure { error ->
+                state.update { it.copy(statusSnapshotKnown = false, statusKnownIds = emptySet()) }
                 reportNonFatalIssue("MainViewModel", "Failed to load session status", error)
             }
+        } finally {
+            if (state.value.runtimeGeneration == generation && state.value.statusEpoch == epoch) state.update { it.copy(statusRequestInFlight = false) }
+        }
     }
 }
 

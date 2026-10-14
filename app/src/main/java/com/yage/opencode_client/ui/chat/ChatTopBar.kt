@@ -69,6 +69,7 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 
 internal data class ChatTopBarState(
+    val presentations: Map<String, com.yage.opencode_client.ui.session.SessionPresentation> = emptyMap(),
     val sessions: List<Session>,
     val currentSessionId: String?,
     val sessionStatuses: Map<String, SessionStatus>,
@@ -410,6 +411,7 @@ internal fun ChatTopBar(
                     .height(ChatUiTuning.sessionSheetHeight)
             ) {
                 SessionList(
+                    presentations = state.presentations,
                     sessions = state.sessions,
                     currentSessionId = state.currentSessionId,
                     sessionStatuses = state.sessionStatuses,

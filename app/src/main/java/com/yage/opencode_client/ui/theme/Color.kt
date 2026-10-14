@@ -2,6 +2,9 @@ package com.yage.opencode_client.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
+val SessionRunningLight = Color(0xFF167C45)
+val SessionRunningDark = Color(0xFF4CBF82)
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Quiet Tech design language — mirrors the iOS client's DesignTokens.
 //

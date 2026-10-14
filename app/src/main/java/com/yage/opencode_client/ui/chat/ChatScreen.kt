@@ -227,6 +227,7 @@ fun ChatScreen(
                 Column(modifier = Modifier.fillMaxSize()) {
                     ChatTopBar(
             state = ChatTopBarState(
+                presentations = state.sessionPresentations,
                 sessions = state.sessions,
                 currentSessionId = state.currentSessionId,
                 sessionStatuses = state.sessionStatuses,
@@ -344,6 +345,7 @@ fun ChatScreen(
         if (state.currentSessionId != null) {
             val backgroundSubagents = state.runningBackgroundSubagents
             ComposerStatusBar(
+                presentation = state.sessionPresentations[state.currentSessionId],
                 stats = state.sessionStats,
                 isBusy = currentSessionIsRunning,
                 agentActivityText = currentActivity?.text,

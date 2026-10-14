@@ -105,6 +105,7 @@ class MainViewModelTest {
         mockkStatic(Log::class)
         every { Log.d(any<String>(), any<String>()) } returns 0
         every { Log.w(any<String>(), any<String>()) } returns 0
+        every { Log.w(any<String>(), any<String>(), any<Throwable>()) } returns 0
         every { Log.e(any<String>(), any<String>()) } returns 0
         every { Log.e(any<String>(), any<String>(), any<Throwable>()) } returns 0
 
@@ -160,8 +161,10 @@ class MainViewModelTest {
         every { repository.connectSSE(any(), any()) } returns emptyFlow()
         coEvery { repository.getSessions(any()) } returns Result.success(emptyList())
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
+        coEvery { repository.getSessionStatusInDirectory(any()) } coAnswers { repository.getSessionStatus() }
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         coEvery { repository.getPendingPermissions() } returns Result.success(emptyList())
+        coEvery { repository.getPendingQuestions() } returns Result.success(emptyList())
         coEvery { repository.getProviders() } returns Result.success(ProvidersResponse())
         coEvery { repository.getProviderRegistry() } returns Result.success(ProviderRegistryResponse())
     }
@@ -181,7 +184,7 @@ class MainViewModelTest {
     )
 
     @Test
-    fun `indicator errors from other sessions settle only after idle and successful turns clear them`() = runTest {
+    fun `indicator errors settle only after idle and successful turns retain unviewed failure`() = runTest {
         val store = testSessionReadStateStore()
         val viewModel = createViewModel(store)
         updateState(viewModel) { it.copy(currentSessionId = "current") }
@@ -203,6 +206,10 @@ class MainViewModelTest {
         assertEquals(errorAt, store.failedAt("other"))
         handleSse(viewModel, indicatorEvent("other", "busy"))
         handleSse(viewModel, indicatorEvent("other", "idle"))
+        assertEquals(errorAt, store.failedAt("other"))
+        store.markViewed("other", errorAt!!)
+        handleSse(viewModel, indicatorEvent("other", "retry"))
+        handleSse(viewModel, indicatorEvent("other", "idle"))
         assertNull(store.failedAt("other"))
         assertNull(viewModel.state.value.sessionReadStates["other"]?.failedAt)
     }
@@ -214,7 +221,8 @@ class MainViewModelTest {
         store.markFailed("success", 20L)
         val viewModel = createViewModel(store)
         updateState(viewModel) {
-            it.copy(sessionStatuses = mapOf("failed" to SessionStatus("retry"), "success" to SessionStatus("busy")))
+            it.copy(sessions = listOf("failed", "success", "snapshot").map { id -> Session(id, directory = "/test") },
+                sessionStatuses = mapOf("failed" to SessionStatus("retry"), "success" to SessionStatus("busy")))
         }
         handleSse(viewModel, indicatorEvent("failed"))
         val errorAt = viewModel.state.value.pendingSessionErrorAt["failed"]
@@ -222,7 +230,7 @@ class MainViewModelTest {
         invokePrivateNoArgs(viewModel, "loadSessionStatus")
         advanceUntilIdle()
         assertEquals(errorAt, store.failedAt("failed"))
-        assertNull(store.failedAt("success"))
+        assertEquals(20L, store.failedAt("success"))
         assertEquals(10L, store.failedAt("snapshot"))
         assertTrue(viewModel.state.value.sessionStatuses["failed"]!!.isIdle)
         assertTrue(viewModel.state.value.sessionStatuses["success"]!!.isIdle)
@@ -290,7 +298,7 @@ class MainViewModelTest {
         }
         val store = testSessionReadStateStore()
         val viewModel = createViewModel(store)
-        updateState(viewModel) { it.copy(sessionStatuses = mapOf("other" to SessionStatus("busy"))) }
+        updateState(viewModel) { it.copy(sessions = listOf(Session("other", directory = "/test")), sessionStatuses = mapOf("other" to SessionStatus("busy"))) }
         invokePrivateNoArgs(viewModel, "startSSE")
         runCurrent()
         listener.captured.onEvent(source, null, null,
@@ -359,6 +367,180 @@ class MainViewModelTest {
         val method = MainViewModel::class.java.getDeclaredMethod("handleSSEEvent", SSEEvent::class.java)
         method.isAccessible = true
         method.invoke(viewModel, event)
+    }
+
+    @Test fun `real permission HTTP failures retain pending and ancestor yellow`() = runTest {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.start()
+        try {
+            val http = OpenCodeRepository().apply { configure(server.url("/").toString()) }
+            val vm = createViewModel()
+            val pending = PermissionRequest("request", "child")
+            updateState(vm) { it.copy(sessions = listOf(Session("parent", directory = "/test"),
+                Session("child", directory = "/test", parentId = "parent")), pendingPermissions = listOf(pending)) }
+            for (code in listOf(403, 500)) {
+                server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(code).setBody("private-body-marker"))
+                val done = CompletableDeferred<Unit>()
+                coEvery { repository.respondPermission("child", "request", PermissionResponse.ONCE) } coAnswers {
+                    http.respondPermission("child", "request", PermissionResponse.ONCE).also { done.complete(Unit) }
+                }
+                vm.respondPermission("child", "request", PermissionResponse.ONCE)
+                done.await(); runCurrent()
+                assertEquals(listOf(pending), vm.state.value.pendingPermissions)
+                for (id in listOf("parent", "child")) assertEquals(
+                    com.yage.opencode_client.ui.session.SessionIndicator.NEEDS_YOU,
+                    vm.state.value.sessionPresentations[id]!!.indicator)
+                assertFalse(vm.state.value.error.orEmpty().contains("private-body-marker"))
+            }
+        } finally { server.shutdown() }
+    }
+
+    @Test fun `unviewed child failure survives later success and only child viewing removes ancestor contribution`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = createViewModel(store)
+        updateState(vm) { it.copy(sessions = listOf(Session("parent", directory = "/test"),
+            Session("child", directory = "/test", parentId = "parent")), currentSessionId = "parent", statusStreamConnected = true) }
+        handleSse(vm, indicatorEvent("child"))
+        handleSse(vm, indicatorEvent("child", "idle"))
+        for (type in listOf("busy", "retry", "idle")) {
+            handleSse(vm, indicatorEvent("child", type))
+            for (id in listOf("parent", "child")) assertEquals(
+                com.yage.opencode_client.ui.session.SessionIndicator.FAILED, vm.state.value.sessionPresentations[id]!!.indicator)
+        }
+        vm.selectSession("child"); runCurrent()
+        assertTrue(vm.state.value.sessionFailureCounts.isEmpty())
+    }
+
+    @Test fun `fresh same-value SSE survives snapshot expiry and repeated failed GETs`() = runTest {
+        val vm = createViewModel()
+        val initialTime = 1_000L
+        updateState(vm) { it.copy(sessions = listOf(Session("child", directory = "/test"),
+            Session("snapshot-only", directory = "/test")), statusStreamConnected = true,
+            statusSnapshotKnown = true, statusConfirmedAt = initialTime,
+            statusKnownIds = setOf("child", "snapshot-only"),
+            sessionStatuses = mapOf("child" to SessionStatus("busy"), "snapshot-only" to SessionStatus("idle"))) }
+        coEvery { repository.getSessionStatusInDirectory(any()) } returns Result.failure(IllegalStateException("offline"))
+        val stateField = MainViewModel::class.java.getDeclaredField("_state").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST") val flow = stateField.get(vm) as MutableStateFlow<AppState>
+        val job = com.yage.opencode_client.ui.launchSseWatchdog(backgroundScope, flow, { _, _ -> },
+            { invokePrivateNoArgs(vm, "loadSessionStatus") }, { initialTime + testScheduler.currentTime }, {},
+            { initialTime + testScheduler.currentTime })
+        runCurrent(); advanceTimeBy(64_000); runCurrent()
+        repeat(2) { handleSse(vm, indicatorEvent("child", "busy")) }
+        advanceTimeBy(7_000); runCurrent()
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.RUNNING, vm.state.value.sessionPresentations["child"]!!.indicator)
+        assertTrue(vm.state.value.sessionPresentations["snapshot-only"]!!.unknown)
+        advanceTimeBy(30_000); runCurrent()
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.RUNNING, vm.state.value.sessionPresentations["child"]!!.indicator)
+        job.cancel()
+    }
+
+    @Test fun `permission replied is exact and stale GET cannot resurrect resolved requests`() = runTest {
+        val vm = createViewModel()
+        val p = PermissionRequest("p", "child")
+        val sibling = PermissionRequest("p", "sibling")
+        updateState(vm) { it.copy(pendingPermissions = listOf(p, sibling)) }
+        val old = CompletableDeferred<Result<List<PermissionRequest>>>()
+        coEvery { repository.getPendingPermissions() } coAnswers { old.await() } andThen Result.success(listOf(sibling))
+        vm.loadPendingPermissions()
+        runCurrent()
+        handleSse(vm, SSEEvent(payload = SSEPayload(type = "permission.replied", properties = buildJsonObject {
+            put("sessionID", JsonPrimitive("child")); put("requestID", JsonPrimitive("p"))
+        })))
+        assertEquals(listOf(sibling), vm.state.value.pendingPermissions)
+        old.complete(Result.success(listOf(p, sibling)))
+        advanceUntilIdle()
+        assertEquals(listOf(sibling), vm.state.value.pendingPermissions)
+    }
+
+    @Test fun `question asked during GET survives obsolete snapshot`() = runTest {
+        val vm = createViewModel()
+        val old = CompletableDeferred<Result<List<QuestionRequest>>>()
+        val q = QuestionRequest(id = "new", sessionId = "child", questions = emptyList())
+        coEvery { repository.getPendingQuestions() } coAnswers { old.await() } andThen Result.success(listOf(q))
+        vm.loadPendingQuestions(); runCurrent()
+        handleSse(vm, SSEEvent(payload = SSEPayload(type = "question.asked", properties = buildJsonObject {
+            put("id", JsonPrimitive("new")); put("sessionID", JsonPrimitive("child")); put("questions", buildJsonArray {})
+        })))
+        old.complete(Result.success(emptyList())); advanceUntilIdle()
+        assertEquals(listOf(q), vm.state.value.pendingQuestions)
+    }
+
+    @Test fun `status snapshot preserves newer and same-value SSE and host generation`() = runTest {
+        val vm = createViewModel()
+        val old = CompletableDeferred<Result<Map<String, SessionStatus>>>()
+        coEvery { repository.getSessionStatus() } coAnswers { old.await() }
+        invokePrivateNoArgs(vm, "loadSessionStatus"); runCurrent()
+        repeat(2) {
+            handleSse(vm, SSEEvent(payload = SSEPayload(type = "session.status", properties = buildJsonObject {
+                put("sessionID", JsonPrimitive("child")); put("status", buildJsonObject { put("type", JsonPrimitive("busy")) })
+            })))
+        }
+        assertEquals(2L, vm.state.value.statusRevisions["child"])
+        old.complete(Result.success(emptyMap())); advanceUntilIdle()
+        assertTrue(vm.state.value.sessionStatuses["child"]!!.isBusy)
+        val other = CompletableDeferred<Result<Map<String, SessionStatus>>>()
+        coEvery { repository.getSessionStatus() } coAnswers { other.await() }
+        invokePrivateNoArgs(vm, "loadSessionStatus"); runCurrent()
+        updateState(vm) { it.copy(runtimeGeneration = it.runtimeGeneration + 1, sessionStatuses = emptyMap()) }
+        other.complete(Result.success(mapOf("old" to SessionStatus("busy")))); advanceUntilIdle()
+        assertTrue(vm.state.value.sessionStatuses.isEmpty())
+    }
+
+    @Test fun `reconnect refreshes global pending even without current session`() = runTest {
+        val vm = createViewModel()
+        val connected = slot<(() -> Unit)?>()
+        every { repository.connectSSE(captureNullable(connected), any()) } returns emptyFlow()
+        invokePrivateNoArgs(vm, "startSSE"); runCurrent()
+        connected.captured!!.invoke(); runCurrent()
+        coVerify { repository.getPendingPermissions() }
+        coVerify { repository.getPendingQuestions() }
+    }
+
+    @Test fun `failed status snapshot does not confirm null and scoped snapshot does`() = runTest {
+        val vm = createViewModel()
+        updateState(vm) { it.copy(sessions = listOf(Session("s", directory = "/project", time = Session.TimeInfo(updated = 100))), statusStreamConnected = true) }
+        coEvery { repository.getSessionStatusInDirectory("/project") } returns Result.failure(IllegalStateException("offline"))
+        invokePrivateNoArgs(vm, "loadSessionStatus"); advanceUntilIdle()
+        assertTrue(vm.state.value.sessionPresentations["s"]!!.unknown)
+        assertNull(vm.state.value.sessionPresentations["s"]!!.indicator)
+        coEvery { repository.getSessionStatusInDirectory("/project") } returns Result.success(emptyMap())
+        invokePrivateNoArgs(vm, "loadSessionStatus"); advanceUntilIdle()
+        assertFalse(vm.state.value.sessionPresentations["s"]!!.unknown)
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, vm.state.value.sessionPresentations["s"]!!.indicator)
+        updateState(vm) { it.copy(sessions = it.sessions + listOf(
+            Session("other", directory = "/other", time = Session.TimeInfo(updated = 100)),
+            Session("new", directory = "/project", time = Session.TimeInfo(updated = 100)))) }
+        assertTrue(vm.state.value.sessionPresentations["other"]!!.unknown)
+        assertTrue(vm.state.value.sessionPresentations["new"]!!.unknown)
+    }
+
+    @Test fun `old host pending callback and failed replies cannot remove current requests`() = runTest {
+        val vm = createViewModel()
+        val p = PermissionRequest("p", "s")
+        updateState(vm) { it.copy(pendingPermissions = listOf(p)) }
+        coEvery { repository.respondPermission(any(), any(), any()) } returns Result.failure(IllegalStateException("offline"))
+        vm.respondPermission("s", "p", PermissionResponse.ONCE); advanceUntilIdle()
+        assertEquals(listOf(p), vm.state.value.pendingPermissions)
+        val old = CompletableDeferred<Result<List<PermissionRequest>>>()
+        coEvery { repository.getPendingPermissions() } coAnswers { old.await() }
+        vm.loadPendingPermissions(); runCurrent()
+        updateState(vm) { it.copy(runtimeGeneration = it.runtimeGeneration + 1, pendingPermissions = emptyList()) }
+        old.complete(Result.success(listOf(p))); advanceUntilIdle()
+        assertTrue(vm.state.value.pendingPermissions.isEmpty())
+    }
+
+    @Test fun `healthy heartbeats still receive low frequency status confirmation without selection`() = runTest {
+        val state = MutableStateFlow(AppState())
+        var calls = 0
+        val job = com.yage.opencode_client.ui.launchSseWatchdog(backgroundScope, state,
+            { _, _ -> }, { calls++ }, { testScheduler.currentTime }, {}, { testScheduler.currentTime })
+        runCurrent(); advanceTimeBy(30_001); runCurrent()
+        assertEquals(1, calls)
+        state.value = state.value.copy(appForeground = false)
+        advanceTimeBy(30_000); runCurrent()
+        assertEquals(1, calls)
+        job.cancel()
     }
 
     private fun invokePrivateNoArgs(viewModel: MainViewModel, name: String) {

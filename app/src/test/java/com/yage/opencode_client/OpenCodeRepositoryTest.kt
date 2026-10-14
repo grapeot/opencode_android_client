@@ -74,6 +74,46 @@ class OpenCodeRepositoryTest {
     }
 
     @Test
+    fun `permission HTTP 403 and 500 are failures without response body disclosure`() = runBlocking {
+        for (code in listOf(403, 500)) {
+            server.enqueue(MockResponse().setResponseCode(code).setBody("private-response-marker"))
+            val result = repository.respondPermission("session", "request", PermissionResponse.ONCE)
+            assertTrue(result.isFailure)
+            assertEquals("Permission reply failed (HTTP $code)", result.exceptionOrNull()?.message)
+            assertFalse(result.exceptionOrNull().toString().contains("private-response-marker"))
+            assertEquals("POST", server.takeRequest().method)
+        }
+    }
+
+    @Test
+    fun `directory query reaches server but neither HTTP client logs private URL`() = runBlocking {
+        val lines = mutableListOf<String>()
+        val logger = java.util.logging.Logger.getLogger(okhttp3.OkHttpClient::class.java.name)
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(record: java.util.logging.LogRecord) { lines.add(record.message) }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        logger.addHandler(handler)
+        try {
+            // Inspect both configured clients, not only a release-only logging switch.
+            for (name in listOf("restHttpClient", "sseHttpClient")) {
+                val field = OpenCodeRepository::class.java.getDeclaredField(name).apply { isAccessible = true }
+                val client = field.get(repository) as okhttp3.OkHttpClient
+                assertFalse(client.interceptors.any { it is okhttp3.logging.HttpLoggingInterceptor })
+                assertFalse(client.networkInterceptors.any { it is okhttp3.logging.HttpLoggingInterceptor })
+            }
+            server.enqueue(jsonResponse("{}"))
+            val directory = "/private-directory-marker/customer-project-marker"
+            assertTrue(repository.getSessionStatusInDirectory(directory).isSuccess)
+            assertEquals(directory, server.takeRequest().requestUrl?.queryParameter("directory"))
+            assertFalse(lines.any { it.contains("private-directory-marker") || it.contains("customer-project-marker") || it.contains("directory=") })
+        } finally {
+            logger.removeHandler(handler)
+        }
+    }
+
+    @Test
     fun `configure accepts base url with trailing slash`() = runBlocking {
         // server.url("/") ends with "/", e.g. "http://127.0.0.1:43210/"
         repository.configure(baseUrl = server.url("/").toString())

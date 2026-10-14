@@ -27,6 +27,9 @@ interface OpenCodeApi {
     @GET("session/status")
     suspend fun getSessionStatus(): Map<String, SessionStatus>
 
+    @GET("session/status")
+    suspend fun getSessionStatusInDirectory(@Query("directory") directory: String): Map<String, SessionStatus>
+
     @GET("session/{id}/message")
     suspend fun getMessages(
         @Path("id") sessionId: String,
