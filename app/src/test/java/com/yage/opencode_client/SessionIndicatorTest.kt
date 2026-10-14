@@ -12,6 +12,24 @@ class SessionIndicatorTest {
         time = Session.TimeInfo(updated = 100))
     private val idle get() = tree.associate { it.id to SessionStatus("idle") }
 
+    @Test fun `row acknowledgement neither stops propagation nor overrides source viewing`() {
+        val ack = mapOf("c" to mapOf("g" to 100L), "g" to mapOf("g" to 100L))
+        val sources = blueReminderSourcesBySession(tree, idle, mapOf("p" to 100L, "c" to 100L, "b" to 100L), ack)
+        assertEquals(mapOf("g" to 100L), sources["p"])
+        assertNull(sources["c"])
+        assertEquals(mapOf("g" to 100L), sources["g"])
+        assertTrue(blueReminderSourcesBySession(tree, idle, tree.associate { it.id to 100L }, ack).isEmpty())
+    }
+
+    @Test fun `source helper is cycle safe and rejects nonpositive versions`() {
+        val cyclic = listOf(s("p", "c"), s("c", "p"), s("zero").copy(time = Session.TimeInfo(updated = 0)))
+        val sources = blueReminderSourcesBySession(cyclic, cyclic.associate { it.id to SessionStatus("idle") }, emptyMap(),
+            mapOf("p" to mapOf("c" to 100L)))
+        assertEquals(mapOf("p" to 100L), sources["p"])
+        assertEquals(mapOf("p" to 100L, "c" to 100L), sources["c"])
+        assertNull(sources["zero"])
+    }
+
     @Test fun `confirmation filters sources before aggregation and preserves siblings and parent`() {
         val events = tree.associate { it.id to 100L }
         val viewed = mapOf("g" to 101L, "c" to 101L)

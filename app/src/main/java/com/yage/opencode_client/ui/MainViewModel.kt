@@ -7,7 +7,6 @@ import com.yage.opencode_client.data.model.*
 import com.yage.opencode_client.ui.session.descendantBusyCountsBySession
 import com.yage.opencode_client.ui.session.runningDescendantSessions
 import com.yage.opencode_client.ui.session.SessionIndicator
-import com.yage.opencode_client.ui.session.unreadCountsBySession
 import com.yage.opencode_client.ui.session.failureCountsBySession
 import com.yage.opencode_client.util.SessionReadState
 import com.yage.opencode_client.util.SessionReadStateStore
@@ -362,14 +361,20 @@ data class AppState(
             }
         }
 
-    val sessionUnreadCounts: Map<String, Int>
-        get() = unreadCountsBySession(sessions, sessionStatuses, lastViewedAt)
+    val sessionBlueReminderSources: Map<String, Map<String, Long>> by lazy {
+        sessionPresentations.mapValues { it.value.blueReminderSources }.filterValues { it.isNotEmpty() }
+    }
+
+    /** Row reminders, not the total unread content in each subtree. */
+    val sessionUnreadCounts: Map<String, Int> by lazy {
+        sessionBlueReminderSources.mapValues { it.value.size }
+    }
 
     val sessionPresentations: Map<String, com.yage.opencode_client.ui.session.SessionPresentation> by lazy {
         com.yage.opencode_client.ui.session.sessionPresentations(
             sessions, sessionStatuses, statusKnownIds + statusSseKnownIds, false, statusStreamConnected && appForeground,
             lastViewedAt, sessions.mapNotNull { s -> sessionReadStates[s.id]?.failedAt?.let { s.id to it } }.toMap(),
-            attentionSessionIds, currentSessionId)
+            attentionSessionIds, currentSessionId, sessionReadStates.mapValues { it.value.blueAckBySource })
     }
 
     val sessionFailureCounts: Map<String, Int>
@@ -1567,7 +1572,7 @@ class MainViewModel @Inject constructor(
             scope = hostRuntimeScope,
             repository = repository,
             state = _state,
-            onSelectSession = ::selectSession,
+            onSelectSession = ::navigateToSession,
             onLoadSessionStatus = ::loadSessionStatus,
             onLoadMessages = { sessionId -> loadMessages(sessionId) }
         )
@@ -1578,7 +1583,7 @@ class MainViewModel @Inject constructor(
             scope = hostRuntimeScope,
             repository = repository,
             state = _state,
-            onSelectSession = ::selectSession
+            onSelectSession = ::navigateToSession
         )
     }
 
@@ -1587,6 +1592,16 @@ class MainViewModel @Inject constructor(
     }
 
     fun selectSession(sessionId: String) {
+        // Synchronous entry snapshot, before viewing/current/load changes the displayed reminder.
+        val presentation = _state.value.sessionPresentations[sessionId]
+        if (presentation?.indicator == SessionIndicator.UNREAD && !presentation.unknown) {
+            readStateStore.acknowledgeBlue(sessionId, presentation.blueReminderSources)
+        }
+        navigateToSession(sessionId)
+    }
+
+    /** Automatic navigation preserves viewing behavior but never confirms child reminders. */
+    private fun navigateToSession(sessionId: String) {
         val now = System.currentTimeMillis()
         _state.value.currentSessionId?.takeIf { it != sessionId }?.let {
             readStateStore.markViewed(it, now)
@@ -1881,11 +1896,11 @@ class MainViewModel @Inject constructor(
     }
 
     fun createSession(title: String? = null) {
-        launchCreateSession(hostRuntimeScope, repository, _state, title, ::selectSession)
+        launchCreateSession(hostRuntimeScope, repository, _state, title, ::navigateToSession)
     }
 
     fun forkSession(sessionId: String, messageId: String?) {
-        launchForkSession(hostRuntimeScope, repository, _state, sessionId, messageId, ::selectSession)
+        launchForkSession(hostRuntimeScope, repository, _state, sessionId, messageId, ::navigateToSession)
     }
 
     fun updateSessionTitle(sessionId: String, title: String) {
@@ -1898,12 +1913,12 @@ class MainViewModel @Inject constructor(
 
     fun restoreSession(sessionId: String) {
         launchSetSessionArchived(hostRuntimeScope, repository, _state, sessionId, archived = false) {
-            selectSession(sessionId)
+            navigateToSession(sessionId)
         }
     }
 
     fun deleteSession(sessionId: String) {
-        launchDeleteSession(hostRuntimeScope, repository, _state, sessionId, ::selectSession) {
+        launchDeleteSession(hostRuntimeScope, repository, _state, sessionId, ::navigateToSession) {
             readStateStore.remove(sessionId)
             _state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt - sessionId) }
             publishReadStates()

@@ -9,7 +9,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Serializable
-data class SessionReadState(val lastViewedAt: Long? = null, val failedAt: Long? = null)
+data class SessionReadState(
+    val lastViewedAt: Long? = null,
+    val failedAt: Long? = null,
+    val blueAckBySource: Map<String, Long> = emptyMap()
+)
 
 @Singleton
 class SessionReadStateStore @Inject constructor(
@@ -31,6 +35,15 @@ class SessionReadStateStore @Inject constructor(
     fun lastViewedAt(sessionId: String): Long? = entry(sessionId)?.lastViewedAt
     fun failedAt(sessionId: String): Long? = entry(sessionId)?.failedAt
 
+    fun blueAcknowledgements(sessionId: String): Map<String, Long> = entry(sessionId)?.blueAckBySource.orEmpty()
+
+    fun acknowledgeBlue(sessionId: String, sources: Map<String, Long>) {
+        val valid = sources.filter { (source, version) -> source != sessionId && version > 0 }
+        if (valid.isEmpty()) return
+        val current = entry(sessionId) ?: SessionReadState()
+        save(sessionId, current.copy(blueAckBySource = current.blueAckBySource + valid))
+    }
+
     fun markViewed(sessionId: String, atMillis: Long) {
         save(sessionId, (entry(sessionId) ?: SessionReadState()).copy(lastViewedAt = atMillis))
     }
@@ -45,7 +58,14 @@ class SessionReadStateStore @Inject constructor(
     }
 
     fun remove(sessionId: String) {
-        prefs.edit().remove(keyFor(sessionId)).apply()
+        val editor = prefs.edit().remove(keyFor(sessionId))
+        all().forEach { (rowId, state) ->
+            if (rowId != sessionId && sessionId in state.blueAckBySource) {
+                editor.putString(keyFor(rowId), json.encodeToString(
+                    state.copy(blueAckBySource = state.blueAckBySource - sessionId)))
+            }
+        }
+        editor.apply()
     }
 
     fun all(): Map<String, SessionReadState> {

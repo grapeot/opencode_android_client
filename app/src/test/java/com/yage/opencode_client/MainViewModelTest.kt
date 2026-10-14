@@ -340,6 +340,232 @@ class MainViewModelTest {
         assertEquals(20L, viewModel.state.value.sessionReadStates["shared"]?.failedAt)
     }
 
+    private fun reminderTree(store: SessionReadStateStore): MainViewModel {
+        val vm = createViewModel(store)
+        val sessions = listOf(
+            Session("g", directory = "/test", time = Session.TimeInfo(updated = 0)),
+            Session("p", directory = "/test", parentId = "g", time = Session.TimeInfo(updated = 0)),
+            Session("c", directory = "/test", parentId = "p", time = Session.TimeInfo(updated = 100)),
+            Session("d", directory = "/test", parentId = "p", time = Session.TimeInfo(updated = 200)),
+            Session("x", directory = "/test", time = Session.TimeInfo(updated = 0)))
+        sessions.forEach { store.markViewed(it.id, 0) }
+        updateState(vm) { it.copy(sessions = sessions, sessionReadStates = store.all(),
+            sessionStatuses = sessions.associate { s -> s.id to SessionStatus("idle") },
+            statusKnownIds = sessions.map { s -> s.id }.toSet(), statusStreamConnected = true,
+            appForeground = true) }
+        return vm
+    }
+
+    @Test fun `selecting blue parent confirms only that row and keeps both children unread`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, vm.state.value.sessionPresentations["p"]?.indicator)
+        vm.selectSession("p")
+        vm.selectSession("x")
+        assertNull(vm.state.value.sessionPresentations["p"]?.indicator)
+        for (id in listOf("g", "c", "d")) assertEquals(
+            com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, vm.state.value.sessionPresentations[id]?.indicator)
+        assertEquals(mapOf("c" to 100L, "d" to 200L), store.blueAcknowledgements("p"))
+        assertTrue(store.blueAcknowledgements("g").isEmpty())
+        assertTrue(store.blueAcknowledgements("c").isEmpty())
+        assertEquals(0L, store.lastViewedAt("c"))
+        assertEquals(0L, store.lastViewedAt("d"))
+        assertEquals(2, vm.state.value.sessionUnreadCounts["g"])
+    }
+
+    @Test fun `viewing child removes its source from all ancestors without reading sibling`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        vm.selectSession("c")
+        vm.selectSession("x")
+        for (id in listOf("p", "g")) assertEquals(mapOf("d" to 200L), vm.state.value.sessionBlueReminderSources[id])
+        assertNull(vm.state.value.sessionPresentations["c"]?.indicator)
+        assertEquals(0L, store.lastViewedAt("d"))
+    }
+
+    @Test fun `smaller sibling token and newly loaded child independently relight parent`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        vm.selectSession("p")
+        vm.selectSession("x")
+        updateState(vm) { it.copy(sessions = it.sessions.map { s ->
+            if (s.id == "c") s.copy(time = Session.TimeInfo(updated = 101)) else s }) }
+        assertEquals(mapOf("c" to 101L), vm.state.value.sessionBlueReminderSources["p"])
+        vm.selectSession("p")
+        vm.selectSession("x")
+        updateState(vm) { it.copy(sessions = it.sessions + Session("e", directory = "/test", parentId = "p",
+            time = Session.TimeInfo(updated = 50)), statusKnownIds = it.statusKnownIds + "e") }
+        assertEquals(mapOf("e" to 50L), vm.state.value.sessionBlueReminderSources["p"])
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, vm.state.value.sessionPresentations["p"]?.indicator)
+    }
+
+    @Test fun `new child token during parent stay survives reselection background and exit`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        vm.selectSession("p")
+        updateState(vm) { it.copy(sessions = it.sessions.map { s ->
+            if (s.id == "c") s.copy(time = Session.TimeInfo(updated = 101)) else s }) }
+        assertNull(vm.state.value.sessionPresentations["p"]?.indicator)
+        vm.selectSession("p")
+        vm.setAppForeground(false)
+        vm.selectSession("x")
+        assertEquals(100L, store.blueAcknowledgements("p")["c"])
+        updateState(vm) { it.copy(appForeground = true, statusStreamConnected = true,
+            statusKnownIds = it.sessions.map { s -> s.id }.toSet()) }
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, vm.state.value.sessionPresentations["p"]?.indicator)
+    }
+
+    @Test fun `pagination preserves acknowledgements while confirmed deletion cleans references`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        vm.selectSession("p")
+        vm.selectSession("x")
+        val child = vm.state.value.sessions.first { it.id == "c" }
+        updateState(vm) { it.copy(sessions = it.sessions.filterNot { s -> s.id == "c" }) }
+        assertEquals(100L, store.blueAcknowledgements("p")["c"])
+        updateState(vm) { it.copy(sessions = it.sessions + child) }
+        assertNull(vm.state.value.sessionPresentations["p"]?.indicator)
+        coEvery { repository.deleteSession("c") } returns Result.success(Unit)
+        vm.deleteSession("c")
+        advanceUntilIdle()
+        assertEquals(mapOf("d" to 200L), store.blueAcknowledgements("p"))
+        assertEquals(store.all(), vm.state.value.sessionReadStates)
+    }
+
+    @Test fun `parent own future update is not hidden by child acknowledgements`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        vm.selectSession("p")
+        vm.selectSession("x")
+        val future = System.currentTimeMillis() + 60_000
+        updateState(vm) { it.copy(sessions = it.sessions.map { s ->
+            if (s.id == "p") s.copy(time = Session.TimeInfo(updated = future)) else s }) }
+        assertEquals(mapOf("p" to future), vm.state.value.sessionBlueReminderSources["p"])
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD, vm.state.value.sessionPresentations["p"]?.indicator)
+    }
+
+    @Test fun `nonblue selection never acknowledges hidden child reminders`() = runTest {
+        for (kind in listOf("yellow", "red", "busy", "retry", "unknown", "stale", "disconnected", "archived")) {
+            val store = testSessionReadStateStore()
+            val vm = reminderTree(store)
+            if (kind == "red") store.markFailed("c", 300)
+            updateState(vm) { s -> when (kind) {
+                "yellow" -> s.copy(pendingPermissions = listOf(PermissionRequest("req", "c")))
+                "red" -> s.copy(sessionReadStates = store.all())
+                "busy", "retry", "unknown" -> s.copy(sessionStatuses = s.sessionStatuses + ("d" to SessionStatus(kind)))
+                "stale" -> s.copy(statusKnownIds = emptySet())
+                "disconnected" -> s.copy(statusStreamConnected = false)
+                else -> s.copy(sessions = s.sessions.map { if (it.id == "p") it.copy(time = Session.TimeInfo(archived = 1)) else it })
+            } }
+            assertTrue(kind, vm.state.value.sessionPresentations["p"]?.indicator != com.yage.opencode_client.ui.session.SessionIndicator.UNREAD)
+            vm.selectSession("p")
+            vm.selectSession("x")
+            assertTrue(kind, store.blueAcknowledgements("p").isEmpty())
+            assertEquals(0L, store.lastViewedAt("c"))
+            if (kind == "yellow") assertEquals(1, vm.state.value.pendingPermissions.size)
+            if (kind == "red") assertEquals(300L, store.failedAt("c"))
+        }
+    }
+
+    @Test fun `cold restore and host refresh preserve isolated parent acknowledgements`() = runTest {
+        val store = testSessionReadStateStore()
+        store.acknowledgeBlue("p", mapOf("c" to 100L))
+        every { settingsManager.currentSessionId } returns "p"
+        val vm = createViewModel(store)
+        assertEquals(mapOf("c" to 100L), vm.state.value.sessionReadStates["p"]?.blueAckBySource)
+        assertNull(store.lastViewedAt("p"))
+        store.selectHost("other-host")
+        store.acknowledgeBlue("p", mapOf("c" to 200L))
+        every { hostProfileStore.currentProfile() } returns HostProfile.defaultDirect("http://other.test").copy(id = "other-host")
+        invokePrivateNoArgs(vm, "refreshHostProfileState")
+        assertEquals(mapOf("c" to 200L), vm.state.value.sessionReadStates["p"]?.blueAckBySource)
+        store.selectHost("test-host")
+        assertEquals(mapOf("c" to 100L), store.blueAcknowledgements("p"))
+    }
+
+    private fun parentFirst(vm: MainViewModel): List<Session> =
+        vm.state.value.sessions.sortedBy { if (it.id == "p") 0 else 1 }
+
+    private fun assertAutomaticParentKeptReminders(vm: MainViewModel, store: SessionReadStateStore) {
+        assertEquals("p", vm.state.value.currentSessionId)
+        assertTrue(store.blueAcknowledgements("p").isEmpty())
+        assertNotNull(store.lastViewedAt("p")) // Keep the existing self-viewing behavior.
+        assertEquals(0L, store.lastViewedAt("c"))
+        assertEquals(0L, store.lastViewedAt("d"))
+        vm.selectSession("x")
+        assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD,
+            vm.state.value.sessionPresentations["p"]?.indicator)
+        vm.selectSession("p")
+        assertEquals(mapOf("c" to 100L, "d" to 200L), store.blueAcknowledgements("p"))
+    }
+
+    @Test fun `refresh automatic selection never acknowledges blue parent for empty or missing current`() = runTest {
+        for (current in listOf(null, "missing")) {
+            val store = testSessionReadStateStore()
+            val vm = reminderTree(store)
+            val sessions = parentFirst(vm)
+            updateState(vm) { it.copy(currentSessionId = current) }
+            assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD,
+                vm.state.value.sessionPresentations["p"]?.indicator)
+            coEvery { repository.getSessions(any()) } returns Result.success(sessions)
+            vm.loadSessions()
+            advanceUntilIdle()
+            assertAutomaticParentKeptReminders(vm, store)
+            advanceUntilIdle()
+        }
+    }
+
+    @Test fun `pagination automatic selection never acknowledges blue parent for empty or missing current`() = runTest {
+        for (current in listOf(null, "missing")) {
+            val store = testSessionReadStateStore()
+            val vm = reminderTree(store)
+            val sessions = parentFirst(vm)
+            updateState(vm) { it.copy(currentSessionId = current, hasMoreSessions = true) }
+            assertEquals(com.yage.opencode_client.ui.session.SessionIndicator.UNREAD,
+                vm.state.value.sessionPresentations["p"]?.indicator)
+            coEvery { repository.getSessions(any()) } returns Result.success(sessions)
+            vm.loadMoreSessions()
+            advanceUntilIdle()
+            assertAutomaticParentKeptReminders(vm, store)
+            advanceUntilIdle()
+        }
+    }
+
+    @Test fun `deleting current automatically navigates to parent without acknowledging its children`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        updateState(vm) { it.copy(sessions = parentFirst(vm), currentSessionId = "x") }
+        coEvery { repository.deleteSession("x") } returns Result.success(Unit)
+        vm.deleteSession("x")
+        advanceUntilIdle()
+        assertAutomaticParentKeptReminders(vm, store)
+    }
+
+    @Test fun `unarchive automatic navigation does not acknowledge restored parent reminders`() = runTest {
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        val sessions = vm.state.value.sessions
+        updateState(vm) { it.copy(currentSessionId = "x", sessions = it.sessions.map { s ->
+            if (s.id in setOf("p", "c", "d")) s.copy(time = s.time!!.copy(archived = 1)) else s }) }
+        coEvery { repository.updateSessionArchived(any(), any()) } answers {
+            Result.success(sessions.first { it.id == firstArg<String>() })
+        }
+        vm.restoreSession("p")
+        advanceUntilIdle()
+        assertAutomaticParentKeptReminders(vm, store)
+    }
+
+    @Test fun `cold restored parent refresh does not acknowledge child reminders`() = runTest {
+        every { settingsManager.currentSessionId } returns "p"
+        val store = testSessionReadStateStore()
+        val vm = reminderTree(store)
+        val sessions = parentFirst(vm)
+        coEvery { repository.getSessions(any()) } returns Result.success(sessions)
+        vm.loadSessions()
+        advanceUntilIdle()
+        assertAutomaticParentKeptReminders(vm, store)
+    }
+
     private fun updateState(viewModel: MainViewModel, transform: (AppState) -> AppState) {
         val field = MainViewModel::class.java.getDeclaredField("_state")
         field.isAccessible = true
