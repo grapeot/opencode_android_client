@@ -30,7 +30,9 @@ abort 只请求中断，之后刷新权威状态；不预写 idle、不把 HTTP 
 
 ## 展示与动效
 
-共享 `SessionIndicatorDot`，保持 chevron、层级、点击和滑动。固定 16dp 灯列；绿蓝 6→9dp，黄红 8→12dp，跟随 fontScale 并 clamp。running 使用独立 token：浅色 `#167C45`，深色 `#4CBF82`，不复用 success。绿灯 2.6 秒透明度 0.75↔1.0，无缩放、位移、光晕或闪灭。系统关闭动画、后台、离屏时常亮或停止动画。动画状态只在绘制层读取，不触发行图、排序或确认逻辑逐帧重算。
+共享 `SessionIndicatorDot`，保持 chevron、层级、点击和滑动。固定 16dp 灯列；绿蓝 6→9dp，黄红 8→12dp，跟随 fontScale 并 clamp。running 使用独立 token：浅色 `#167C45`，深色 `#4CBF82`，不复用 success。绿灯 2.6 秒透明度 0.40↔1.0，最低值由 `SessionIndicatorTuning.runningMinOpacity` 定义；无缩放、位移、光晕或闪灭。系统关闭动画、后台、离屏时常亮或停止动画。动画状态只在绘制层读取，不触发行图、排序或确认逻辑逐帧重算。
+
+历史：初版透明度范围为 0.75↔1.0。2026-10-14 根据真机反馈增强呼吸幅度，最低值改为 0.40；周期、尺寸、绿色 tone 和状态规则保持原规格。
 
 列表与 composer 各保留单灯；文字采用中性色。composer 的后台任务导航入口保留，执行摘要仍明确区分自身与后代。状态图按已加载会话 O(N×depth) 生成，逐行读取结果。
 

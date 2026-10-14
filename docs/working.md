@@ -1,5 +1,11 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-14 — 增强运行灯呼吸幅度
+
+- 根据真机反馈，将列表与 composer 共用的运行灯透明度从 0.75↔1.0 调为 0.40↔1.0；最低值提为 `SessionIndicatorTuning.runningMinOpacity` 常量。
+- 保持 2.6 秒周期、6dp 基础尺寸、绿色 tone 和全部状态规则；不增加缩放、闪灭或光晕。系统关闭动画时仍以完整不透明度常亮。
+- 验证：`testDebugUnitTest --tests com.yage.opencode_client.SessionIndicatorTest`（5 项，0 失败/跳过）与 `assembleDebug` 均通过。更新纳入现有 PR，保持未合并。
+
 ## 2026-10-14 — 单灯独立审查修复 H1/H2/M1/M2
 
 - H1：权限回复检查真实 HTTP 成功状态，非 2xx 保留 pending；失败消息仅包含状态码。增加真实本地 HTTP 403/500 的 repository 及父子黄灯保留回归。

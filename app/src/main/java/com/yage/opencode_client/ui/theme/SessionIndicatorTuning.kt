@@ -3,6 +3,7 @@ package com.yage.opencode_client.ui.theme
 import androidx.compose.ui.unit.dp
 
 object SessionIndicatorTuning {
+    const val runningMinOpacity = 0.40f
     val unreadSize = 6.dp
     val unreadMaxSize = 9.dp
     val emphasisSize = 8.dp

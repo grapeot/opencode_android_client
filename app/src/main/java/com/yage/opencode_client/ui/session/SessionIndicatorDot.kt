@@ -52,7 +52,7 @@ fun SessionIndicatorDot(sessionId: String, indicator: SessionIndicator?) {
     }
     val animate = indicator == SessionIndicator.RUNNING && runningAnimationEnabled(visible, foreground, scale)
     val alpha = if (animate) rememberInfiniteTransition(label = "running").animateFloat(
-        1f, .75f, infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "opacity"
+        1f, SessionIndicatorTuning.runningMinOpacity, infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "opacity"
     ) else rememberUpdatedState(1f)
     val dark = MaterialTheme.colorScheme.surface.luminance() < .5f
     Box(Modifier.width(SessionIndicatorTuning.columnWidth), contentAlignment = Alignment.CenterStart) {
