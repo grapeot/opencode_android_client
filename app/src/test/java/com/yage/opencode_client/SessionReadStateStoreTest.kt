@@ -8,6 +8,33 @@ class SessionReadStateStoreTest {
     private val prefs = FakeSharedPreferences()
     private val store = testSessionReadStateStore(prefs)
 
+    @Test fun `legacy JSON retains timestamps and accepts only positive nonself source tokens`() {
+        prefs.edit().putString("session_read_state_test-host_p", """{"lastViewedAt":10,"failedAt":20}""").apply()
+        assertTrue(store.blueAcknowledgements("p").isEmpty())
+        store.acknowledgeBlue("p", mapOf("c" to 100, "d" to 200, "p" to 50, "zero" to 0, "negative" to -1))
+        store.acknowledgeBlue("p", mapOf("c" to 101))
+        val restored = testSessionReadStateStore(prefs)
+        assertEquals(mapOf("c" to 101L, "d" to 200L), restored.blueAcknowledgements("p"))
+        assertEquals(10L, restored.lastViewedAt("p"))
+        assertEquals(20L, restored.failedAt("p"))
+    }
+
+    @Test fun `deleting absent source removes references from every row only in current host`() {
+        store.acknowledgeBlue("p", mapOf("c" to 100, "d" to 200))
+        store.acknowledgeBlue("g", mapOf("c" to 100))
+        store.selectHost("other")
+        store.acknowledgeBlue("p", mapOf("c" to 300))
+        store.selectHost("test-host")
+        store.remove("c")
+        assertEquals(mapOf("d" to 200L), store.blueAcknowledgements("p"))
+        assertTrue(store.blueAcknowledgements("g").isEmpty())
+        store.remove("p")
+        assertFalse(store.all().containsKey("p"))
+        val restored = testSessionReadStateStore(prefs)
+        restored.selectHost("other")
+        assertEquals(mapOf("c" to 300L), restored.blueAcknowledgements("p"))
+    }
+
     @Test
     fun `viewing and failing preserve the other timestamp and persist across restart`() {
         assertNull(store.lastViewedAt("s1"))

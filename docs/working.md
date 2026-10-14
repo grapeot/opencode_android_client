@@ -1,5 +1,22 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-14 — 独立审查 MEDIUM：自动导航不确认父行提醒
+
+- 审查发现此前 `selectSession` 也供列表刷新/分页和删除替补调用，可能在没有显式点选时确认父行子来源。拆出私有 `navigateToSession` 共用原有 markViewed、草稿/current 切换和加载行为；只有显式 `selectSession` 执行蓝色快照确认。
+- 刷新/分页自动选择、删除替补、创建/分叉后导航及解除归档后导航改走无 ACK 的入口。显式列表点选、主动打开子会话/链接继续使用显式入口。未改状态算法、存储格式和 UI。
+- 新增 5 项入口回归，覆盖刷新和分页各自的空 current/失效 current、删除当前 X 自动替补 P、解除归档自动进入 P、冷恢复 P 后刷新。自动导航不 ACK，切走 P 仍蓝，随后显式点选才 ACK；既有自身 viewed 行为保留。
+- 验证：独立执行相关 3 个测试类，167 项通过（0 失败/错误/跳过）；随后全量 `testDebugUnitTest` 553 项、42 suites 通过（0 失败/错误/跳过），`assembleDebug` 通过。报告 `app/build/reports/tests/testDebugUnitTest/index.html`。本轮未执行 Git 命令、设备操作、PR 或部署。
+- 交付复核：独立代码和隐私审查确认该 MEDIUM 已关闭，无新的 HIGH/MEDIUM；主线程再次检查构建与测试任务通过，按用户授权创建 PR、合并后部署真机。
+
+## 2026-10-14 — 父行蓝色提醒按来源版本确认
+
+- 基线 `master@07cdbe4`；参考 iOS `e2a1788`，只实现父行提醒确认。P 因 C/D 未读而显示蓝时，显式选择 P 在 markViewed/current/load 之前同步保存当时来源版本；切走后旧批次不再使 P 变蓝，C/D 内容仍未读，祖父独立提醒。
+- `SessionReadStateStore` 新增默认空 `blueAckBySource`，沿用 host 命名空间及旧 JSON。只存非 self 的正数 token；明确删除来源清理所有行引用，分页移出不清理。`SessionTree` 纯来源映射先过滤自身未读，再逐祖先匹配相等 token；抑制一行不截断上卷。`AppState` 复用同一 presentation 的来源映射与计数，保持 O(N×depth)。
+- 当前 P 停留期间的新子版本、非蓝行、后台、刷新及自动恢复不新增确认。C=100/D=200 确认后 C=101 或新补载 E=50 仍能提醒。来源 `updated > lastViewedAt`、失败及状态 freshness/sync 保持；继承来源时钟和相同 updated 无法区分内容的限制，不实现更强 self 版本模型。
+- 新增 12 项测试：真实 `selectSession` 原复现、子仍未读/祖先独立、看子清祖先贡献、乱序 token/新孩子、current 新版本与后台退出、父自身更新、非蓝矩阵、分页/删除、冷恢复/host 隔离，以及旧 JSON/重启/无自身记录的删除和纯 helper 防环。
+- 实际验证：`testDebugUnitTest` 548 项、42 suites，0 失败/错误/跳过；`assembleDebug`、`assembleDebugAndroidTest` 均通过。报告 `app/build/reports/tests/testDebugUnitTest/index.html`，原始结果 `app/build/test-results/testDebugUnitTest/`。`git diff --check` 通过。
+- 本轮只改 3 个生产 Kotlin 文件、3 个测试文件及 Android 的本设计/工作日志。已验收 UI、呼吸、活动文字保持；原 untracked `docs/context_usage_sync_design.md` 和 `docs/plan_halfwidth_process_rows.md` 未改。实施阶段未操作设备、未做 Git mutation；发布及真机部署由主线程执行。
+
 ## 2026-10-14 — 状态灯按完整文字块居中与尺寸调整
 
 - 列表改为灯列与完整标题/副文字 Column 并列并垂直居中；移除 metadata 灯列 padding。保留原 48dp chevron/Spacer、树缩进、横向位置和点击滑动，无垂直偏移补丁，无灯占位稳定。

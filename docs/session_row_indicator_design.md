@@ -1,12 +1,22 @@
 # 会话树单灯：产品与实现合同
 
-状态：本地实现与验证；发布由主线程负责。替代旧的祖先独立确认规则。
+状态：本地实现与验证；发布由主线程负责。来源内容已读与父行蓝色提醒确认分开维护。
 
 ## 产品规则
 
-列表父、子、孙行及 composer 使用同一个判断：归档无灯；待处理权限或提问为黄；未确认失败为红；自身或任意已知后代 busy/retry 为绿；已知子树均不活跃且有未读更新为蓝；其余无灯。当前会话仅豁免蓝灯。绿色表示执行未结束，不承诺持续产出或任务成功。蓝色表示未读更新，不是成功标记。
+列表父、子、孙行及 composer 使用同一个判断：归档无灯；待处理权限或提问为黄；未确认失败为红；自身或任意已知后代 busy/retry 为绿；已知子树均不活跃且有本行尚未确认的未读更新提醒为蓝；其余无灯。当前会话仅豁免蓝灯。绿色表示执行未结束，不承诺持续产出或任务成功。父行无蓝不代表子内容已读。
 
 来源先确认，再聚合：`failedAt[source] > viewedAt[source]`；未读要求正数更新时间、来源执行不活跃且 `updatedAt[source] > viewedAt[source]`。每个有效来源贡献给自身及已知祖先，祖先自己的查看时间不参与子来源过滤。查看子会话后所有祖先减去该来源；查看父会话不会确认子会话。其他兄弟和父自身的提示独立保留。确认与失败存储继续按 host profile 隔离。
+
+蓝色另有逐行确认映射 `SessionReadState.blueAckBySource[sourceID] = updated token`，默认空映射，兼容原 JSON。`SessionTree.blueReminderSourcesBySession` 先按上述来源未读谓词过滤，再防环上卷；若祖先行保存的 token 与当前正数 updated 相等，仅抑制这一行的贡献，继续向更高祖先传播。来源自身不受映射抑制。`AppState` 从同一份可信状态 presentation 派生来源映射与计数，整图计算 O(N×depth)，不逐行重算。
+
+`MainViewModel.selectSession` 开始时，只有目标行实际显示 UNREAD 且非 unknown，才同步确认当时的来源快照；随后执行原 markViewed、current 切换及加载。没有异步间隙，不会将迟到数据写入另一 host。映射只保存非 self 的正数版本，不以 now 或子树最大时间作阈值。P 确认 C=100、D=200 后，C=101 或新补载 E=50 都能重新提醒；只确认 P，不确认祖父或子。看 C 仍按原 viewedAt 从所有祖先消除 C 的来源贡献。
+
+显式选择入口与自动导航分开：用户点选（含主动打开子会话或会话链接）使用 `selectSession`，随后调用共享的 `navigateToSession`。列表刷新/分页缺少 current 时的自动选择、删除后的自动替补、创建/分叉后的导航及解除归档后的导航直接使用 `navigateToSession`，不写 `blueAckBySource`。自动导航仍保持原有自身 markViewed、草稿切换和消息/状态加载行为；冷启动恢复 current 不新增确认。独立审查发现的自动选择误确认已按此边界修复。
+
+停留 P 时后来出现的子版本不会自动确认；切走、后台、刷新、冷启动恢复及 current 无蓝重选均不扩大快照。黄、红、绿、unknown 和归档行不会顺带确认潜在蓝色。分页移出保留映射，明确删除来源才从当前 host 的所有行清理引用（包括来源没有自身存储记录的情况）。
+
+本轮与 iOS e2a1788 的有界实现同构：保留来源 `updated > lastViewedAt` 的时钟局限，相同 updated 的不同内容仍不可区分；没有引入 self 版本模型、消息 revision 或新同步协议。
 
 后续 busy/retry → idle 不确认历史失败：尚未查看的失败继续保留，忙状态仍先黄/红后绿。成功轮次仅可清理 `failedAt <= viewedAt` 的已确认历史，不能代替用户查看来源。
 
@@ -49,3 +59,7 @@ Android 相对较小的标题字体采用更小的点：绿蓝基础 5dp、上�
 ## 验证
 
 单测覆盖来源确认、多级和兄弟独立性、父自身事件、未知与已确认缺项、优先级、最后子结束、动画开关，以及真实同步入口的 replied、旧 GET、新事件、同值 SSE、重连和 host generation。构建顺序为 `testDebugUnitTest`、`assembleDebug`、`assembleDebugAndroidTest`。UI 测试仅指定 emulator；证据留在 ignored build scratch。具体执行结果见 `working.md`。
+
+父级蓝点回归通过真实 selectSession 覆盖打开 P→X、子仍未读、祖先独立、兄弟乱序 token、新补载、current 期间新版本、非蓝不确认、分页与删除、冷恢复和跨 host；存储测试覆盖旧 JSON、有效 token 过滤和重启，纯 helper 测试覆盖防环及来源已读优先。
+
+自动导航回归驱动真实 loadSessions/loadMoreSessions（current 为空或指向不存在的 ID）、deleteSession、restoreSession 及冷恢复后的刷新；断言自动进入蓝色父行不确认子来源，切走仍蓝，随后显式点选才写入来源快照。
