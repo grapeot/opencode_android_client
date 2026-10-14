@@ -8,9 +8,9 @@ data class SessionNode(
     val children: List<SessionNode>
 )
 
-enum class SessionIndicator { NEEDS_YOU, FAILED, UNREAD }
+enum class SessionIndicator { NEEDS_YOU, FAILED, RUNNING, UNREAD }
 
-fun settled(status: SessionStatus?): Boolean = status == null || status.isIdle
+fun settled(status: SessionStatus?): Boolean = status?.isIdle == true
 
 fun unreadCountsBySession(
     sessions: List<Session>,
@@ -19,7 +19,7 @@ fun unreadCountsBySession(
 ): Map<String, Int> = indicatorCountsBySession(
     sessions,
     sessions.mapNotNull { session ->
-        session.time?.updated?.takeIf { settled(statuses[session.id]) }?.let { session.id to it }
+        session.time?.updated?.takeIf { it > 0 && settled(statuses[session.id]) }?.let { session.id to it }
     }.toMap(),
     lastViewedAt
 )
@@ -38,12 +38,11 @@ private fun indicatorCountsBySession(
     val sessionsById = sessions.associateBy { it.id }
     val counts = mutableMapOf<String, Int>()
     sourceTimes.forEach { (sourceId, time) ->
+        if (time <= 0 || time <= (lastViewedAt[sourceId] ?: Long.MIN_VALUE)) return@forEach
         var sessionId: String? = sourceId
         val visited = mutableSetOf<String>()
         while (sessionId != null && visited.add(sessionId)) {
-            if (time > (lastViewedAt[sessionId] ?: Long.MIN_VALUE)) {
-                counts[sessionId] = counts.getOrDefault(sessionId, 0) + 1
-            }
+            counts[sessionId] = counts.getOrDefault(sessionId, 0) + 1
             sessionId = sessionsById[sessionId]?.parentId
         }
     }
@@ -56,14 +55,49 @@ fun rowIndicator(
     isCurrent: Boolean,
     attentionCount: Int,
     unreadCount: Int,
-    failureCount: Int
+    failureCount: Int,
+    descendantActiveCount: Int = 0,
+    unknown: Boolean = status == null
 ): SessionIndicator? = when {
     session.isArchived -> null
     attentionCount > 0 -> SessionIndicator.NEEDS_YOU
     failureCount > 0 -> SessionIndicator.FAILED
-    !settled(status) || isCurrent -> null
+    status?.isBusy == true || status?.isRetry == true || descendantActiveCount > 0 -> SessionIndicator.RUNNING
+    unknown || !settled(status) || isCurrent -> null
     unreadCount > 0 -> SessionIndicator.UNREAD
     else -> null
+}
+
+data class SessionPresentation(
+    val indicator: SessionIndicator?,
+    val ownStatus: SessionStatus?,
+    val activeDescendants: Int,
+    val unknown: Boolean
+)
+
+/** All facts are calculated once per state change, never in an animated row. */
+fun sessionPresentations(
+    sessions: List<Session>, statuses: Map<String, SessionStatus>,
+    known: Set<String>, snapshotKnown: Boolean, connected: Boolean,
+    viewed: Map<String, Long>, failed: Map<String, Long>, attentionIds: List<String>, current: String?
+): Map<String, SessionPresentation> {
+    val effective = sessions.associate { s ->
+        s.id to if (connected && (snapshotKnown || s.id in known)) statuses[s.id] ?: SessionStatus("idle")
+        else SessionStatus("unknown")
+    }
+    val unknownCounts = attentionCountsBySession(sessions, effective.filterValues { !it.isIdle && !it.isBusy && !it.isRetry }.keys.toList())
+    val active = descendantBusyCountsBySession(sessions, effective)
+    val unread = unreadCountsBySession(sessions, effective, viewed)
+    val failures = failureCountsBySession(sessions, failed, viewed)
+    val attention = attentionCountsBySession(sessions, attentionIds)
+    return sessions.associate { s ->
+        val status = effective[s.id]
+        val unknown = unknownCounts.getOrDefault(s.id, 0) > 0
+        val descendants = active.getOrDefault(s.id, 0)
+        s.id to SessionPresentation(rowIndicator(s, status, s.id == current,
+            attention.getOrDefault(s.id, 0), unread.getOrDefault(s.id, 0), failures.getOrDefault(s.id, 0),
+            descendants, unknown), status, descendants, unknown)
+    }
 }
 
 fun attentionCountsBySession(

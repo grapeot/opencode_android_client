@@ -104,6 +104,7 @@ class NfcQuickPromptTest {
         every { settingsManager.setAgentForSession(any(), any()) } just runs
 
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
+        coEvery { repository.getSessionStatusInDirectory(any()) } returns Result.success(emptyMap())
         coEvery { repository.getSessionTodos(any()) } returns Result.success(emptyList())
         coEvery { repository.getSessions(any()) } returns Result.success(emptyList())
         coEvery { repository.getAgents() } returns Result.success(emptyList())

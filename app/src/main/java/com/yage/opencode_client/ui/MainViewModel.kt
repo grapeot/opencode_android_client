@@ -79,6 +79,23 @@ data class AppState(
     val currentSessionId: String? = null,
     val sessionStatuses: Map<String, SessionStatus> = emptyMap(),
     val sessionReadStates: Map<String, SessionReadState> = emptyMap(),
+    val runtimeGeneration: Long = 0,
+    val statusRevision: Long = 0,
+    val statusRevisions: Map<String, Long> = emptyMap(),
+    val statusKnownIds: Set<String> = emptySet(), // Snapshot-derived; expires with the snapshot.
+    val statusSseKnownIds: Set<String> = emptySet(), // Independent evidence for this live connection.
+    val statusSnapshotKnown: Boolean = false,
+    val statusSnapshotDirectories: Set<String> = emptySet(),
+    val statusEpoch: Long = 0,
+    val streamGeneration: Long = 0,
+    val statusStreamConnected: Boolean = false,
+    val statusConfirmedAt: Long = 0,
+    val statusRequestInFlight: Boolean = false,
+    val permissionRevision: Long = 0,
+    val questionRevision: Long = 0,
+    val permissionLoadVersion: Long = 0,
+    val questionLoadVersion: Long = 0,
+    val appForeground: Boolean = true,
     val pendingSessionErrorAt: Map<String, Long> = emptyMap(),
     val currentSessionCounts: SessionCounts? = null,
     val messages: List<MessageWithParts> = emptyList(),
@@ -348,6 +365,13 @@ data class AppState(
     val sessionUnreadCounts: Map<String, Int>
         get() = unreadCountsBySession(sessions, sessionStatuses, lastViewedAt)
 
+    val sessionPresentations: Map<String, com.yage.opencode_client.ui.session.SessionPresentation> by lazy {
+        com.yage.opencode_client.ui.session.sessionPresentations(
+            sessions, sessionStatuses, statusKnownIds + statusSseKnownIds, false, statusStreamConnected && appForeground,
+            lastViewedAt, sessions.mapNotNull { s -> sessionReadStates[s.id]?.failedAt?.let { s.id to it } }.toMap(),
+            attentionSessionIds, currentSessionId)
+    }
+
     val sessionFailureCounts: Map<String, Int>
         get() {
             val viewed = mutableMapOf<String, Long>()
@@ -361,11 +385,8 @@ data class AppState(
         }
 
     fun rowIndicator(sessionId: String, attentionCount: Int): SessionIndicator? {
-        val session = sessions.find { it.id == sessionId } ?: return null
-        return com.yage.opencode_client.ui.session.rowIndicator(
-            session, sessionStatuses[sessionId], sessionId == currentSessionId, attentionCount,
-            sessionUnreadCounts.getOrDefault(sessionId, 0), sessionFailureCounts.getOrDefault(sessionId, 0)
-        )
+        val presentation = sessionPresentations[sessionId] ?: return null
+        return if (attentionCount > 0 && sessions.find { it.id == sessionId }?.isArchived != true) SessionIndicator.NEEDS_YOU else presentation.indicator
     }
 
     val isCurrentSessionBusy: Boolean
@@ -1735,6 +1756,19 @@ class MainViewModel @Inject constructor(
         _state.update {
             it.copy(
                 isConnected = false,
+                runtimeGeneration = it.runtimeGeneration + 1,
+                statusRevision = 0,
+                statusRevisions = emptyMap(),
+                statusKnownIds = emptySet(),
+                statusSseKnownIds = emptySet(),
+                statusSnapshotKnown = false,
+                statusSnapshotDirectories = emptySet(),
+                statusEpoch = it.statusEpoch + 1,
+                statusStreamConnected = false,
+                statusConfirmedAt = 0,
+                statusRequestInFlight = false,
+                permissionRevision = 0,
+                questionRevision = 0,
                 isConnecting = true,
                 serverVersion = null,
                 sessions = emptyList(),
@@ -1972,6 +2006,7 @@ class MainViewModel @Inject constructor(
         val sessionId = _state.value.currentSessionId ?: return
         hostRuntimeScope.launch {
             repository.abortSession(sessionId)
+                .onSuccess { loadSessionStatus() }
                 .onFailure { error ->
                     _state.update { it.copy(error = errorMessageOrFallback(error, "Failed to abort session")) }
                 }
@@ -2175,23 +2210,34 @@ class MainViewModel @Inject constructor(
     }
 
     fun respondPermission(sessionId: String, permissionId: String, response: PermissionResponse) {
+        val generation = _state.value.runtimeGeneration
         hostRuntimeScope.launch {
             repository.respondPermission(sessionId, permissionId, response)
                 .onSuccess {
+                    if (_state.value.runtimeGeneration != generation) return@onSuccess
                     _state.update { it.copy(
-                        pendingPermissions = it.pendingPermissions.filter { p -> p.id != permissionId }
+                        permissionRevision = it.permissionRevision + 1,
+                        pendingPermissions = it.pendingPermissions.filterNot { p -> p.id == permissionId && p.sessionId == sessionId }
                     )}
                 }
                 .onFailure { error ->
+                    if (_state.value.runtimeGeneration != generation) return@onFailure
                     _state.update { it.copy(error = errorMessageOrFallback(error, "Failed to respond to permission")) }
                 }
         }
     }
 
     fun loadPendingPermissions() {
+        val generation = _state.value.runtimeGeneration
+        val revision = _state.value.permissionRevision
+        val version = _state.value.permissionLoadVersion + 1
+        _state.update { it.copy(permissionLoadVersion = version) }
         hostRuntimeScope.launch {
             repository.getPendingPermissions()
                 .onSuccess { permissions ->
+                    if (_state.value.runtimeGeneration != generation) return@onSuccess
+                    if (_state.value.permissionLoadVersion != version) return@onSuccess
+                    if (_state.value.permissionRevision != revision) { loadPendingPermissions(); return@onSuccess }
                     _state.update { it.copy(pendingPermissions = permissions) }
                 }
                 .onFailure { error ->
@@ -2201,9 +2247,16 @@ class MainViewModel @Inject constructor(
     }
 
     fun loadPendingQuestions() {
+        val generation = _state.value.runtimeGeneration
+        val revision = _state.value.questionRevision
+        val version = _state.value.questionLoadVersion + 1
+        _state.update { it.copy(questionLoadVersion = version) }
         hostRuntimeScope.launch {
             repository.getPendingQuestions()
                 .onSuccess { questions ->
+                    if (_state.value.runtimeGeneration != generation) return@onSuccess
+                    if (_state.value.questionLoadVersion != version) return@onSuccess
+                    if (_state.value.questionRevision != revision) { loadPendingQuestions(); return@onSuccess }
                     _state.update { it.copy(pendingQuestions = questions) }
                 }
                 .onFailure { error ->
@@ -2213,14 +2266,17 @@ class MainViewModel @Inject constructor(
     }
 
     fun replyQuestion(requestId: String, answers: List<List<String>>, onError: () -> Unit = {}) {
+        val generation = _state.value.runtimeGeneration
         hostRuntimeScope.launch {
             repository.replyQuestion(requestId, answers)
                 .onSuccess {
+                    if (_state.value.runtimeGeneration != generation) return@onSuccess
                     _state.update { currentState ->
-                        currentState.copy(pendingQuestions = currentState.pendingQuestions.filter { it.id != requestId })
+                        currentState.copy(questionRevision = currentState.questionRevision + 1, pendingQuestions = currentState.pendingQuestions.filter { it.id != requestId })
                     }
                 }
                 .onFailure { error ->
+                    if (_state.value.runtimeGeneration != generation) return@onFailure
                     Log.w(TAG, "Failed to reply question: ${error.message}")
                     onError()
                 }
@@ -2228,11 +2284,13 @@ class MainViewModel @Inject constructor(
     }
 
     fun rejectQuestion(requestId: String) {
+        val generation = _state.value.runtimeGeneration
         hostRuntimeScope.launch {
             repository.rejectQuestion(requestId)
                 .onSuccess {
+                    if (_state.value.runtimeGeneration != generation) return@onSuccess
                     _state.update { currentState ->
-                        currentState.copy(pendingQuestions = currentState.pendingQuestions.filter { it.id != requestId })
+                        currentState.copy(questionRevision = currentState.questionRevision + 1, pendingQuestions = currentState.pendingQuestions.filter { it.id != requestId })
                     }
                 }
                 .onFailure { error ->
@@ -2269,6 +2327,7 @@ class MainViewModel @Inject constructor(
     }
 
     private fun startSSE() {
+        _state.update { it.copy(streamGeneration = it.streamGeneration + 1) }
         sseJob?.cancel()
         _state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
         sseJob = launchSseCollection(
@@ -2277,7 +2336,9 @@ class MainViewModel @Inject constructor(
             _state,
             onEvent = ::handleSSEEvent,
             onConnected = {
-                _state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
+                _state.update { it.copy(pendingSessionErrorAt = emptyMap(), statusStreamConnected = true,
+                    statusEpoch = it.statusEpoch + 1, statusRequestInFlight = false,
+                    statusSnapshotKnown = false, statusKnownIds = emptySet(), statusSseKnownIds = emptySet()) }
                 // Reconnect bootstrap: OkHttp fires onOpen on every fresh
                 // (re)connect, so this also reconciles anything missed while
                 // the stream was down. loadMessages guards against session
@@ -2288,6 +2349,8 @@ class MainViewModel @Inject constructor(
                     loadMessages(sessionId, false)
                 }
                 loadSessionStatus()
+                loadPendingPermissions()
+                loadPendingQuestions()
             }
         )
     }
@@ -2313,6 +2376,17 @@ class MainViewModel @Inject constructor(
         )
     }
 
+    fun setAppForeground(foreground: Boolean) {
+        _state.update { it.copy(appForeground = foreground,
+            statusEpoch = it.statusEpoch + 1, statusRequestInFlight = false,
+            statusSnapshotKnown = false, statusKnownIds = emptySet(), statusSseKnownIds = emptySet()) }
+        if (foreground && _state.value.isConnected) {
+            loadSessionStatus()
+            loadPendingPermissions()
+            loadPendingQuestions()
+        }
+    }
+
     private fun publishReadStates() {
         _state.update { it.copy(sessionReadStates = readStateStore.all()) }
     }
@@ -2331,8 +2405,12 @@ class MainViewModel @Inject constructor(
                 readStateStore.markFailed(sessionId, pending)
                 publishReadStates()
             } else if (previous?.isBusy == true || previous?.isRetry == true) {
-                readStateStore.clearFailed(sessionId)
-                publishReadStates()
+                val failedAt = readStateStore.failedAt(sessionId)
+                val viewedAt = readStateStore.lastViewedAt(sessionId)
+                if (failedAt != null && viewedAt != null && failedAt <= viewedAt) {
+                    readStateStore.clearFailed(sessionId)
+                    publishReadStates()
+                }
             }
             _state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt - sessionId) }
         }

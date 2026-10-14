@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sessions_status_sync_pending">Status awaiting sync</string>
+    <string name="sessions_descendants_executing">%d subagents executing</string>
     <string name="sessions_indicator_needs_you">Needs your attention</string>
     <string name="sessions_indicator_failed">Last turn failed</string>
     <string name="sessions_indicator_unread">Unread</string>

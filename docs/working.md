@@ -1,5 +1,37 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-14 — 状态灯按完整文字块居中与尺寸调整
+
+- 列表改为灯列与完整标题/副文字 Column 并列并垂直居中；移除 metadata 灯列 padding。保留原 48dp chevron/Spacer、树缩进、横向位置和点击滑动，无垂直偏移补丁，无灯占位稳定。
+- Android 按较小标题字体比例缩小共享点：绿蓝 5→7.5dp，黄红 6→9dp；列表和 composer 一致。保留 0.40↔1.0、2.6 秒呼吸、绿色 tone、Reduced Motion 和所有状态规则，语义风格与 iOS 一致。
+- 增加 synthetic 布局测试：单/双行完整文字块中心、父子及选中态、chevron 不重叠、无灯对齐；局部放大字体验证尺寸上限，不修改系统显示/字体设置。
+- 验证：`SessionIndicatorTest` 5 项通过，`assembleDebug` 通过；明确指定 emulator 的 `SessionListInstrumentedTest` 15 项通过（0 失败/跳过）。首次冷启动因模拟器存储未挂载未能启动测试，待启动完成后重跑通过。
+- 浅深色截图已更新并读图核验：ignored `app/build/session-indicator-scratch/light.png`、`dark.png`。包含展开父子树、选中父行、单/双行及各灯色。未安装实体设备、未提交；本轮创建的模拟器已关闭。
+
+## 2026-10-14 — 增强运行灯呼吸幅度
+
+- 根据真机反馈，将列表与 composer 共用的运行灯透明度从 0.75↔1.0 调为 0.40↔1.0；最低值提为 `SessionIndicatorTuning.runningMinOpacity` 常量。
+- 保持 2.6 秒周期、6dp 基础尺寸、绿色 tone 和全部状态规则；不增加缩放、闪灭或光晕。系统关闭动画时仍以完整不透明度常亮。
+- 验证：`testDebugUnitTest --tests com.yage.opencode_client.SessionIndicatorTest`（5 项，0 失败/跳过）与 `assembleDebug` 均通过。更新纳入现有 PR，保持未合并。
+
+## 2026-10-14 — 单灯独立审查修复 H1/H2/M1/M2
+
+- H1：权限回复检查真实 HTTP 成功状态，非 2xx 保留 pending；失败消息仅包含状态码。增加真实本地 HTTP 403/500 的 repository 及父子黄灯保留回归。
+- H2：后续成功轮次不能清除尚未查看的失败；仅清理已由来源 viewedAt 确认的历史。调整旧测试，增加子会话再次成功后父子仍红、查看子后祖先贡献消失的回归。
+- M1：分离快照与同连接 SSE 确认证据；快照过期或 GET 失败不清除有效 SSE。增加虚拟时钟回归，覆盖 GET 持续失败、同值 busy 事件跨多个 watchdog tick。
+- M2：移除 Repository REST/SSE 的完整 URL 日志，覆盖 debug。增加 directory 请求实际到达服务器、但两个客户端均不启用 HTTP 日志且日志不含目录标记的定向测试。
+- 验证完成：`testDebugUnitTest` 536 项通过、0 失败/跳过；随后 `assembleDebug` 与 `assembleDebugAndroidTest` 均通过。单测报告仍为 `app/build/reports/tests/testDebugUnitTest/index.html`。本轮没有 UI 布局/动画改动，未重跑设备 UI 测试；未部署设备、未执行 Git mutation。
+
+## 2026-10-14 — 会话树单灯与来源确认
+
+- 实现合同见 `docs/session_row_indicator_design.md`。替换祖先独立确认：先按来源自己的 viewedAt 过滤红/蓝，再上卷；父、兄弟不受子确认误清。
+- 列表和 composer 共用黄 > 红 > 绿 > 蓝单灯及 running token；自身与后代摘要同时显示。未知/断线不回落蓝；归档无灯。绘制层透明度动画不重算状态图，关闭动画、离屏、后台停止循环。
+- 同步层增加 host generation、连接 epoch、逐来源 revision、directory 快照确认；同值 SSE 也保护旧 GET。前台低频状态确认复用 watchdog，abort 等待权威状态。
+- 新增 permission.replied，重连刷新两类 pending；事件 revision 与请求版本拒绝旧 GET，保留新 asked、已 resolved 和跨 host 边界。
+- 验证完成：依次执行 `testDebugUnitTest`（531 项，0 失败/跳过）、`assembleDebug`、`assembleDebugAndroidTest`；指定 emulator 执行 `SessionListInstrumentedTest`（13 项，0 失败/跳过）。包含系统关闭动画后的像素稳定性检查。最终代码重新执行同一组检查全部通过。
+- 浅色与深色混排截图位于 ignored `app/build/session-indicator-scratch/light.png` 和 `dark.png`，已读图核验。单测报告 `app/build/reports/tests/testDebugUnitTest/index.html`，仪器测试报告 `app/build/reports/androidTests/connected/debug/index.html`。未发布，未安装实体设备，未修改在线服务。
+- 已知限制：仅已加载树；离线丢失的 error 不重建；依赖兼容服务端的完整 directory 快照合同。未做大量同时呼吸行的长期性能/视觉验收，也未做平板截图。本轮保留现有应用架构，未重写 MainViewModel。
+
 ## 2026-10-08 — 主会话 idle 时后台 subagent 仍运行，UI 不显示
 
 - 派给 background subagent 后，父会话这轮结束变 `idle`，subagent 在自己的子会话里 `busy`。列表父行显示 Idle，聊天页也没有进行中的迹象。

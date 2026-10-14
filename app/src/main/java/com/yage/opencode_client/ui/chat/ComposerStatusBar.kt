@@ -137,6 +137,7 @@ internal fun turnStopwatchFrozenEnd(
  *  the turn stops, and resets to zero when a new message moves the anchor. */
 @Composable
 internal fun ComposerStatusBar(
+    presentation: com.yage.opencode_client.ui.session.SessionPresentation? = null,
     stats: AppState.SessionStats?,
     isBusy: Boolean,
     agentActivityText: String?,
@@ -158,11 +159,18 @@ internal fun ComposerStatusBar(
         else -> null
     }
     val activityStatus = if (isBusy) agentActivityText ?: stringResource(R.string.chat_agent_running) else null
-    val status = listOfNotNull(activityStatus, voiceStatus).joinToString(" · ").takeIf { it.isNotEmpty() }
+    val execution = presentation?.let { p -> listOfNotNull(
+        when { p.ownStatus?.isBusy == true -> activityStatus ?: stringResource(R.string.sessions_status_running)
+            p.ownStatus?.isRetry == true -> stringResource(R.string.sessions_status_retrying)
+            else -> null },
+        if (p.activeDescendants > 0) stringResource(R.string.sessions_descendants_executing, p.activeDescendants) else null,
+        if (p.unknown) stringResource(R.string.sessions_status_sync_pending) else null
+    ).joinToString(" · ").takeIf { it.isNotEmpty() } }
+    val status = listOfNotNull(if (presentation != null) execution else activityStatus, voiceStatus).joinToString(" · ").takeIf { it.isNotEmpty() }
     val visibleStats = stats?.takeIf { it.hasVisibleSegments }
     val showCountersRow = visibleStats != null || stopwatchStartedAtMillis != null
     val hasBackgroundTasks = backgroundTaskLabel != null
-    if (!showCountersRow && status == null && !hasBackgroundTasks) return
+    if (!showCountersRow && status == null && !hasBackgroundTasks && presentation?.indicator == null) return
 
     val labelStyle = MaterialTheme.typography.labelMedium
     val color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -259,15 +267,11 @@ internal fun ComposerStatusBar(
             }
         }
 
-        status?.let {
+        (status ?: if (presentation?.indicator != null) "" else null)?.let {
             if (showCountersRow) Spacer(modifier = Modifier.width(8.dp))
-            if (isBusy) {
-                Icon(
-                    Icons.Default.Circle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.size(8.dp)
-                )
+            if (presentation != null || isBusy) {
+                com.yage.opencode_client.ui.session.SessionIndicatorDot("composer", presentation?.indicator
+                    ?: if (presentation == null && isBusy) com.yage.opencode_client.ui.session.SessionIndicator.RUNNING else null)
                 Spacer(modifier = Modifier.width(8.dp))
             }
             Text(

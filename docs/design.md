@@ -7,7 +7,7 @@
 ## 设计原则
 
 1. **深色是主场，浅色是平替。** 开发者默认深色审美。深色优先调到完美，浅色用同一套 token 映射。
-2. **单一识别色：电蓝 `#3B82F6`。** 整个 app 只有一个色相承担"可交互/品牌"语义——发送、选中、链接、用户消息色条、可点的工具卡元素。金色 `#D9A621` 仅作唯一次级强调，只用在"AI 正在工作"瞬时态。除这两色外全部走中性灰阶；Material 的 `error`/绿/橙一律不作装饰用（红只保留给 stop / 删除等破坏性语义）。
+2. **单一识别色：电蓝 `#3B82F6`。** 发送、选中、链接、用户消息色条及工具交互使用品牌蓝。会话状态单灯是语义例外：黄为需要你处理、红为未确认失败、专用绿为执行未结束、蓝为未读更新；这些颜色不用于装饰。
 3. **关掉 Material You 动态取色。** `OpenCodeTheme` 不使用 `dynamicColor`——品牌色在所有设备上固定为电蓝，不跟随用户壁纸，和 iOS"固定 primary blue、不跟系统 accent"的决策一致。
 4. **语义靠形态和位置，不靠颜色堆叠。** 用**卡片形态**区分功能类别，颜色只在极少数可交互处点缀。
 5. **颜色不建立层级，字号和留白建立层级。**
@@ -45,7 +45,7 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 
 > `ToolWritePatchBackground` / `...Dark` 是历史上 write/patch 卡的特殊蓝底，Quiet Tech 下工具卡统一用中性 surface，这两个色已不再被 UI 引用，保留只为向后兼容，后续可清理。
 
-整屏在任何时刻最多出现一处彩色（accent 或 gold），其余全灰阶——这是"冷静"的硬约束。
+一般信息区域限制彩色强调；会话列表与 composer 是分诊例外，每行一个状态灯，副文字维持中性。完整优先级、来源确认和同步边界见 [会话树单灯合同](session_row_indicator_design.md)。
 
 ## 卡片形态语言
 
@@ -89,7 +89,7 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 - Active 行 leading swipe 为 Archive；Archived 行 leading swipe 为 Restore；trailing swipe 始终为 Delete。所有 action 使用图标在上、文字在下的克制按钮语言。
 - Archived rows 仍可点击查看，但标题和状态使用弱一级中性色，不画当前选中 accent，避免读起来像当前工作项。
 - Session 分页使用顶部全局 `Load older` action，不再用底部自动 sentinel；这样 Archived 默认折叠时不会为了不可见历史自动连续分页，也不会把加载更多误读成 Archived 专属动作。
-- 保留：展开折叠、depth 缩进、busy 标题色、状态文字。
+- 保留展开折叠、48dp chevron/Spacer、depth 缩进、点击和滑动。标题中性；状态灯统一黄 > 红 > 绿 > 蓝，自身与后代执行摘要同时保留。点与完整标题+时间/状态文字块并列并垂直居中，不用 y offset；副文字不再额外缩进，无灯保留灯列占位。Android 按标题字体比例采用绿蓝 5→7.5dp、黄红 6→9dp 的有界缩放，列表/composer 共用，语义风格与 iOS 一致。绿灯为独立 running token，2.6 秒、0.40↔1.0 透明度呼吸；系统关闭动画时常亮，后台/离屏不循环。未知状态显示中性“状态待同步”。
 
 ## Settings（`SettingsSections`）
 

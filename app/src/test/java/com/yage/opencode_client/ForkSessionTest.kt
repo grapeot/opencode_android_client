@@ -108,6 +108,7 @@ class ForkSessionTest {
 
         every { repository.connectSSE(any(), any()) } returns emptyFlow()
         coEvery { repository.getSessionStatus() } returns Result.success(emptyMap())
+        coEvery { repository.getSessionStatusInDirectory(any()) } returns Result.success(emptyMap())
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         coEvery { repository.getPendingPermissions() } returns Result.success(emptyList())
         coEvery { repository.getProviders() } returns Result.success(ProvidersResponse())

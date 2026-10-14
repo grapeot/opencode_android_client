@@ -9,7 +9,6 @@ import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.logging.HttpLoggingInterceptor
 import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -36,9 +35,8 @@ class OpenCodeRepository @Inject constructor() {
 
     private fun buildHttpClient(readTimeoutSeconds: Long): OkHttpClient {
         return OkHttpClient.Builder()
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-            })
+            // Do not log request URLs: directory queries and path segments may
+            // contain private workspace data, including in debug builds.
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .apply {
@@ -126,6 +124,10 @@ class OpenCodeRepository @Inject constructor() {
         api.getSessionStatus()
     }
 
+    suspend fun getSessionStatusInDirectory(directory: String): Result<Map<String, SessionStatus>> = apiCall {
+        api.getSessionStatusInDirectory(directory)
+    }
+
     suspend fun getMessages(sessionId: String, limit: Int? = null): Result<List<MessageWithParts>> =
         apiCall { api.getMessages(sessionId, limit) }
 
@@ -184,7 +186,11 @@ class OpenCodeRepository @Inject constructor() {
         permissionId: String,
         response: PermissionResponse
     ): Result<Unit> = apiCall {
-        api.respondPermission(sessionId, permissionId, PermissionResponseRequest(response.value))
+        val result = api.respondPermission(sessionId, permissionId, PermissionResponseRequest(response.value))
+        if (!result.isSuccessful) {
+            // Do not propagate the response body or server-provided reason into UI/logs.
+            throw IllegalStateException("Permission reply failed (HTTP ${result.code()})")
+        }
     }
 
     suspend fun getPendingQuestions(): Result<List<QuestionRequest>> = apiCall {

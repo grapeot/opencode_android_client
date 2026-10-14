@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="sessions_status_sync_pending">状态待同步</string>
+    <string name="sessions_descendants_executing">%d 个子代理执行未结束</string>
     <string name="sessions_indicator_needs_you">需要你处理</string>
     <string name="sessions_indicator_failed">上一轮失败</string>
     <string name="sessions_indicator_unread">有新内容未读</string>
