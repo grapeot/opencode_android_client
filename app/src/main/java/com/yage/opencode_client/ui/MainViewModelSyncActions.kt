@@ -2,6 +2,7 @@ package com.yage.opencode_client.ui
 
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.SSEEvent
+import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.data.repository.OpenCodeRepository
 import kotlinx.coroutines.CoroutineScope
@@ -10,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
@@ -22,14 +24,17 @@ internal fun launchSseCollection(
     onConnected: (() -> Unit)? = null
 ): Job {
     return scope.launch {
-        repository.connectSSE(onConnected)
+        repository.connectSSE(onConnected, onDisconnected = {
+            state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
+        })
+            .onCompletion { state.update { it.copy(pendingSessionErrorAt = emptyMap()) } }
             .catch { error ->
-                state.update { it.copy(error = "SSE Error: ${error.message}") }
+                state.update { it.copy(error = "SSE Error: ${error.message}", pendingSessionErrorAt = emptyMap()) }
             }
             .collect { result ->
                 result.onSuccess { event -> onEvent(event) }
                     .onFailure { error ->
-                        state.update { it.copy(error = "SSE Error: ${error.message}") }
+                        state.update { it.copy(error = "SSE Error: ${error.message}", pendingSessionErrorAt = emptyMap()) }
                     }
             }
     }
@@ -96,7 +101,8 @@ internal fun handleIncomingSseEvent(
     onLoadPendingPermissions: () -> Unit,
     onNonFatalIssue: (String) -> Unit,
     onRecordUserMessage: (String, String) -> Unit = { _, _ -> },
-    onRecordToolPart: (String, String) -> Unit = { _, _ -> }
+    onRecordToolPart: (String, String) -> Unit = { _, _ -> },
+    onReconcileSessionFailure: (String, SessionStatus?, SessionStatus) -> Unit = { _, _, _ -> }
 ) {
     when (event.payload.type) {
         "session.created" -> {
@@ -120,6 +126,11 @@ internal fun handleIncomingSseEvent(
         "session.status" -> {
             val statusEvent = parseSessionStatusEvent(event)
             if (statusEvent != null) {
+                onReconcileSessionFailure(
+                    statusEvent.sessionId,
+                    state.value.sessionStatuses[statusEvent.sessionId],
+                    statusEvent.status
+                )
                 state.update {
                     it.copy(
                         sessionStatuses = it.sessionStatuses + (statusEvent.sessionId to statusEvent.status)
@@ -352,6 +363,10 @@ internal fun handleIncomingSseEvent(
         }
         "session.error" -> {
             val sessionId = event.payload.getString("sessionID")
+            if (sessionId != null) {
+                val now = System.currentTimeMillis()
+                state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt + (sessionId to now)) }
+            }
             if (sessionId != null && sessionId == state.value.currentSessionId) {
                 // prompt_async acknowledges with 204 before the turn runs, so a failure
                 // that happens before the user message is persisted only surfaces here.

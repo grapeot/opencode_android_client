@@ -3,6 +3,7 @@ package com.yage.opencode_client
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -231,7 +232,7 @@ class SessionListInstrumentedTest {
     }
 
     @Test
-    fun sessionListShowsIdleStatusLabel() {
+    fun sessionListOmitsIdleStatusLabel() {
         val session = Session(
             id = "session-idle",
             directory = "/tmp/project",
@@ -252,11 +253,11 @@ class SessionListInstrumentedTest {
         }
 
         composeRule.onNodeWithText("Idle Session").assertIsDisplayed()
-        composeRule.onNodeWithText("Idle").assertIsDisplayed()
+        composeRule.onNodeWithText("Idle").assertDoesNotExist()
     }
 
     @Test
-    fun sessionListRollsNeedAttentionUpToParentAndOverridesRunning() {
+    fun sessionListRollsAttentionDotUpToParentAndKeepsRunning() {
         val parent = Session(
             id = "parent",
             directory = "/tmp/project",
@@ -284,7 +285,42 @@ class SessionListInstrumentedTest {
         }
 
         composeRule.onNodeWithText("Parent").assertIsDisplayed()
-        composeRule.onNodeWithText("Need attention").assertIsDisplayed()
-        composeRule.onNodeWithText("Running").assertDoesNotExist()
+        composeRule.onNodeWithText("Need attention").assertDoesNotExist()
+        composeRule.onNodeWithText("Running").assertIsDisplayed()
+        composeRule.onNodeWithTag("session-indicator-parent", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertContentDescriptionEquals("Needs your attention")
+    }
+
+    @Test
+    fun sessionListRendersAllThreeIndicatorDescriptions() {
+        val sessions = listOf(
+            Session("needs-you", directory = "/tmp", title = "Needs You"),
+            Session("failed", directory = "/tmp", title = "Failed"),
+            Session("unread", directory = "/tmp", title = "New Content")
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                SessionList(
+                    sessions = sessions,
+                    currentSessionId = null,
+                    attentionSessionIds = listOf("needs-you"),
+                    unreadCounts = mapOf("needs-you" to 1, "failed" to 1, "unread" to 1),
+                    failureCounts = mapOf("needs-you" to 1, "failed" to 1),
+                    onSelectSession = {},
+                    onCreateSession = {},
+                    onDeleteSession = {}
+                )
+            }
+        }
+        for ((id, description) in listOf(
+            "needs-you" to "Needs your attention",
+            "failed" to "Last turn failed",
+            "unread" to "Unread"
+        )) {
+            composeRule.onNodeWithTag("session-indicator-$id", useUnmergedTree = true)
+                .assertIsDisplayed()
+                .assertContentDescriptionEquals(description)
+        }
     }
 }

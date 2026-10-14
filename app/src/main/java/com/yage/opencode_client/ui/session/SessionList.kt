@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Add
@@ -62,6 +63,8 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -69,6 +72,9 @@ import com.yage.opencode_client.R
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.theme.StopRed
+import com.yage.opencode_client.ui.theme.BrandGold
+import com.yage.opencode_client.ui.theme.BrandPrimary
+import com.yage.opencode_client.ui.theme.SessionIndicatorTuning
 import kotlin.math.roundToInt
 
 private enum class SwipeAnchor { Leading, Center, Trailing }
@@ -82,22 +88,39 @@ private fun formatRelativeTime(updatedMs: Long): String = DateUtils.getRelativeT
 ).toString()
 
 @Composable
-private fun sessionStatusLabel(status: SessionStatus?, attentionCount: Int): String? = when {
-    attentionCount > 1 -> "${stringResource(R.string.sessions_status_need_attention)} · $attentionCount"
-    attentionCount == 1 -> stringResource(R.string.sessions_status_need_attention)
+private fun sessionStatusLabel(status: SessionStatus?): String? = when {
     status == null -> null
     status.isBusy -> stringResource(R.string.sessions_status_running)
     status.isRetry -> stringResource(R.string.sessions_status_retrying)
-    status.isIdle -> stringResource(R.string.sessions_status_idle)
     else -> null
 }
 
 @Composable
-private fun sessionStatusColor(status: SessionStatus?, attentionCount: Int): Color = when {
-    attentionCount > 0 -> StopRed
-    status?.isBusy == true -> MaterialTheme.colorScheme.primary
-    status?.isRetry == true -> MaterialTheme.colorScheme.tertiary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun sessionStatusColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant
+
+@Composable
+private fun SessionIndicatorDot(sessionId: String, indicator: SessionIndicator?) {
+    Box(modifier = Modifier.width(SessionIndicatorTuning.columnWidth), contentAlignment = Alignment.CenterStart) {
+        if (indicator != null) {
+            val emphasis = indicator != SessionIndicator.UNREAD
+            val base = if (emphasis) SessionIndicatorTuning.emphasisSize else SessionIndicatorTuning.unreadSize
+            val maximum = if (emphasis) SessionIndicatorTuning.emphasisMaxSize else SessionIndicatorTuning.unreadMaxSize
+            val size = (base * LocalDensity.current.fontScale).coerceIn(base, maximum)
+            val description = stringResource(when (indicator) {
+                SessionIndicator.NEEDS_YOU -> R.string.sessions_indicator_needs_you
+                SessionIndicator.FAILED -> R.string.sessions_indicator_failed
+                SessionIndicator.UNREAD -> R.string.sessions_indicator_unread
+            })
+            val color = when (indicator) {
+                SessionIndicator.NEEDS_YOU -> BrandGold
+                SessionIndicator.FAILED -> StopRed
+                SessionIndicator.UNREAD -> BrandPrimary
+            }
+            Box(Modifier.size(size).background(color, CircleShape)
+                .semantics { contentDescription = description }
+                .testTag("session-indicator-$sessionId"))
+        }
+    }
 }
 
 /** Label for the subordinate "subagents running" signal shown in place of the
@@ -117,11 +140,11 @@ private fun SwipeRevealRow(
     onRestore: () -> Unit,
     onDelete: () -> Unit,
     isSelected: Boolean,
-    isBusy: Boolean,
     displayName: String,
     updatedTime: Long? = null,
     status: SessionStatus? = null,
-    attentionCount: Int = 0,
+    sessionId: String,
+    indicator: SessionIndicator?,
     busyDescendantCount: Int = 0,
     onSelect: () -> Unit,
     depth: Int = 0,
@@ -138,12 +161,11 @@ private fun SwipeRevealRow(
     val selectionShape = RoundedCornerShape(12.dp)
     val titleColor = when {
         isArchived -> MaterialTheme.colorScheme.onSurfaceVariant
-        isBusy -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurface
     }
-    // The row falls back to the descendant-subagent signal only when it has no
-    // stronger state of its own (attention > own busy/retry > descendants).
-    val showsDescendantBusy = attentionCount == 0 && !isBusy && busyDescendantCount > 0
+    // The dot carries attention; the secondary line describes running work.
+    val showsDescendantBusy = settled(status) && busyDescendantCount > 0
+    val statusLabel = sessionStatusLabel(status)
     val dragFlingBehavior = AnchoredDraggableDefaults.flingBehavior(
         state = dragState,
         positionalThreshold = { total: Float -> total * 0.5f }
@@ -199,13 +221,16 @@ private fun SwipeRevealRow(
                 Spacer(modifier = Modifier.size(48.dp))
             }
             Column(modifier = Modifier.weight(1f, fill = false).offset(x = (-12).dp)) {
-                Text(
-                    text = displayName,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = titleColor
-                )
-                if (updatedTime != null || status != null || attentionCount > 0 || showsDescendantBusy) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SessionIndicatorDot(sessionId, indicator)
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = titleColor
+                    )
+                }
+                if (updatedTime != null || statusLabel != null || showsDescendantBusy) {
+                    Row(modifier = Modifier.padding(start = SessionIndicatorTuning.columnWidth), verticalAlignment = Alignment.CenterVertically) {
                         if (updatedTime != null) {
                             Text(
                                 text = formatRelativeTime(updatedTime),
@@ -213,14 +238,14 @@ private fun SwipeRevealRow(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        val showStatus = status != null || attentionCount > 0
+                        val showStatus = statusLabel != null
                         if ((showStatus || showsDescendantBusy) && updatedTime != null) {
                             Text("  ", style = MaterialTheme.typography.bodySmall)
                         }
                         if (showsDescendantBusy) {
                             // Delegated work still in flight under an idle session:
                             // a heterogeneous signal (branch icon + neutral color) so
-                            // it reads apart from the session's own Running (primary).
+                                 // it reads apart from the session's own Running label.
                             Icon(
                                 Icons.Default.AccountTree,
                                 contentDescription = null,
@@ -235,13 +260,9 @@ private fun SwipeRevealRow(
                             )
                         } else if (showStatus) {
                             Text(
-                                text = sessionStatusLabel(status, attentionCount) ?: "",
+                                text = statusLabel.orEmpty(),
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                color = if (isArchived && attentionCount == 0) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                } else {
-                                    sessionStatusColor(status, attentionCount)
-                                }
+                                color = sessionStatusColor()
                             )
                         }
                     }
@@ -313,6 +334,8 @@ fun SessionList(
     sessionStatuses: Map<String, SessionStatus> = emptyMap(),
     attentionSessionIds: List<String> = emptyList(),
     descendantBusyCounts: Map<String, Int> = emptyMap(),
+    unreadCounts: Map<String, Int> = emptyMap(),
+    failureCounts: Map<String, Int> = emptyMap(),
     hasMoreSessions: Boolean = false,
     isLoadingMoreSessions: Boolean = false,
     isRefreshingSessions: Boolean = false,
@@ -413,6 +436,8 @@ fun SessionList(
                         sessionStatuses = sessionStatuses,
                         attentionCounts = attentionCounts,
                         descendantBusyCounts = descendantBusyCounts,
+                        unreadCounts = unreadCounts,
+                        failureCounts = failureCounts,
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = false,
@@ -444,6 +469,8 @@ fun SessionList(
                         sessionStatuses = sessionStatuses,
                         attentionCounts = attentionCounts,
                         descendantBusyCounts = descendantBusyCounts,
+                        unreadCounts = unreadCounts,
+                        failureCounts = failureCounts,
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = true,
@@ -503,6 +530,8 @@ private fun SessionRowItem(
     sessionStatuses: Map<String, SessionStatus>,
     attentionCounts: Map<String, Int>,
     descendantBusyCounts: Map<String, Int>,
+    unreadCounts: Map<String, Int>,
+    failureCounts: Map<String, Int>,
     listIsScrolling: Boolean,
     expandedSessionIds: Set<String>,
     isArchived: Boolean,
@@ -538,11 +567,16 @@ private fun SessionRowItem(
             onRestore = { onRestoreSession(session.id) },
             onDelete = { onDeleteSession(session.id) },
             isSelected = isSelected,
-            isBusy = sessionStatuses[session.id]?.isBusy == true,
             displayName = session.displayName,
             updatedTime = session.time?.updated,
             status = sessionStatuses[session.id],
-            attentionCount = attentionCounts.getOrDefault(session.id, 0),
+            sessionId = session.id,
+            indicator = rowIndicator(
+                session, sessionStatuses[session.id], isSelected,
+                attentionCounts.getOrDefault(session.id, 0),
+                unreadCounts.getOrDefault(session.id, 0),
+                failureCounts.getOrDefault(session.id, 0)
+            ),
             busyDescendantCount = descendantBusyCounts.getOrDefault(session.id, 0),
             onSelect = { onSelectSession(session.id) },
             depth = depth,

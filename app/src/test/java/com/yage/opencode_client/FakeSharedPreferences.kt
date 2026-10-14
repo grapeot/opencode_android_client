@@ -3,6 +3,7 @@ package com.yage.opencode_client
 import android.content.Context
 import android.content.SharedPreferences
 import com.yage.opencode_client.util.SessionStatsStore
+import com.yage.opencode_client.util.SessionReadStateStore
 import io.mockk.every
 import io.mockk.mockk
 
@@ -53,3 +54,10 @@ fun testSessionStatsStore(prefs: FakeSharedPreferences = FakeSharedPreferences()
             every { getSharedPreferences(any(), any()) } returns prefs
         }
     )
+
+fun testSessionReadStateStore(prefs: FakeSharedPreferences = FakeSharedPreferences()): SessionReadStateStore =
+    SessionReadStateStore(
+        mockk<Context> {
+            every { getSharedPreferences(any(), any()) } returns prefs
+        }
+    ).apply { selectHost("test-host") }

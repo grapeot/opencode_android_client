@@ -5,6 +5,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.retryWhen
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,8 +34,12 @@ class SSEClient(
         baseUrl: String,
         username: String? = null,
         password: String? = null,
-        onConnected: (() -> Unit)? = null
+        onConnected: (() -> Unit)? = null,
+        onDisconnected: (() -> Unit)? = null
     ): Flow<Result<SSEEvent>> = connectOnce(baseUrl, username, password, onConnected)
+        // This is upstream of retryWhen: clear tentative state after buffered
+        // events drain, before each connection's retry backoff begins.
+        .onCompletion { onDisconnected?.invoke() }
         .retryWhen { _, attempt ->
             val delayMs = (INITIAL_RETRY_DELAY_MS * Math.pow(RETRY_MULTIPLIER, attempt.toDouble()))
                 .toLong()
