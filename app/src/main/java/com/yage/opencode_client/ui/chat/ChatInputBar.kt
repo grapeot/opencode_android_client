@@ -171,11 +171,18 @@ internal fun ChatInputBar(
                         .padding(end = 10.dp, top = 4.dp, bottom = 4.dp),
                     contentAlignment = Alignment.TopStart
                 ) {
-                    if (text.isEmpty()) {
+                    val placeholder = if (isRecording) {
+                        stringResource(R.string.chat_transcription_placeholder)
+                    } else {
+                        stringResource(R.string.chat_type_message)
+                    }
+                    val placeholderStyle = MaterialTheme.typography.bodyLarge
+                    val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    if (text.isEmpty() && !voiceFirst) {
                         Text(
-                            if (isRecording) stringResource(R.string.chat_transcription_placeholder) else stringResource(R.string.chat_type_message),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            placeholder,
+                            style = placeholderStyle,
+                            color = placeholderColor,
                         )
                     }
                     if (voiceFirst) {
@@ -183,8 +190,12 @@ internal fun ChatInputBar(
                             text = text,
                             ownerKey = ownerKey,
                             keyboardRequested = keyboardRequested,
+                            hint = placeholder,
                             textColor = MaterialTheme.colorScheme.onSurface.toArgb(),
-                            hintColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f).toArgb(),
+                            hintColor = placeholderColor.toArgb(),
+                            textSizeSp = placeholderStyle.fontSize.value,
+                            lineHeightSp = placeholderStyle.lineHeight.value,
+                            letterSpacingSp = placeholderStyle.letterSpacing.value,
                             onTextChange = onTextChange,
                             onCaret = onCaret,
                             cursorRevision = cursorRevision,

@@ -5,6 +5,8 @@ import android.text.SpanWatcher
 import android.text.Spannable
 import android.text.Spanned
 import android.text.TextWatcher
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewTreeObserver
@@ -13,6 +15,7 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
 import androidx.appcompat.widget.AppCompatEditText
+import androidx.core.widget.TextViewCompat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -30,8 +33,12 @@ internal fun VoiceFirstEditor(
     text: String,
     ownerKey: String,
     keyboardRequested: Boolean,
+    hint: String,
     textColor: Int,
     hintColor: Int,
+    textSizeSp: Float,
+    lineHeightSp: Float,
+    letterSpacingSp: Float,
     onTextChange: (String) -> Unit,
     onCaret: (focused: Boolean, start: Int, end: Int, composing: Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -50,6 +57,7 @@ internal fun VoiceFirstEditor(
                 background = null
                 setTextColor(textColor)
                 setHintTextColor(hintColor)
+                pinFirstLine(hint, textSizeSp, lineHeightSp, letterSpacingSp)
                 minLines = 2
                 maxLines = 6
                 isFocusable = true
@@ -95,6 +103,7 @@ internal fun VoiceFirstEditor(
             editText.onKeyboardDismissed = { if (!editText.released) currentDismiss() }
             editText.setTextColor(textColor)
             editText.setHintTextColor(hintColor)
+            editText.pinFirstLine(hint, textSizeSp, lineHeightSp, letterSpacingSp)
             val initialBind = editText.boundOwner == null
             val ownerChanged = editText.boundOwner != null && editText.boundOwner != ownerKey
             if (ownerChanged) {
@@ -162,6 +171,38 @@ internal fun snapCursor(text: String, cursor: Int): Int {
         return (clamped + 1).coerceAtMost(text.length)
     }
     return clamped
+}
+
+private fun ComposerEditText.pinFirstLine(
+    hint: String,
+    textSizeSp: Float,
+    lineHeightSp: Float,
+    letterSpacingSp: Float,
+) {
+    if (background != null) background = null
+    if (paddingLeft != 0 || paddingTop != 0 || paddingRight != 0 || paddingBottom != 0) {
+        setPadding(0, 0, 0, 0)
+    }
+    val wantedGravity = Gravity.TOP or Gravity.START
+    if (gravity != wantedGravity) gravity = wantedGravity
+    if (includeFontPadding) includeFontPadding = false
+    if (textSizeSp > 0f) {
+        val sizePx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSizeSp, resources.displayMetrics)
+        if (kotlin.math.abs(textSize - sizePx) > 0.5f) {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+        }
+        val em = letterSpacingSp / textSizeSp
+        if (kotlin.math.abs(letterSpacing - em) > 0.002f) letterSpacing = em
+    }
+    if (lineHeightSp > 0f) {
+        val linePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP,
+            lineHeightSp,
+            resources.displayMetrics,
+        ).toInt()
+        if (linePx > 0 && lineHeight != linePx) TextViewCompat.setLineHeight(this, linePx)
+    }
+    if (this.hint?.toString() != hint) this.hint = hint
 }
 
 private class ComposerEditText(context: android.content.Context) : AppCompatEditText(context) {

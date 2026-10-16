@@ -2,10 +2,14 @@ package com.yage.opencode_client
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.text.Editable
 import android.text.Spanned
 import android.text.TextWatcher
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -13,6 +17,10 @@ import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.TextView
+import java.io.FileOutputStream
+import kotlin.math.max
+import kotlin.math.min
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +41,7 @@ import com.yage.opencode_client.ui.chat.ChatInputBar
 import com.yage.opencode_client.ui.insertPaste
 import com.yage.opencode_client.ui.joinClipboardText
 import com.yage.opencode_client.ui.pastePlacement
+import com.yage.opencode_client.ui.theme.OpenCodeTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -183,6 +192,51 @@ class VoiceFirstEditorInstrumentedTest {
         assertTrue(composeRule.onAllNodesWithTag("chat-paste").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithTag("chat-keyboard").fetchSemanticsNodes().isEmpty())
         assertNull(findEditText(composeRule.activity.window.decorView))
+    }
+
+    @Test
+    fun emptyHintBaselineSharesCaretFirstLine() {
+        val probe = PasteProbe(text = "")
+        composeRule.setContent {
+            OpenCodeTheme {
+                ChatInputBar(
+                    text = probe.text,
+                    isRecording = false,
+                    isTranscribing = false,
+                    hasPreservedSpeechAudio = false,
+                    isRetryingSpeech = false,
+                    speechAudioLevel = 0f,
+                    isSpeechConfigured = true,
+                    imageAttachments = emptyList(),
+                    onTextChange = probe::onTextChange,
+                    onSend = {},
+                    onAddImages = {},
+                    onRemoveImage = {},
+                    onAbortSpeech = {},
+                    onRetrySpeech = {},
+                    onDiscardSpeech = {},
+                    onToggleRecording = {},
+                    voiceFirst = true,
+                    ownerKey = probe.owner,
+                    onCaret = probe::onCaret,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        val editor = requireEditor()
+        val hintText = composeRule.activity.getString(R.string.chat_type_message)
+        composeRule.runOnUiThread { paintMeasurementCursor(editor) }
+        composeRule.onNodeWithTag("chat-input").performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.runOnUiThread { paintMeasurementCursor(editor) }
+        composeRule.waitForIdle()
+        Thread.sleep(200)
+        val shot = awaitCaretShot(editor)
+        val report = measureCaretAgainstHint(shot, editor, hintText)
+        writeAssertedBitmap(shot, editor, report)
+        assertFalse("tap must not show IME while measuring caret: ${imeDebug(editor)}", imeVisible(editor))
+        assertTrue(editor.isFocused)
+        assertTrue(report.detail, report.sameLine && report.firstLine)
     }
 
     @Test
@@ -549,6 +603,199 @@ class VoiceFirstEditorInstrumentedTest {
         assertFalse("Back left showSoftInputOnFocus true: ${imeDebug(editor)} events=${probe.caretEvents}", editor.showSoftInputOnFocus)
         assertFalse(probe.keyboardRequested)
     }
+
+    private fun paintMeasurementCursor(editor: EditText) {
+        val cursor = GradientDrawable().apply {
+            setColor(Color.MAGENTA)
+            setSize(8, 8)
+        }
+        editor.setTextCursorDrawable(cursor)
+        editor.isCursorVisible = true
+        runCatching {
+            val editorField = TextView::class.java.getDeclaredField("mEditor")
+            editorField.isAccessible = true
+            val editorObject = editorField.get(editor) ?: return@runCatching
+            val drawableField = editorObject.javaClass.getDeclaredField("mDrawableForCursor")
+            drawableField.isAccessible = true
+            drawableField.set(editorObject, null)
+            val blinkField = editorObject.javaClass.getDeclaredField("mBlink")
+            blinkField.isAccessible = true
+            val blink = blinkField.get(editorObject)
+            if (blink != null) {
+                val cancel = blink.javaClass.getDeclaredMethod("cancel")
+                cancel.isAccessible = true
+                cancel.invoke(blink)
+            }
+            val visible = editorObject.javaClass.getDeclaredField("mCursorVisible")
+            visible.isAccessible = true
+            visible.setBoolean(editorObject, true)
+        }
+        editor.requestLayout()
+        editor.invalidate()
+    }
+
+    private fun awaitCaretShot(editor: EditText): Bitmap {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        var last: Bitmap? = null
+        repeat(10) {
+            composeRule.waitForIdle()
+            val shot = automation.takeScreenshot()
+            if (shot != null) {
+                last = shot
+                if (caretInk(shot, editor) != null) return shot
+            }
+            Thread.sleep(80)
+        }
+        return checkNotNull(last) { "uiAutomation.takeScreenshot returned null" }
+    }
+
+    private fun writeAssertedBitmap(shot: Bitmap, editor: EditText, report: CaretAlignReport) {
+        val bounds = editorScreenBounds(shot, editor)
+        val crop = Bitmap.createBitmap(shot, bounds.left, bounds.top, bounds.width(), bounds.height())
+        val scaled = Bitmap.createScaledBitmap(crop, crop.width * 4, crop.height * 4, false)
+        shellWrite("/data/local/tmp/voice-first-caret-asserted.png", pngBytes(shot))
+        shellWrite("/data/local/tmp/voice-first-caret-asserted-editor.png", pngBytes(scaled))
+        shellWrite("/data/local/tmp/voice-first-caret-metrics.txt", report.detail.toByteArray())
+        Log.i("CaretAlign", report.detail)
+    }
+
+    private fun pngBytes(bitmap: Bitmap): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        return out.toByteArray()
+    }
+
+    private fun shellWrite(path: String, bytes: ByteArray) {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val pipes = automation.executeShellCommandRwe("dd of=$path")
+        val stdout = java.io.ByteArrayOutputStream()
+        val stderr = java.io.ByteArrayOutputStream()
+        val outThread = Thread {
+            java.io.FileInputStream(pipes[0].fileDescriptor).use { it.copyTo(stdout) }
+        }
+        val errThread = Thread {
+            java.io.FileInputStream(pipes[2].fileDescriptor).use { it.copyTo(stderr) }
+        }
+        outThread.start()
+        errThread.start()
+        FileOutputStream(pipes[1].fileDescriptor).use { it.write(bytes) }
+        pipes[1].close()
+        outThread.join(5_000)
+        errThread.join(5_000)
+        pipes[0].close()
+        pipes[2].close()
+        val check = automation.executeShellCommand("ls -l $path")
+        val listing = java.io.FileInputStream(check.fileDescriptor).use { it.readBytes() }.decodeToString()
+        check.close()
+        check(listing.contains(path.substringAfterLast('/'))) {
+            "asserted bitmap was not saved: listing='$listing' stderr='${stderr.toByteArray().decodeToString()}' stdout='${stdout.toByteArray().decodeToString()}'"
+        }
+    }
+
+    private fun measureCaretAgainstHint(shot: Bitmap, editor: EditText, hintText: String): CaretAlignReport {
+        val bounds = editorScreenBounds(shot, editor)
+        val caret = caretInk(shot, editor)
+        val hint = hintInk(shot, editor)
+        val layout = editor.layout
+        val line = layout?.getLineForOffset(editor.selectionStart.coerceAtLeast(0))
+        val lineTop = if (layout != null && line != null) layout.getLineTop(line) else null
+        val lineBaseline = if (layout != null && line != null) layout.getLineBaseline(line) else null
+        val lineBottom = if (layout != null && line != null) layout.getLineBottom(line) else null
+        val metrics = "hintText='$hintText' editor=${bounds.width()}x${bounds.height()} " +
+            "pad=${editor.paddingLeft},${editor.paddingTop},${editor.paddingRight},${editor.paddingBottom} " +
+            "extTop=${editor.extendedPaddingTop} extBottom=${editor.extendedPaddingBottom} " +
+            "gravity=${editor.gravity} textSizePx=${editor.textSize} lineHeight=${editor.lineHeight} " +
+            "includeFontPadding=${editor.includeFontPadding} minLines=${editor.minLines} " +
+            "hint='${editor.hint}' layoutLines=${layout?.lineCount} line=$line " +
+            "lineTop=$lineTop baseline=$lineBaseline lineBottom=$lineBottom sel=${editor.selectionStart}"
+        if (caret == null || hint == null) {
+            return CaretAlignReport(
+                sameLine = false,
+                firstLine = false,
+                detail = "missing ink caret=$caret hint=$hint $metrics",
+            )
+        }
+        val overlap = max(0, min(caret.bottom, hint.bottom) - max(caret.top, hint.top) + 1)
+        val shorter = min(caret.height, hint.height)
+        val centerDelta = kotlin.math.abs(caret.center - hint.center)
+        val sameLine = overlap >= shorter * 0.8f && centerDelta <= max(4f, shorter * 0.12f)
+        val firstLine = caret.center < bounds.height() * 0.42f && line == 0
+        return CaretAlignReport(
+            sameLine = sameLine,
+            firstLine = firstLine,
+            detail = "caret=$caret hintInk=$hint overlap=$overlap shorter=$shorter centerDelta=$centerDelta sameLine=$sameLine firstLine=$firstLine $metrics",
+        )
+    }
+
+    private fun caretInk(shot: Bitmap, editor: EditText): InkSpan? =
+        inkSpan(shot, editor) { color ->
+            val red = Color.red(color)
+            val green = Color.green(color)
+            val blue = Color.blue(color)
+            red > 170 && blue > 140 && red > green + 50 && blue > green + 30
+        }
+
+    private fun hintInk(shot: Bitmap, editor: EditText): InkSpan? {
+        val bounds = editorScreenBounds(shot, editor)
+        val background = shot.getPixel(
+            (bounds.right - 8).coerceIn(0, shot.width - 1),
+            (bounds.bottom - 8).coerceIn(0, shot.height - 1),
+        )
+        return inkSpan(shot, editor) { color ->
+            val red = Color.red(color)
+            val green = Color.green(color)
+            val blue = Color.blue(color)
+            val maxChannel = max(red, max(green, blue))
+            val minChannel = min(red, min(green, blue))
+            val saturation = if (maxChannel == 0) 0f else (maxChannel - minChannel) / maxChannel.toFloat()
+            saturation < 0.28f && colorDistance(color, background) > 22
+        }
+    }
+
+    private fun inkSpan(shot: Bitmap, editor: EditText, predicate: (Int) -> Boolean): InkSpan? {
+        val bounds = editorScreenBounds(shot, editor)
+        var top = Int.MAX_VALUE
+        var bottom = -1
+        var count = 0
+        for (y in bounds.top until bounds.bottom) {
+            var row = 0
+            for (x in bounds.left until bounds.right) {
+                if (predicate(shot.getPixel(x, y))) row += 1
+            }
+            if (row >= 1) {
+                top = min(top, y)
+                bottom = max(bottom, y)
+                count += row
+            }
+        }
+        if (bottom < top || count < 12) return null
+        return InkSpan(top - bounds.top, bottom - bounds.top, count)
+    }
+
+    private fun editorScreenBounds(shot: Bitmap, editor: EditText): android.graphics.Rect {
+        val loc = IntArray(2)
+        editor.getLocationOnScreen(loc)
+        val left = loc[0].coerceIn(0, shot.width - 2)
+        val top = loc[1].coerceIn(0, shot.height - 2)
+        val right = (loc[0] + editor.width).coerceIn(left + 1, shot.width)
+        val bottom = (loc[1] + editor.height).coerceIn(top + 1, shot.height)
+        return android.graphics.Rect(left, top, right, bottom)
+    }
+
+    private fun colorDistance(left: Int, right: Int): Int {
+        val dr = Color.red(left) - Color.red(right)
+        val dg = Color.green(left) - Color.green(right)
+        val db = Color.blue(left) - Color.blue(right)
+        return max(kotlin.math.abs(dr), max(kotlin.math.abs(dg), kotlin.math.abs(db)))
+    }
+
+    private data class InkSpan(val top: Int, val bottom: Int, val count: Int) {
+        val center: Float get() = (top + bottom) / 2f
+        val height: Int get() = bottom - top + 1
+        override fun toString(): String = "y=$top..$bottom c=$count"
+    }
+
+    private data class CaretAlignReport(val sameLine: Boolean, val firstLine: Boolean, val detail: String)
 
     private fun setBar(probe: PasteProbe) {
         composeRule.setContent {
