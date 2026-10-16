@@ -31,6 +31,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
@@ -57,6 +59,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -95,7 +98,16 @@ internal fun ChatInputBar(
     onAbortSpeech: () -> Unit,
     onRetrySpeech: () -> Unit,
     onDiscardSpeech: () -> Unit,
-    onToggleRecording: () -> Unit
+    onToggleRecording: () -> Unit,
+    voiceFirst: Boolean = false,
+    keyboardRequested: Boolean = false,
+    ownerKey: String = "",
+    onPaste: () -> Unit = {},
+    onKeyboard: () -> Unit = {},
+    onKeyboardDismissed: () -> Unit = {},
+    cursorRevision: Long = 0,
+    cursor: Int = -1,
+    onCaret: (Boolean, Int, Int, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
     val canSend = (text.isNotBlank() || imageAttachments.isNotEmpty()) &&
         !isRecording && !isTranscribing && !isRetryingSpeech
@@ -120,6 +132,10 @@ internal fun ChatInputBar(
                 onAbortSpeech = onAbortSpeech,
                 onRetrySpeech = onRetrySpeech,
                 onDiscardSpeech = onDiscardSpeech,
+                voiceFirst = voiceFirst,
+                keyboardRequested = keyboardRequested,
+                onPaste = onPaste,
+                onKeyboard = onKeyboard,
             )
 
             if (imageAttachments.isNotEmpty()) {
@@ -162,17 +178,35 @@ internal fun ChatInputBar(
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
-                    BasicTextField(
-                        value = text,
-                        onValueChange = onTextChange,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 66.dp, max = 132.dp)
-                            .testTag("chat-input"),
-                        textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onSurface),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        maxLines = 6
-                    )
+                    if (voiceFirst) {
+                        VoiceFirstEditor(
+                            text = text,
+                            ownerKey = ownerKey,
+                            keyboardRequested = keyboardRequested,
+                            textColor = MaterialTheme.colorScheme.onSurface.toArgb(),
+                            hintColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f).toArgb(),
+                            onTextChange = onTextChange,
+                            onCaret = onCaret,
+                            cursorRevision = cursorRevision,
+                            cursor = cursor,
+                            onKeyboardDismissed = onKeyboardDismissed,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 66.dp, max = 132.dp),
+                        )
+                    } else {
+                        BasicTextField(
+                            value = text,
+                            onValueChange = onTextChange,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 66.dp, max = 132.dp)
+                                .testTag("chat-input"),
+                            textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            maxLines = 6
+                        )
+                    }
                 }
 
                 ChatPrimaryActionButton(
@@ -253,6 +287,10 @@ private fun VoiceRail(
     onAbortSpeech: () -> Unit,
     onRetrySpeech: () -> Unit,
     onDiscardSpeech: () -> Unit,
+    voiceFirst: Boolean = false,
+    keyboardRequested: Boolean = false,
+    onPaste: () -> Unit = {},
+    onKeyboard: () -> Unit = {},
 ) {
     val railTitle = when {
         isRecording -> stringResource(R.string.chat_listening)
@@ -319,6 +357,30 @@ private fun VoiceRail(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
+        }
+        if (voiceFirst) {
+            IconButton(
+                onClick = onPaste,
+                modifier = Modifier.size(48.dp).testTag("chat-paste"),
+            ) {
+                Icon(
+                    Icons.Default.ContentPaste,
+                    contentDescription = stringResource(R.string.chat_paste),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            IconButton(
+                onClick = onKeyboard,
+                modifier = Modifier.size(48.dp).testTag("chat-keyboard"),
+            ) {
+                Icon(
+                    Icons.Default.Keyboard,
+                    contentDescription = stringResource(
+                        if (keyboardRequested) R.string.chat_keyboard_hide else R.string.chat_keyboard
+                    ),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }

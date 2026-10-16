@@ -68,6 +68,7 @@ internal fun currentSpeechInputConfig(settingsManager: SettingsManager): SpeechI
 internal data class SpeechDraftTarget(
     val sessionId: String?,
     val existingInput: String,
+    val hostId: String? = null,
 )
 
 internal sealed interface PreservedSpeechRecording {

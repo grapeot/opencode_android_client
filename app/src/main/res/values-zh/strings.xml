@@ -34,6 +34,15 @@
     <string name="settings_show_password">显示密码</string>
     <string name="settings_hide_password">隐藏密码</string>
     <string name="settings_speech_recognition">语音识别</string>
+    <string name="settings_layout">布局模式</string>
+    <string name="settings_layout_automatic">自动</string>
+    <string name="settings_layout_focus">专注</string>
+    <string name="settings_layout_footer">专注模式在大屏显示单一内容，聊天中打开文件仍保留输入区。</string>
+    <string name="settings_voice_first">语音优先</string>
+    <string name="settings_voice_first_footer">开启后轻点草稿不弹键盘，仍可粘贴文本，点键盘按钮进入编辑。</string>
+    <string name="chat_paste">粘贴</string>
+    <string name="chat_keyboard">键盘</string>
+    <string name="chat_keyboard_hide">收起键盘</string>
     <string name="settings_recording_strategy">录音模型</string>
     <string name="settings_recording_strategy_openai">GPT Realtime</string>
     <string name="settings_recording_strategy_gpt_live">GPT Live</string>

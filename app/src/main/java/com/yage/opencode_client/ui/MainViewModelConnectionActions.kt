@@ -40,7 +40,9 @@ internal fun applySavedSettings(
             modelShortlist = shortlist,
             selectedAgentName = settingsManager.selectedAgentName ?: "build",
             themeMode = settingsManager.themeMode,
-            languageMode = settingsManager.languageMode
+            languageMode = settingsManager.languageMode,
+            layoutPreference = LayoutPreference.fromRaw(settingsManager.layoutPreference),
+            voiceFirstInput = settingsManager.voiceFirstInput,
         )
     }
 

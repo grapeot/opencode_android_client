@@ -34,6 +34,15 @@
     <string name="settings_show_password">Show password</string>
     <string name="settings_hide_password">Hide password</string>
     <string name="settings_speech_recognition">Speech Recognition</string>
+    <string name="settings_layout">Layout Mode</string>
+    <string name="settings_layout_automatic">Auto</string>
+    <string name="settings_layout_focus">Focus</string>
+    <string name="settings_layout_footer">Focus shows one content area on large screens and keeps the input area when opening files in chat.</string>
+    <string name="settings_voice_first">Voice-First</string>
+    <string name="settings_voice_first_footer">When on, tapping a draft won\'t show the keyboard. Use Paste, or tap the keyboard button to edit.</string>
+    <string name="chat_paste">Paste</string>
+    <string name="chat_keyboard">Keyboard</string>
+    <string name="chat_keyboard_hide">Hide keyboard</string>
     <string name="settings_recording_strategy">Transcription model</string>
     <string name="settings_recording_strategy_openai">GPT Realtime</string>
     <string name="settings_recording_strategy_gpt_live">GPT Live</string>

@@ -129,7 +129,10 @@ internal fun handleIncomingSseEvent(
     onNonFatalIssue: (String) -> Unit,
     onRecordUserMessage: (String, String) -> Unit = { _, _ -> },
     onRecordToolPart: (String, String) -> Unit = { _, _ -> },
-    onReconcileSessionFailure: (String, SessionStatus?, SessionStatus) -> Unit = { _, _, _ -> }
+    onReconcileSessionFailure: (String, SessionStatus?, SessionStatus) -> Unit = { _, _, _ -> },
+    onSessionErrorRestore: (String, String, AppState) -> AppState = { _, recovered, current ->
+        current.copy(inputText = mergeSendFailure(recovered, current.inputText))
+    },
 ) {
     when (event.payload.type) {
         "session.created" -> {
@@ -411,6 +414,9 @@ internal fun handleIncomingSseEvent(
                 val now = System.currentTimeMillis()
                 state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt + (sessionId to now)) }
             }
+            if (sessionId != null && sessionId != state.value.currentSessionId) {
+                state.update { current -> onSessionErrorRestore(sessionId, "", current) }
+            }
             if (sessionId != null && sessionId == state.value.currentSessionId) {
                 // prompt_async acknowledges with 204 before the turn runs, so a failure
                 // that happens before the user message is persisted only surfaces here.
@@ -427,10 +433,10 @@ internal fun handleIncomingSseEvent(
                             .mapNotNull { row -> row.parts.firstOrNull { p -> p.isText }?.text }
                             .filter { text -> text.isNotBlank() }
                             .joinToString("\n")
-                        state.copy(
+                        val restored = onSessionErrorRestore(sessionId, recoveredText, state)
+                        restored.copy(
                             messages = state.messages.filter { m -> m.info.id !in pendingIds },
                             pendingOptimisticMessageIds = emptySet(),
-                            inputText = recoveredText.ifBlank { state.inputText },
                             error = "Send failed: $reason"
                         )
                     }

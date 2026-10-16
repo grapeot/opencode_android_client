@@ -1,5 +1,12 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-16 — 专注布局与语音优先迁移
+
+- 在同一 PR #135 内保留旋转停录修复，增加设备本地 Automatic / Focus 偏好：自动模式沿用 Expanded 三栏、Compact / Medium 单内容，专注模式始终单内容。已应用布局保存在 ViewModel，预览跨配置重建迁移，以当前可见源为准，并保留 host / session / workspace 与 Chat / Files 来源。
+- Voice-First 默认关闭，保留原 `BasicTextField` 路径；开启后以原生 `EditText` 提供无默认 IME 的光标与选区、显式键盘、Back 复位及 owner 切换清焦点。粘贴与键盘位于语音栏，麦克风和发送槽位保持。剪贴板仅点击时读取，聚焦按选区插入、未聚焦追加，不自动发送。
+- 草稿按 host + session 保存；组合输入延后写入保留发起 owner，转写 anchor 保留粘贴尾巴，空起点也有效。各发送失败路径合并来源文字和附件，不回填新选择的输入区。单 host 的旧草稿可惰性迁移，多 host 的旧记录保留而不猜测归属。Foundation / BOM 未升级，未增加自绘旋转按钮。
+- 最终单测 571 项、0 失败，`assembleDebug` 成功；API 34 专用模拟器的 17 项输入仪器测试通过，覆盖真实 IME、Back、剪贴板、组合输入、owner、重组及 emoji。独立状态与 UI code/privacy review 均闭合，主线程已读回组件截图。真机、TriFold、编辑器聚焦时的整页旋转及 OEM IME 行为未设备验证。按要求更新同一 PR，保持未合并。
+
 ## 2026-10-16 — 配置重建时保持录音
 
 - 修复旋转、折叠重建 Activity 时，旧 `ON_STOP` 无条件把应用标为后台并停录的问题。每次 `ON_START` 生成前台 Activity 的 Long 标记；仅当前标记匹配且不是配置变化时，才执行原后台停录及音频保留逻辑。新 Activity 启动后，旧 Activity 迟到的停止事件不再影响它。
