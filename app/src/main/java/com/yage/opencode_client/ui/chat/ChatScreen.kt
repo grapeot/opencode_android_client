@@ -1,6 +1,7 @@
 package com.yage.opencode_client.ui.chat
 
 import android.Manifest
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -35,6 +36,7 @@ import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.joinClipboardText
 import com.yage.opencode_client.ui.files.WorkspaceMarkdownLinkResolver
 import com.yage.opencode_client.util.OpenCodeDeepLinkParser
 import com.yage.opencode_client.ui.sanitizeBearerToken
@@ -255,7 +257,8 @@ fun ChatScreen(
                 aiUsageDashboardUrl = state.aiUsageDashboardUrl,
                 showSettingsButton = showSettingsButton,
                 showNewSessionInTopBar = showNewSessionInTopBar,
-                showSessionListInTopBar = showSessionListInTopBar
+                showSessionListInTopBar = showSessionListInTopBar,
+                layoutPreference = state.layoutPreference,
             ),
             actions = ChatTopBarActions(
                 onSelectSession = viewModel::selectSession,
@@ -278,7 +281,8 @@ fun ChatScreen(
                     state.currentSessionId?.let { sessionId ->
                         viewModel.updateSessionTitle(sessionId, title)
                     }
-                }
+                },
+                onSetLayoutPreference = viewModel::setLayoutPreference,
             )
         )
 
@@ -401,7 +405,26 @@ fun ChatScreen(
                             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     }
-                }
+                },
+                voiceFirst = state.voiceFirstInput,
+                keyboardRequested = state.keyboardRequested,
+                ownerKey = "${state.currentHostProfileId}:${state.currentSessionId}",
+                onPaste = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    val clip = clipboard?.primaryClip
+                    val parts = if (clip == null) emptyList() else (0 until clip.itemCount).map { index ->
+                        clip.getItemAt(index).coerceToText(context)?.toString().orEmpty()
+                    }
+                    viewModel.pasteComposerText(listOf(joinClipboardText(parts)))
+                },
+                onKeyboard = {
+                    if (state.keyboardRequested) viewModel.dismissComposerKeyboard()
+                    else viewModel.requestComposerKeyboard()
+                },
+                onKeyboardDismissed = viewModel::dismissComposerKeyboard,
+                cursorRevision = state.composerCursorRevision,
+                cursor = state.composerCursor,
+                onCaret = viewModel::reportComposerCaret,
             )
         }
 

@@ -3,6 +3,7 @@ package com.yage.opencode_client
 import android.util.Log
 import com.yage.opencode_client.data.api.SSEClient
 import com.yage.opencode_client.data.model.AgentInfo
+import com.yage.opencode_client.data.model.ComposerImageAttachment
 import com.yage.opencode_client.data.model.Message
 import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
@@ -25,6 +26,7 @@ import com.yage.opencode_client.data.repository.OpenCodeRepository
 import com.yage.opencode_client.ssh.SSHKeyManager
 import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ui.AppState
+import com.yage.opencode_client.ui.SpeechDraftTarget
 import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.MainViewModel
 import com.yage.opencode_client.ui.MainViewModelTimings
@@ -65,6 +67,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -153,6 +156,9 @@ class MainViewModelTest {
 
         every { settingsManager.getDraftText(any()) } returns ""
         every { settingsManager.setDraftText(any(), any()) } just runs
+        every { settingsManager.getOwnedDraftOrNull(any(), any()) } returns null
+        every { settingsManager.draftMap() } returns emptyMap()
+        every { settingsManager.setOwnedDraft(any(), any(), any()) } just runs
         every { settingsManager.getModelIdForSession(any()) } returns null
         every { settingsManager.getLegacySessionModels() } returns emptyMap()
         every { settingsManager.getAgentForSession(any()) } returns null
@@ -589,10 +595,109 @@ class MainViewModelTest {
         }
     }
 
+    private suspend fun TestScope.startRealtimeCapture(sessionId: String?, input: String): RealtimeCapture {
+        val session = mockk<VoiceFlowSession>(relaxed = true)
+        val wav = File.createTempFile("opencode-empty-anchor", ".wav").apply { writeBytes(byteArrayOf(1)) }
+        val owned = mutableMapOf<Pair<String, String>, String>()
+        owned["test-host" to "session-b"] = "b draft"
+        var legacyWrites = 0
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GPT_LIVE_TRANSCRIBE"
+        every { settingsManager.getOwnedDraftOrNull(any(), any()) } answers {
+            owned[invocation.args[0] as String to invocation.args[1] as String]
+        }
+        every { settingsManager.setOwnedDraft(any(), any(), any()) } answers {
+            owned[invocation.args[0] as String to invocation.args[1] as String] = invocation.args[2] as String
+        }
+        every { settingsManager.setDraftText(any(), any()) } answers { legacyWrites += 1 }
+        coEvery { voiceFlowClient.startSession(VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE) } returns session
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE,
+                persist = any(),
+                onPCMChunk = any(),
+            )
+        } just runs
+        coEvery { microphone.stop() } returns wav
+        lateinit var sendPartial: (String) -> Unit
+        val results = ArrayDeque<CompletableDeferred<String>>()
+        var commitArrived: CompletableDeferred<Unit>? = null
+        coEvery { session.commitAndStop(any()) } coAnswers {
+            sendPartial = firstArg()
+            val result = CompletableDeferred<String>()
+            results.add(result)
+            commitArrived?.complete(Unit)
+            result.await()
+        }
+        val viewModel = createViewModel()
+        val writesAfterInit = legacyWrites
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "test-host",
+                currentSessionId = sessionId,
+                inputText = input,
+                aiBuilderConnectionOK = true,
+            )
+        }
+        viewModel.toggleRecording()
+        runCurrent()
+        assertTrue(viewModel.state.value.isRecording)
+        return RealtimeCapture(
+            viewModel = viewModel,
+            owned = owned,
+            legacyWrites = { legacyWrites },
+            legacyWritesAfterInit = writesAfterInit,
+            onPartial = { text ->
+                sendPartial(text)
+                runCurrent()
+            },
+            onStop = {
+                commitArrived = CompletableDeferred()
+                viewModel.toggleRecording()
+                var waited = 0L
+                while (commitArrived?.isCompleted != true && waited < 5_000) {
+                    Thread.sleep(20)
+                    waited += 20
+                    runCurrent()
+                }
+                assertTrue(commitArrived?.isCompleted == true)
+            },
+            onFinish = { text ->
+                results.removeFirst().complete(text)
+                runCurrent()
+            },
+        )
+    }
+
+    private class RealtimeCapture(
+        val viewModel: MainViewModel,
+        val owned: MutableMap<Pair<String, String>, String>,
+        val legacyWrites: () -> Int,
+        val legacyWritesAfterInit: Int,
+        private val onPartial: suspend (String) -> Unit,
+        private val onStop: suspend () -> Unit,
+        private val onFinish: suspend (String) -> Unit,
+    ) {
+        suspend fun partial(text: String) = onPartial(text)
+        suspend fun stopAndCapture() = onStop()
+        suspend fun finish(text: String) = onFinish(text)
+    }
+
     private fun handleSse(viewModel: MainViewModel, event: SSEEvent) {
         val method = MainViewModel::class.java.getDeclaredMethod("handleSSEEvent", SSEEvent::class.java)
         method.isAccessible = true
         method.invoke(viewModel, event)
+    }
+
+    private fun publishSpeechForTest(viewModel: MainViewModel, target: SpeechDraftTarget, transcript: String) {
+        val method = MainViewModel::class.java.getDeclaredMethod(
+            "publishSpeech",
+            SpeechDraftTarget::class.java,
+            String::class.java,
+            Boolean::class.javaPrimitiveType,
+        )
+        method.isAccessible = true
+        method.invoke(viewModel, target, transcript, false)
     }
 
     @Test fun `real permission HTTP failures retain pending and ancestor yellow`() = runTest {
@@ -1306,6 +1411,118 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `recreated layout still migrates the visible chat preview without restamping owner`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host-b",
+                currentSessionId = "session-b",
+                sessions = listOf(Session(id = "session-b", directory = "/b")),
+                appliedLayout = com.yage.opencode_client.ui.EffectiveLayout.COMPACT,
+                columnPreview = com.yage.opencode_client.ui.OwnedFilePreview(
+                    path = "old-a.md",
+                    hostId = "host-a",
+                    sessionId = "session-a",
+                    workspace = "/a",
+                    kind = com.yage.opencode_client.ui.FilePreviewKind.CHAT,
+                ),
+            )
+        }
+        val inline = com.yage.opencode_client.ui.chat.ChatFilePreviewRequest("visible.md", "host-b", "session-b", "/b")
+        val next = viewModel.reconcilePreviewLayout(com.yage.opencode_client.ui.EffectiveLayout.REGULAR, inline)
+        assertNull(next)
+        assertEquals("visible.md", viewModel.state.value.columnPreview?.path)
+        assertEquals("session-b", viewModel.state.value.columnPreview?.sessionId)
+        assertEquals("host-b", viewModel.state.value.columnPreview?.hostId)
+    }
+
+    @Test
+    fun `session change clears chat column and keeps files navigation`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "test-host",
+                currentSessionId = "session-a",
+                appliedLayout = com.yage.opencode_client.ui.EffectiveLayout.REGULAR,
+                columnPreview = com.yage.opencode_client.ui.OwnedFilePreview(
+                    "notes.md", "test-host", "session-a", "/work", com.yage.opencode_client.ui.FilePreviewKind.CHAT,
+                ),
+                filePathToShowInFiles = "notes.md",
+            )
+        }
+        viewModel.showFilesBrowserFile("tree.kt")
+        viewModel.selectSession("session-b")
+        advanceUntilIdle()
+        viewModel.reconcilePreviewLayout(com.yage.opencode_client.ui.EffectiveLayout.REGULAR, null)
+        assertEquals("tree.kt", viewModel.state.value.columnPreview?.path)
+        assertEquals(com.yage.opencode_client.ui.FilePreviewKind.FILES, viewModel.state.value.columnPreview?.kind)
+    }
+
+    @Test
+    fun `deferred paste is written to the starting session instead of dropped`() = runTest {
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentHostProfileId = "test-host", currentSessionId = "source", inputText = "hello")
+        }
+        viewModel.reportComposerCaret(focused = true, start = 5, end = 5, composing = true)
+        viewModel.pasteComposerText(listOf("note"))
+        viewModel.selectSession("destination")
+        advanceUntilIdle()
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        verify { settingsManager.setOwnedDraft("test-host", "source", "hellonote") }
+    }
+
+    @Test
+    fun `focused paste tail survives the next speech result`() = runTest {
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        coEvery {
+            microphone.start(strategy = com.yage.voiceflowkit.VoiceFlowRecordingStrategy.GROK_BATCH, persist = any(), onPCMChunk = null)
+        } just runs
+        val grokFile = File.createTempFile("opencode-paste-tail", ".wav").apply { writeBytes(byteArrayOf(1)) }
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, com.yage.voiceflowkit.VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns com.yage.voiceflowkit.TranscriptionResult(text = "world", requestId = "tail")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentHostProfileId = "test-host", currentSessionId = "source", inputText = "hello", aiBuilderConnectionOK = true)
+        }
+        viewModel.toggleRecording()
+        runCurrent()
+        viewModel.reportComposerCaret(true, 5, 5, false)
+        viewModel.pasteComposerText(listOf("note"))
+        assertEquals("hellonote", viewModel.state.value.inputText)
+        assertEquals(9, viewModel.state.value.composerCursor)
+        assertEquals(1L, viewModel.state.value.composerCursorRevision)
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.inputText.contains("note"))
+        assertTrue(viewModel.state.value.inputText.contains("world"))
+        grokFile.delete()
+    }
+
+    @Test
+    fun `send failure after reselect writes owned draft and does not read legacy`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } coAnswers {
+            delay(50)
+            Result.failure(IllegalStateException("send failed"))
+        }
+        every { settingsManager.getDraftText(any()) } returns "legacy draft"
+        every { settingsManager.getOwnedDraftOrNull("test-host", "session-1") } returns "owned"
+        val viewModel = createViewModel()
+        viewModel.selectSession("session-1")
+        advanceUntilIdle()
+        viewModel.setInputText("hello")
+        viewModel.sendMessage()
+        viewModel.selectSession("session-1")
+        advanceUntilIdle()
+        verify(exactly = 0) { settingsManager.getDraftText("session-1") }
+        verify { settingsManager.setOwnedDraft("test-host", "session-1", "hello\nowned") }
+    }
+
+    @Test
     fun `session_error SSE for another session is ignored`() = runTest {
         coEvery { repository.getMessages(any(), any()) } returns Result.success(emptyList())
         val viewModel = createViewModel()
@@ -1342,6 +1559,143 @@ class MainViewModelTest {
         assertEquals(1, viewModel.state.value.messages.size)
         assertTrue(viewModel.state.value.pendingOptimisticMessageIds.contains("msg_pending"))
         assertNull(viewModel.state.value.error)
+    }
+
+    @Test
+    fun `session error after leaving restores source owned draft without touching current session`() = runTest {
+        coEvery { repository.sendMessage(any(), any(), any(), any(), any(), any()) } coAnswers {
+            delay(60_000)
+            Result.success(Unit)
+        }
+        val owned = mutableMapOf<Pair<String, String>, String>()
+        owned["test-host" to "session-b"] = "b draft"
+        var legacyReads = 0
+        every { settingsManager.getOwnedDraftOrNull(any(), any()) } answers {
+            owned[invocation.args[0] as String to invocation.args[1] as String]
+        }
+        every { settingsManager.setOwnedDraft(any(), any(), any()) } answers {
+            owned[invocation.args[0] as String to invocation.args[1] as String] = invocation.args[2] as String
+        }
+        every { settingsManager.getDraftText(any()) } answers {
+            legacyReads += 1
+            "legacy-unscoped"
+        }
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(currentHostProfileId = "test-host", currentSessionId = "session-a", inputText = "hello")
+        }
+        viewModel.sendMessage()
+        viewModel.selectSession("session-b")
+        val kept = ComposerImageAttachment("img-b", "b.png", "image/png", "data:image/png,b", byteArrayOf(2), 1)
+        updateState(viewModel) { it.copy(imageAttachments = listOf(kept)) }
+        val before = viewModel.state.value
+        val readsBefore = legacyReads
+        val error = SSEEvent(
+            payload = SSEPayload(
+                type = "session.error",
+                properties = buildJsonObject {
+                    put("sessionID", JsonPrimitive("session-a"))
+                    put("error", buildJsonObject { put("name", JsonPrimitive("X")) })
+                }
+            )
+        )
+        handleSse(viewModel, error)
+        val after = viewModel.state.value
+        assertEquals("session-b", after.currentSessionId)
+        assertEquals(before.inputText, after.inputText)
+        assertEquals(before.messages, after.messages)
+        assertEquals(before.imageAttachments, after.imageAttachments)
+        assertEquals(before.error, after.error)
+        assertEquals("b draft", after.inputText)
+        assertEquals("hello", owned["test-host" to "session-a"])
+        assertFalse(owned["test-host" to "session-a"]!!.contains("legacy"))
+        assertEquals(readsBefore, legacyReads)
+        handleSse(viewModel, error)
+        assertEquals("hello", owned["test-host" to "session-a"])
+        assertEquals(before.inputText, viewModel.state.value.inputText)
+        assertEquals(before.imageAttachments, viewModel.state.value.imageAttachments)
+    }
+
+    @Test
+    fun `null session speech keeps focused paste tail and does not cross host`() = runTest {
+        var legacyReads = 0
+        var legacyWrites = 0
+        every { settingsManager.getDraftText(any()) } answers {
+            legacyReads += 1
+            ""
+        }
+        every { settingsManager.setDraftText(any(), any()) } answers { legacyWrites += 1 }
+        val viewModel = createViewModel()
+        val readsAfterInit = legacyReads
+        val writesAfterInit = legacyWrites
+        updateState(viewModel) {
+            it.copy(currentHostProfileId = "test-host", currentSessionId = null, inputText = "hello")
+        }
+        viewModel.reportComposerCaret(focused = true, start = 5, end = 5, composing = false)
+        viewModel.pasteComposerText(listOf("note"))
+        assertEquals("hellonote", viewModel.state.value.inputText)
+        val target = SpeechDraftTarget(sessionId = null, existingInput = "hello", hostId = "test-host")
+        publishSpeechForTest(viewModel, target, "world")
+        assertEquals("hello worldnote", viewModel.state.value.inputText)
+        publishSpeechForTest(viewModel, target, "world!")
+        assertEquals("hello world!note", viewModel.state.value.inputText)
+        updateState(viewModel) { it.copy(currentHostProfileId = "other-host") }
+        publishSpeechForTest(viewModel, target, "gone")
+        assertEquals("hello world!note", viewModel.state.value.inputText)
+        assertEquals(readsAfterInit, legacyReads)
+        assertEquals(writesAfterInit, legacyWrites)
+    }
+
+    @Test
+    fun `empty recording keeps paste before the first partial for a session and a new round`() = runTest {
+        val harness = startRealtimeCapture(sessionId = "session-a", input = "")
+        harness.viewModel.reportComposerCaret(focused = true, start = 0, end = 0, composing = false)
+        harness.viewModel.pasteComposerText(listOf("note"))
+        assertEquals("note", harness.viewModel.state.value.inputText)
+        harness.stopAndCapture()
+        harness.partial("world")
+        assertEquals("worldnote", harness.viewModel.state.value.inputText)
+        harness.partial("world!")
+        assertEquals("world!note", harness.viewModel.state.value.inputText)
+        harness.partial("")
+        assertEquals("world!note", harness.viewModel.state.value.inputText)
+        assertEquals(1, harness.viewModel.state.value.inputText.split("note").size - 1)
+        harness.viewModel.selectSession("session-b")
+        harness.partial("hijack")
+        assertEquals("b draft", harness.viewModel.state.value.inputText)
+        harness.finish("world!")
+        assertEquals("b draft", harness.viewModel.state.value.inputText)
+        assertEquals("world!note", harness.owned["test-host" to "session-a"])
+        harness.viewModel.selectSession("session-a")
+        harness.viewModel.setInputText("")
+        harness.viewModel.toggleRecording()
+        runCurrent()
+        harness.stopAndCapture()
+        harness.partial("fresh")
+        harness.finish("fresh")
+        assertEquals("fresh", harness.viewModel.state.value.inputText)
+        assertFalse(harness.viewModel.state.value.inputText.contains("note"))
+    }
+
+    @Test
+    fun `empty recording keeps unfocused paste before the first partial when session is null`() = runTest {
+        val harness = startRealtimeCapture(sessionId = null, input = "")
+        harness.viewModel.pasteComposerText(listOf("note"))
+        assertEquals("note", harness.viewModel.state.value.inputText)
+        harness.stopAndCapture()
+        harness.partial("world")
+        assertEquals("worldnote", harness.viewModel.state.value.inputText)
+        harness.partial("")
+        assertEquals("worldnote", harness.viewModel.state.value.inputText)
+        harness.partial("world!")
+        assertEquals("world!note", harness.viewModel.state.value.inputText)
+        assertEquals(1, harness.viewModel.state.value.inputText.split("note").size - 1)
+        updateState(harness.viewModel) { it.copy(currentHostProfileId = "other-host") }
+        harness.partial("hijack")
+        assertEquals("world!note", harness.viewModel.state.value.inputText)
+        harness.finish("world!")
+        assertEquals("world!note", harness.viewModel.state.value.inputText)
+        assertEquals(harness.legacyWritesAfterInit, harness.legacyWrites())
     }
 
     @Test
@@ -2568,6 +2922,130 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `configuration recreation keeps recording and original host session`() = runTest {
+        val grokFile = File.createTempFile("opencode-rotate-keep", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns TranscriptionResult(text = "heard", requestId = "rotate-1")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "source",
+                currentHostProfileId = "test-host",
+                inputText = "prefix",
+                aiBuilderConnectionOK = true,
+            )
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        assertTrue(viewModel.state.value.isRecording)
+        val epochWhileRecording = viewModel.state.value.statusEpoch
+
+        val first = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(first, changingConfigurations = true)
+        val second = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(first, changingConfigurations = false)
+        viewModel.onHostActivityStop(second, changingConfigurations = true)
+        val third = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(first, changingConfigurations = true)
+        runCurrent()
+
+        assertTrue(viewModel.state.value.isRecording)
+        assertTrue(viewModel.state.value.appForeground)
+        assertEquals("source", viewModel.state.value.currentSessionId)
+        assertEquals("test-host", viewModel.state.value.currentHostProfileId)
+        assertEquals("prefix", viewModel.state.value.inputText)
+        assertTrue(viewModel.state.value.statusEpoch >= epochWhileRecording)
+        coVerify(exactly = 0) { microphone.stop() }
+
+        val epochAfterRecreate = viewModel.state.value.statusEpoch
+        viewModel.onHostActivityStop(second, changingConfigurations = false)
+        runCurrent()
+        assertTrue(viewModel.state.value.isRecording)
+        assertTrue(viewModel.state.value.appForeground)
+        assertEquals(epochAfterRecreate, viewModel.state.value.statusEpoch)
+        coVerify(exactly = 0) { microphone.stop() }
+
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isRecording)
+        assertEquals("prefix heard", viewModel.state.value.inputText)
+        verify { settingsManager.setOwnedDraft("test-host", "source", "prefix heard") }
+        assertEquals("test-host", viewModel.state.value.currentHostProfileId)
+        coVerify(exactly = 1) { microphone.stop() }
+        grokFile.delete()
+    }
+
+    @Test
+    fun `real background stop preserves audio for the originating session`() = runTest {
+        val grokFile = File.createTempFile("opencode-background-owner", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns TranscriptionResult(text = "heard", requestId = "background-1")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "source",
+                currentHostProfileId = "test-host",
+                inputText = "prefix",
+                aiBuilderConnectionOK = true,
+            )
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        val token = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(token, changingConfigurations = false)
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isRecording)
+        assertFalse(viewModel.state.value.appForeground)
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertEquals("source", viewModel.state.value.currentSessionId)
+        assertEquals("test-host", viewModel.state.value.currentHostProfileId)
+        coVerify(exactly = 1) { microphone.stop() }
+
+        viewModel.selectSession("destination")
+        runCurrent()
+        assertEquals("destination draft", viewModel.state.value.inputText)
+
+        viewModel.retryPreservedSpeechAudio()
+        advanceUntilIdle()
+
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        verify { settingsManager.setOwnedDraft("test-host", "source", "prefix heard") }
+        assertFalse(grokFile.exists())
+    }
+
+    @Test
     fun `discard joins active retry before deleting preserved file`() = runTest {
         val grokFile = File.createTempFile("opencode-grok-discard-join", ".wav").apply {
             writeBytes(byteArrayOf(1, 2, 3))
@@ -2668,7 +3146,7 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         assertEquals("destination draft", viewModel.state.value.inputText)
-        verify { settingsManager.setDraftText("source", "source prefix source words") }
+        verify { settingsManager.setOwnedDraft("test-host", "source", "source prefix source words") }
         assertFalse(viewModel.state.value.hasPreservedSpeechAudio)
         assertFalse(grokFile.exists())
     }
@@ -2711,7 +3189,7 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         assertEquals("destination draft", viewModel.state.value.inputText)
-        verify { settingsManager.setDraftText("source", "source prefix finished") }
+        verify { settingsManager.setOwnedDraft("test-host", "source", "source prefix finished") }
         assertFalse(grokFile.exists())
     }
 
@@ -2769,7 +3247,7 @@ class MainViewModelTest {
         runCurrent()
 
         assertEquals("destination draft", viewModel.state.value.inputText)
-        verify { settingsManager.setDraftText("source", "source prefix finished") }
+        verify { settingsManager.setOwnedDraft("test-host", "source", "source prefix finished") }
         assertFalse(realtimeWav.exists())
         viewModel.stopSpeechForBackground()
         advanceUntilIdle()
@@ -3179,7 +3657,7 @@ class MainViewModelTest {
 
         viewModel.setInputText("hello")
 
-        verify { settingsManager.setDraftText("s1", "hello") }
+        verify { settingsManager.setOwnedDraft("test-host", "s1", "hello") }
     }
 
     @Test
@@ -3192,7 +3670,7 @@ class MainViewModelTest {
         viewModel.selectSession("s2")
         advanceUntilIdle()
 
-        verify { settingsManager.setDraftText("s1", "draft1") }
+        verify { settingsManager.setOwnedDraft("test-host", "s1", "draft1") }
         verify { settingsManager.getDraftText("s2") }
         assertEquals("draft2", viewModel.state.value.inputText)
     }
@@ -3305,7 +3783,7 @@ class MainViewModelTest {
         viewModel.sendMessage()
         advanceUntilIdle()
 
-        verify { settingsManager.setDraftText("s1", "") }
+        verify { settingsManager.setOwnedDraft("test-host", "s1", "") }
     }
 
     @Test

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yage.opencode_client.data.model.*
+import com.yage.opencode_client.ui.chat.ChatFilePreviewRequest
 import com.yage.opencode_client.ui.session.descendantBusyCountsBySession
 import com.yage.opencode_client.ui.session.runningDescendantSessions
 import com.yage.opencode_client.ui.session.SessionIndicator
@@ -115,8 +116,16 @@ data class AppState(
     val error: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val languageMode: LanguageMode = LanguageMode.SYSTEM,
+    val layoutPreference: LayoutPreference = LayoutPreference.AUTOMATIC,
+    val voiceFirstInput: Boolean = false,
+    val keyboardRequested: Boolean = false,
     val filePathToShowInFiles: String? = null,
     val filePreviewOriginRoute: String? = null,
+    val columnPreview: OwnedFilePreview? = null,
+    val appliedLayout: EffectiveLayout? = null,
+    val composerSelectionEpoch: Long = 0,
+    val composerCursor: Int = -1,
+    val composerCursorRevision: Long = 0,
     val streamingPartTexts: Map<String, String> = emptyMap(),
     val streamingReasoningPart: Part? = null,
     val partTypeIndex: Map<String, String> = emptyMap(),
@@ -652,10 +661,22 @@ class MainViewModel @Inject constructor(
     private var activeSpeechFileOwner: SpeechRecordingFileOwner? = null
     private var speechExistingInput: String = ""
     private var speechSourceSessionId: String? = null
+    private var speechSourceHostId: String? = null
+    private var composerFocused: Boolean = false
+    private var composerSelectionStart: Int = 0
+    private var composerSelectionEnd: Int = 0
+    private var composerComposing: Boolean = false
+    private var deferredPaste: DeferredPaste? = null
+    private var deferredSpeech: DeferredSpeech? = null
+    private var speechAnchor: String = ""
+    private var speechTail: String = ""
+    private var speechCaptureOpen: Boolean = false
+    private val sendRecoveries = mutableMapOf<String, SendRecovery>()
     private var activeSpeechStrategy: VoiceFlowRecordingStrategy =
         VoiceFlowRecordingStrategy.OPENAI_REALTIME
     private var speechAttemptId = 0L
     private var activeSpeechAttemptId = 0L
+    private val hostActivityForegroundGate = HostActivityForegroundGate()
     private var preservedSpeechRecording: PreservedSpeechRecording? = null
     private var lastHealthCheckTime = 0L
     private var deepLinkRouteGeneration = 0L
@@ -904,7 +925,7 @@ class MainViewModel @Inject constructor(
             val sender = speechPcmSender
             val strategy = activeSpeechStrategy
             val attemptId = activeSpeechAttemptId
-            val target = SpeechDraftTarget(speechSourceSessionId, speechExistingInput)
+            val target = SpeechDraftTarget(speechSourceSessionId, speechExistingInput, speechSourceHostId)
             val fileOwner = activeSpeechFileOwner ?: SpeechRecordingFileOwner().also {
                 activeSpeechFileOwner = it
             }
@@ -1075,8 +1096,13 @@ class MainViewModel @Inject constructor(
                 }
                 return
             }
+            flushDeferredComposerWrites()
             val strategy = speechConfig.recordingStrategy
-            val target = SpeechDraftTarget(currentState.currentSessionId, currentState.inputText)
+            val target = SpeechDraftTarget(currentState.currentSessionId, currentState.inputText, currentState.currentHostProfileId)
+            speechSourceHostId = currentState.currentHostProfileId
+            speechAnchor = currentState.inputText
+            speechTail = ""
+            speechCaptureOpen = true
             val attemptId = beginSpeechAttempt()
             val fileOwner = SpeechRecordingFileOwner()
             speechExistingInput = target.existingInput
@@ -1144,13 +1170,10 @@ class MainViewModel @Inject constructor(
                         speechTypewriter = AttemptScopedSpeechTypewriter(
                             scope = viewModelScope,
                             shouldApply = {
-                                isCurrentSpeechAttempt(attemptId) &&
-                                    _state.value.currentSessionId == target.sessionId
+                                isCurrentSpeechAttempt(attemptId) && sameSpeechOwner(target)
                             },
                         ) { partial ->
-                            _state.update {
-                                it.copy(inputText = mergedSpeechInput(target.existingInput, partial))
-                            }
+                            publishSpeech(target, partial, clearFlags = false)
                         }
                         speechTranscriptionJob = null
                     }
@@ -1221,22 +1244,150 @@ class MainViewModel @Inject constructor(
     private fun isCurrentSpeechAttempt(attemptId: Long): Boolean = speechAttemptId == attemptId
 
     private fun acceptSpeechDraft(target: SpeechDraftTarget, transcript: String) {
-        val merged = mergedSpeechInput(target.existingInput, transcript.trim())
-        if (_state.value.currentSessionId == target.sessionId) {
+        publishSpeech(target, transcript, clearFlags = true)
+    }
+
+    private fun sameSpeechOwner(target: SpeechDraftTarget): Boolean {
+        val current = _state.value
+        val sessionOk = current.currentSessionId == target.sessionId
+        val hostOk = target.hostId == null || current.currentHostProfileId == target.hostId
+        return sessionOk && hostOk
+    }
+
+    private fun publishSpeech(target: SpeechDraftTarget, transcript: String, clearFlags: Boolean) {
+        val sessionId = target.sessionId
+        if (sessionId == null) {
+            if (!sameSpeechOwner(target)) return
+            if (composerComposing) {
+                deferredSpeech = DeferredSpeech(transcript, target, activeSpeechAttemptId)
+                if (clearFlags) {
+                    _state.update { it.copy(isTranscribing = false, isRetryingSpeech = false, speechError = null) }
+                }
+                return
+            }
+            val rendered = renderAnchoredSpeech(
+                target.existingInput,
+                transcript,
+                activeSpeechAnchor(target.existingInput),
+                _state.value.inputText,
+                captureActive = speechCaptureOpen,
+            )
+            speechAnchor = rendered.anchor
+            speechTail = rendered.tail
             _state.update {
                 it.copy(
-                    inputText = merged,
-                    isTranscribing = false,
-                    isRetryingSpeech = false,
-                    speechError = null,
+                    inputText = rendered.text,
+                    isTranscribing = if (clearFlags) false else it.isTranscribing,
+                    isRetryingSpeech = if (clearFlags) false else it.isRetryingSpeech,
+                    speechError = if (clearFlags) null else it.speechError,
                 )
             }
+            return
         }
-        target.sessionId?.let { settingsManager.setDraftText(it, merged) }
+        if (sameSpeechOwner(target) && composerComposing) {
+            deferredSpeech = DeferredSpeech(transcript, target, activeSpeechAttemptId)
+            if (clearFlags) {
+                _state.update { it.copy(isTranscribing = false, isRetryingSpeech = false, speechError = null) }
+            }
+            return
+        }
+        val latest = if (sameSpeechOwner(target)) _state.value.inputText else readDraft(target.hostId, sessionId)
+        val rendered = renderAnchoredSpeech(
+            target.existingInput,
+            transcript,
+            activeSpeechAnchor(target.existingInput),
+            latest,
+            captureActive = speechCaptureOpen,
+        )
+        speechAnchor = rendered.anchor
+        speechTail = rendered.tail
+        val merged = rendered.text
+        saveDraft(target.hostId, sessionId, merged)
+        if (!sameSpeechOwner(target)) return
+        _state.update {
+            it.copy(
+                inputText = merged,
+                isTranscribing = if (clearFlags) false else it.isTranscribing,
+                isRetryingSpeech = if (clearFlags) false else it.isRetryingSpeech,
+                speechError = if (clearFlags) null else it.speechError,
+            )
+        }
+    }
+
+    private fun activeSpeechAnchor(fallback: String): String =
+        if (speechCaptureOpen) speechAnchor else speechAnchor.ifEmpty { fallback }
+
+    private fun saveDraft(hostId: String?, sessionId: String, text: String) {
+        val host = hostId ?: _state.value.currentHostProfileId
+        if (host != null) settingsManager.setOwnedDraft(host, sessionId, text)
+        else settingsManager.setDraftText(sessionId, text)
+    }
+
+    private fun readOwnedDraftOnly(hostId: String, sessionId: String): String =
+        settingsManager.getOwnedDraftOrNull(hostId, sessionId).orEmpty()
+
+    private fun restoreSessionSendError(sessionId: String, recoveredText: String, state: AppState): AppState {
+        val entry = sendRecoveries.entries.lastOrNull { it.value.sessionId == sessionId }
+        val recovery = entry?.value
+        val sent = recovery?.text ?: recoveredText
+        val ownerHost = recovery?.hostId
+        val same = if (recovery == null) {
+            sessionId == state.currentSessionId
+        } else {
+            recovery.hostId == state.currentHostProfileId &&
+                sessionId == state.currentSessionId &&
+                recovery.selectionEpoch == state.composerSelectionEpoch
+        }
+        if (!same) {
+            if (entry != null && ownerHost != null) {
+                sendRecoveries.remove(entry.key)
+                settingsManager.setOwnedDraft(
+                    ownerHost,
+                    sessionId,
+                    mergeSendFailure(sent, readOwnedDraftOnly(ownerHost, sessionId)),
+                )
+            }
+            return state
+        }
+        if (entry != null) sendRecoveries.remove(entry.key)
+        val sentAttachments = recovery?.attachments ?: emptyList()
+        val ids = unionAttachmentsById(sentAttachments.map { it.id }, state.imageAttachments.map { it.id }).toSet()
+        return state.copy(
+            inputText = mergeSendFailure(sent, state.inputText),
+            imageAttachments = (sentAttachments + state.imageAttachments).filter { it.id in ids }.distinctBy { it.id },
+        )
+    }
+
+    private fun readDraft(hostId: String?, sessionId: String): String {
+        val host = hostId ?: _state.value.currentHostProfileId
+        if (host != null) {
+            settingsManager.getOwnedDraftOrNull(host, sessionId)?.let { return it }
+            val known = _state.value.hostProfiles.map { it.id }.toSet()
+            val stored = runCatching { settingsManager.draftMap() }.getOrDefault(emptyMap())
+            val looked = lookupDraft(stored, host, sessionId, known)
+            if (looked.migrated && looked.stored != null) {
+                runCatching { settingsManager.replaceDraftMap(looked.stored) }
+            }
+            if (looked.ambiguousLegacy) return ""
+            if (stored.isNotEmpty() && (looked.text.isNotEmpty() || looked.migrated)) return looked.text
+        }
+        return settingsManager.getDraftText(sessionId)
+    }
+
+    private fun flushDeferredComposerWrites() {
+        val paste = deferredPaste
+        val speech = deferredSpeech
+        deferredPaste = null
+        deferredSpeech = null
+        val wasComposing = composerComposing
+        composerComposing = false
+        if (paste != null && paste.addition.isNotEmpty()) applyDeferredPaste(paste)
+        if (speech != null) publishSpeech(speech.target, speech.transcript, clearFlags = false)
+        composerComposing = wasComposing
     }
 
     private fun reportSpeechFailure(target: SpeechDraftTarget, error: Throwable) {
-        if (_state.value.currentSessionId != target.sessionId) return
+        if (!sameSpeechOwner(target)) return
         _state.update {
             it.copy(
                 inputText = speechFailureInput(target.existingInput, it.inputText),
@@ -1353,6 +1504,18 @@ class MainViewModel @Inject constructor(
         scheduleSpeechCleanup()
     }
 
+    fun onHostActivityStart(): Long {
+        val token = hostActivityForegroundGate.onStart()
+        setAppForeground(true)
+        return token
+    }
+
+    fun onHostActivityStop(token: Long, changingConfigurations: Boolean) {
+        if (!hostActivityForegroundGate.onStop(token, changingConfigurations)) return
+        setAppForeground(false)
+        stopSpeechForBackground()
+    }
+
     private fun scheduleSpeechCleanup() {
         if (speechCleanupJob?.isActive == true) return
         val owner = speechSessionOwner
@@ -1360,7 +1523,7 @@ class MainViewModel @Inject constructor(
         val fileOwner = activeSpeechFileOwner
         val file = activeSpeechFile
         val strategy = activeSpeechStrategy
-        val target = SpeechDraftTarget(speechSourceSessionId, speechExistingInput)
+        val target = SpeechDraftTarget(speechSourceSessionId, speechExistingInput, speechSourceHostId)
         val originalJob = speechTranscriptionJob
         val shouldStopMicrophone = _state.value.isRecording || fileOwner != null || owner != null || sender != null
         fileOwner?.handoffToCleanup()
@@ -1435,12 +1598,10 @@ class MainViewModel @Inject constructor(
             shouldApply = {
                 isCurrentSpeechAttempt(attemptId) &&
                     preservedSpeechRecording === preserved &&
-                    _state.value.currentSessionId == target.sessionId
+                    sameSpeechOwner(target)
             },
         ) { partial ->
-            _state.update {
-                it.copy(inputText = mergedSpeechInput(target.existingInput, partial))
-            }
+            publishSpeech(target, partial, clearFlags = false)
         }
         speechTypewriter = typewriter
         _state.update { it.copy(isRetryingSpeech = true) }
@@ -1619,7 +1780,14 @@ class MainViewModel @Inject constructor(
                 speechTypewriter = null
             }
         }
-        selectSessionState(_state, settingsManager, sessionId)
+        clearComposerEditing()
+        selectSessionState(
+            _state,
+            settingsManager,
+            sessionId,
+            _state.value.currentHostProfileId,
+            _state.value.hostProfiles.map { it.id }.toSet(),
+        )
         publishCurrentSessionCounts()
         _state.update {
             it.copy(
@@ -1759,8 +1927,9 @@ class MainViewModel @Inject constructor(
     private fun resetRuntimeForHostSwitch() {
         val current = _state.value
         current.currentSessionId?.let { sessionId ->
-            settingsManager.setDraftText(sessionId, current.inputText)
+            saveDraft(current.currentHostProfileId, sessionId, current.inputText)
         }
+        clearComposerEditing()
         settingsManager.currentSessionId = null
         tunnelManager.disconnect()
         hostRuntimeJob.cancel()
@@ -1802,6 +1971,7 @@ class MainViewModel @Inject constructor(
                 partTypeIndex = emptyMap(),
                 isLoadingMessages = false,
                 inputText = "",
+                keyboardRequested = false,
                 imageAttachments = emptyList(),
                 pendingPermissions = emptyList(),
                 pendingQuestions = emptyList(),
@@ -1813,6 +1983,7 @@ class MainViewModel @Inject constructor(
                 providers = null,
                 filePathToShowInFiles = null,
                 filePreviewOriginRoute = null,
+                columnPreview = null,
                 pendingNfcAction = null,
                 connectionPhase = null
             )
@@ -1927,6 +2098,8 @@ class MainViewModel @Inject constructor(
 
     fun sendMessage() {
         val sessionId = _state.value.currentSessionId ?: return
+        val ownerHost = _state.value.currentHostProfileId
+        val sendEpoch = _state.value.composerSelectionEpoch
         if (_state.value.isRecording) return
         if (_state.value.sendingSessionIds.contains(sessionId)) return
         val text = _state.value.inputText.trim()
@@ -1937,6 +2110,7 @@ class MainViewModel @Inject constructor(
         // clear the composer. The row carries the same deterministic msg_ id we send
         // to the server, so reconciliation in loadMessages is pure id membership.
         val messageId = makeServerId("msg")
+        sendRecoveries[messageId] = SendRecovery(ownerHost, sessionId, sendEpoch, text, attachments)
         val optimistic = buildOptimisticMessage(
             sessionId = sessionId,
             text = text,
@@ -1950,6 +2124,7 @@ class MainViewModel @Inject constructor(
                 messages = state.messages + optimistic,
                 pendingOptimisticMessageIds = state.pendingOptimisticMessageIds + messageId,
                 inputText = "",
+                keyboardRequested = false,
                 imageAttachments = emptyList(),
                 sendingSessionIds = state.sendingSessionIds + sessionId,
                 sessionSendTimestamps = state.sessionSendTimestamps + (sessionId to System.currentTimeMillis())
@@ -1971,10 +2146,14 @@ class MainViewModel @Inject constructor(
                 agent = agent,
                 model = model,
                 messageId = messageId,
+                ownerHostId = ownerHost,
+                selectionEpoch = _state.value.composerSelectionEpoch,
+                settingsManager = settingsManager,
                 onRefreshMessages = ::loadMessagesWithRetry,
                 onRefreshSessions = ::loadSessions,
                 onSuccess = {
-                    settingsManager.setDraftText(sessionId, "")
+                    sendRecoveries.remove(messageId)
+                    saveDraft(ownerHost, sessionId, "")
                 },
                 onComplete = {
                     _state.update { state ->
@@ -1999,11 +2178,21 @@ class MainViewModel @Inject constructor(
                     .onFailure { error ->
                         // Restoring the archived session failed; roll back the optimistic row.
                         _state.update { state ->
+                            val same = state.currentSessionId == sessionId &&
+                                state.currentHostProfileId == ownerHost &&
+                                state.composerSelectionEpoch == sendEpoch
+                            val mergedText = mergeSendFailure(text, if (same) state.inputText else "")
+                            if (!same && ownerHost != null) {
+                                saveDraft(ownerHost, sessionId, mergeSendFailure(text, readOwnedDraftOnly(ownerHost, sessionId)))
+                            }
                             state.copy(
                                 messages = state.messages.filter { m -> m.info.id != messageId },
                                 pendingOptimisticMessageIds = state.pendingOptimisticMessageIds - messageId,
-                                inputText = text,
-                                imageAttachments = attachments,
+                                inputText = if (same) mergedText else state.inputText,
+                                imageAttachments = if (same) {
+                                    val ids = unionAttachmentsById(attachments.map { it.id }, state.imageAttachments.map { it.id }).toSet()
+                                    (attachments + state.imageAttachments).filter { it.id in ids }.distinctBy { it.id }
+                                } else state.imageAttachments,
                                 sendingSessionIds = state.sendingSessionIds - sessionId,
                                 sessionSendTimestamps = state.sessionSendTimestamps - sessionId,
                                 error = "Failed to restore session: ${errorMessageOrFallback(error, "unknown error")}"
@@ -2030,7 +2219,150 @@ class MainViewModel @Inject constructor(
 
     fun setInputText(text: String) {
         _state.update { it.copy(inputText = text) }
-        _state.value.currentSessionId?.let { settingsManager.setDraftText(it, text) }
+        _state.value.currentSessionId?.let { saveDraft(_state.value.currentHostProfileId, it, text) }
+    }
+
+    fun setLayoutPreference(preference: LayoutPreference) {
+        settingsManager.layoutPreference = preference.name
+        _state.update { it.copy(layoutPreference = preference) }
+    }
+
+    fun setVoiceFirstInput(enabled: Boolean) {
+        settingsManager.voiceFirstInput = enabled
+        _state.update {
+            it.copy(
+                voiceFirstInput = enabled,
+                keyboardRequested = if (enabled) it.keyboardRequested else false,
+            )
+        }
+        if (!enabled) clearComposerEditing()
+    }
+
+    fun requestComposerKeyboard() {
+        if (!_state.value.voiceFirstInput) return
+        _state.update { it.copy(keyboardRequested = true) }
+    }
+
+    fun dismissComposerKeyboard() {
+        _state.update { it.copy(keyboardRequested = false) }
+    }
+
+    fun reportComposerCaret(focused: Boolean, start: Int, end: Int, composing: Boolean) {
+        val wasComposing = composerComposing
+        composerFocused = focused
+        composerSelectionStart = start
+        composerSelectionEnd = end
+        composerComposing = composing
+        if (wasComposing && !composing) flushDeferredComposerWrites()
+    }
+
+    fun pasteComposerText(parts: List<String>) {
+        val addition = joinClipboardText(parts)
+        if (addition.isEmpty()) return
+        if (composerComposing) {
+            val current = _state.value
+            val previous = deferredPaste
+            val additionText = if (previous == null) addition else joinClipboardText(listOf(previous.addition, addition))
+            deferredPaste = DeferredPaste(
+                addition = additionText,
+                owner = DraftOwner(current.currentHostProfileId, current.currentSessionId),
+                focused = composerFocused,
+                selectionStart = composerSelectionStart,
+                selectionEnd = composerSelectionEnd,
+                speechOwnedEnd = activeSpeechOwnedEnd(),
+            )
+            return
+        }
+        applyPaste(addition)
+    }
+
+    private fun activeSpeechOwnedEnd(): Int? {
+        if (!_state.value.isRecording && !_state.value.isTranscribing && !_state.value.isRetryingSpeech) return null
+        val anchor = speechAnchor.ifEmpty { speechExistingInput }
+        return anchor.length
+    }
+
+    private fun applyPaste(addition: String) {
+        val current = _state.value
+        applyDeferredPaste(
+            DeferredPaste(
+                addition = addition,
+                owner = DraftOwner(current.currentHostProfileId, current.currentSessionId),
+                focused = composerFocused,
+                selectionStart = composerSelectionStart,
+                selectionEnd = composerSelectionEnd,
+                speechOwnedEnd = activeSpeechOwnedEnd(),
+            )
+        )
+    }
+
+    private fun applyDeferredPaste(paste: DeferredPaste) {
+        val current = _state.value
+        val same = paste.owner.matches(current.currentHostProfileId, current.currentSessionId)
+        val sessionId = paste.owner.sessionId
+        if (sessionId == null) {
+            if (!same) return
+            val placement = pastePlacement(
+                focused = paste.focused,
+                selectionStart = paste.selectionStart,
+                selectionEnd = paste.selectionEnd,
+                composing = false,
+                speechOwnedEnd = paste.speechOwnedEnd,
+            )
+            val inserted = when (placement) {
+                PastePlacement.INSERT -> insertPaste(current.inputText, paste.addition, paste.selectionStart, paste.selectionEnd)
+                else -> appendPaste(current.inputText, paste.addition).let { appended -> appended to appended.length }
+            }
+            if (current.isRecording || current.isTranscribing) {
+                val anchor = speechAnchor.ifEmpty { speechExistingInput }
+                if (anchor.isNotEmpty() && inserted.first.startsWith(anchor)) speechTail = inserted.first.removePrefix(anchor)
+            }
+            _state.update {
+                it.copy(
+                    inputText = inserted.first,
+                    composerCursor = inserted.second,
+                    composerCursorRevision = it.composerCursorRevision + 1,
+                )
+            }
+            return
+        }
+        val latest = if (same) current.inputText else readDraft(paste.owner.hostId, sessionId)
+        val placement = pastePlacement(
+            focused = paste.focused,
+            selectionStart = paste.selectionStart,
+            selectionEnd = paste.selectionEnd,
+            composing = false,
+            speechOwnedEnd = paste.speechOwnedEnd,
+        )
+        val inserted = when (placement) {
+            PastePlacement.INSERT -> insertPaste(latest, paste.addition, paste.selectionStart, paste.selectionEnd)
+            else -> appendPaste(latest, paste.addition).let { appended -> appended to appended.length }
+        }
+        val merged = inserted.first
+        val cursor = inserted.second
+        if (same && (_state.value.isRecording || _state.value.isTranscribing)) {
+            val anchor = speechAnchor.ifEmpty { speechExistingInput }
+            if (anchor.isNotEmpty() && merged.startsWith(anchor)) speechTail = merged.removePrefix(anchor)
+        }
+        saveDraft(paste.owner.hostId, sessionId, merged)
+        if (same) {
+            _state.update {
+                it.copy(
+                    inputText = merged,
+                    composerCursor = cursor,
+                    composerCursorRevision = it.composerCursorRevision + 1,
+                )
+            }
+        }
+    }
+
+    private fun clearComposerEditing() {
+        flushDeferredComposerWrites()
+        composerFocused = false
+        composerComposing = false
+        composerSelectionStart = 0
+        composerSelectionEnd = 0
+        _state.update { it.copy(keyboardRequested = false, composerSelectionEpoch = it.composerSelectionEpoch + 1) }
     }
 
     fun handleNfcPrompt(prompt: String, autoSend: Boolean) {
@@ -2085,7 +2417,7 @@ class MainViewModel @Inject constructor(
                             error = null
                         )
                     }
-                    settingsManager.setDraftText(sessionId, draft)
+                    saveDraft(_state.value.currentHostProfileId, sessionId, draft)
                     // Revert truncates history, so the add-only counters would
                     // overcount; drop the entry so the reload reseeds it.
                     sessionStatsStore.reset(sessionId)
@@ -2319,11 +2651,65 @@ class MainViewModel @Inject constructor(
     }
 
     fun showFileInFiles(path: String, originRoute: String? = null) {
-        _state.update { it.copy(filePathToShowInFiles = path, filePreviewOriginRoute = originRoute) }
+        val current = _state.value
+        val target = OwnedFilePreview(
+            path = path,
+            hostId = current.currentHostProfileId,
+            sessionId = current.currentSessionId,
+            workspace = current.currentSession?.directory,
+            kind = FilePreviewKind.CHAT,
+        )
+        _state.update {
+            it.copy(
+                filePathToShowInFiles = path,
+                filePreviewOriginRoute = originRoute,
+                columnPreview = target,
+            )
+        }
+    }
+
+    fun showFilesBrowserFile(path: String) {
+        val current = _state.value
+        val target = OwnedFilePreview(
+            path = path,
+            hostId = current.currentHostProfileId,
+            sessionId = null,
+            workspace = current.currentSession?.directory,
+            kind = FilePreviewKind.FILES,
+        )
+        _state.update {
+            it.copy(
+                filePathToShowInFiles = path,
+                filePreviewOriginRoute = null,
+                columnPreview = target,
+            )
+        }
+    }
+
+    fun reconcilePreviewLayout(effective: EffectiveLayout, inline: ChatFilePreviewRequest?): ChatFilePreviewRequest? {
+        val current = _state.value
+        val from = layoutMigrationFrom(current.appliedLayout, effective)
+        val hostId = current.currentHostProfileId
+        val sessionId = current.currentSessionId
+        val workspace = current.currentSession?.directory
+        val migrated = if (from == null) {
+            migrateVisiblePreview(effective, effective, inline, current.columnPreview, hostId, sessionId, workspace)
+        } else {
+            migrateVisiblePreview(from, effective, inline, current.columnPreview, hostId, sessionId, workspace)
+        }
+        _state.update {
+            it.copy(
+                appliedLayout = effective,
+                columnPreview = migrated.column,
+                filePathToShowInFiles = migrated.column?.path,
+                filePreviewOriginRoute = if (migrated.column?.kind == FilePreviewKind.CHAT) it.filePreviewOriginRoute ?: "chat" else null,
+            )
+        }
+        return migrated.inline
     }
 
     fun clearFileToShow() {
-        _state.update { it.copy(filePathToShowInFiles = null, filePreviewOriginRoute = null) }
+        _state.update { it.copy(filePathToShowInFiles = null, filePreviewOriginRoute = null, columnPreview = null) }
     }
 
     /** Watchdog replacing busy polling: checks every 5s, and only when no SSE
@@ -2387,7 +2773,8 @@ class MainViewModel @Inject constructor(
                 sessionStatsStore.recordToolPart(sessionId, partId)
                 publishCurrentSessionCounts()
             },
-            onReconcileSessionFailure = ::reconcileSessionFailure
+            onReconcileSessionFailure = ::reconcileSessionFailure,
+            onSessionErrorRestore = ::restoreSessionSendError,
         )
     }
 

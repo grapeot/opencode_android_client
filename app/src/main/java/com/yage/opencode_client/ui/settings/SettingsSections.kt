@@ -374,6 +374,57 @@ internal fun AIUsageDashboardSection(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
+internal fun FocusVoiceSection(
+    layoutPreference: com.yage.opencode_client.ui.LayoutPreference,
+    voiceFirst: Boolean,
+    onLayoutSelected: (com.yage.opencode_client.ui.LayoutPreference) -> Unit,
+    onVoiceFirstChange: (Boolean) -> Unit,
+) {
+    SectionHeader(title = stringResource(R.string.settings_layout))
+    val modes = com.yage.opencode_client.ui.LayoutPreference.entries
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        modes.forEachIndexed { index, mode ->
+            SegmentedButton(
+                selected = layoutPreference == mode,
+                onClick = { onLayoutSelected(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
+            ) {
+                Text(
+                    when (mode) {
+                        com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC -> stringResource(R.string.settings_layout_automatic)
+                        com.yage.opencode_client.ui.LayoutPreference.FOCUS -> stringResource(R.string.settings_layout_focus)
+                    }
+                )
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        stringResource(R.string.settings_layout_footer),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.settings_voice_first),
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Switch(checked = voiceFirst, onCheckedChange = onVoiceFirstChange)
+    }
+    Text(
+        stringResource(R.string.settings_voice_first_footer),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
 internal fun SpeechRecognitionSection(
     state: AppState,
     aiBuilderBaseURL: String,

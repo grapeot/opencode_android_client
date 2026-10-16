@@ -219,6 +219,15 @@ fun SettingsScreen(
 
             SettingsSectionDivider()
 
+            FocusVoiceSection(
+                layoutPreference = state.layoutPreference,
+                voiceFirst = state.voiceFirstInput,
+                onLayoutSelected = viewModel::setLayoutPreference,
+                onVoiceFirstChange = viewModel::setVoiceFirstInput,
+            )
+
+            SettingsSectionDivider()
+
             SpeechRecognitionSection(
                 state = state,
                 aiBuilderBaseURL = aiBuilderBaseURL,

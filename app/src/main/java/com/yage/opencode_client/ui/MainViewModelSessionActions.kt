@@ -218,16 +218,19 @@ internal fun launchLoadSessionStatus(
 internal fun selectSessionState(
     state: MutableStateFlow<AppState>,
     settingsManager: SettingsManager,
-    sessionId: String
+    sessionId: String,
+    hostId: String? = null,
+    knownHostIds: Set<String> = emptySet(),
 ) {
     val oldSessionId = state.value.currentSessionId
     val currentInputText = state.value.inputText
     if (oldSessionId != null) {
-        settingsManager.setDraftText(oldSessionId, currentInputText)
+        if (hostId != null) settingsManager.setOwnedDraft(hostId, oldSessionId, currentInputText)
+        else settingsManager.setDraftText(oldSessionId, currentInputText)
     }
 
     settingsManager.currentSessionId = sessionId
-    val restoredDraft = settingsManager.getDraftText(sessionId)
+    val restoredDraft = restoreDraft(settingsManager, hostId, sessionId, knownHostIds)
     state.update {
         it.copy(
             currentSessionId = sessionId,
@@ -238,9 +241,28 @@ internal fun selectSessionState(
             streamingReasoningPart = null,
             partTypeIndex = emptyMap(),
             messageLimit = 30,
-            inputText = restoredDraft
+            inputText = restoredDraft,
+            keyboardRequested = false,
         )
     }
+}
+
+private fun restoreDraft(
+    settingsManager: SettingsManager,
+    hostId: String?,
+    sessionId: String,
+    knownHostIds: Set<String>,
+): String {
+    if (hostId == null) return settingsManager.getDraftText(sessionId)
+    settingsManager.getOwnedDraftOrNull(hostId, sessionId)?.let { return it }
+    val stored = runCatching { settingsManager.draftMap() }.getOrDefault(emptyMap())
+    val looked = lookupDraft(stored, hostId, sessionId, knownHostIds)
+    if (looked.migrated && looked.stored != null) {
+        runCatching { settingsManager.replaceDraftMap(looked.stored) }
+    }
+    if (looked.ambiguousLegacy) return ""
+    if (stored.isNotEmpty() && (looked.text.isNotEmpty() || looked.migrated)) return looked.text
+    return settingsManager.getDraftText(sessionId)
 }
 
 internal fun mergePendingOptimisticMessages(
@@ -626,6 +648,9 @@ internal fun launchSendMessage(
     agent: String,
     model: Message.ModelInfo?,
     messageId: String,
+    ownerHostId: String? = null,
+    selectionEpoch: Long = 0,
+    settingsManager: SettingsManager? = null,
     onRefreshMessages: (String, Boolean) -> Unit,
     onRefreshSessions: () -> Unit,
     onSuccess: (() -> Unit)? = null,
@@ -659,16 +684,30 @@ internal fun launchSendMessage(
                 }
             }
             .onFailure { error ->
-                // The optimistic row was inserted before dispatch. On failure, drop it
-                // and hand the text/attachments back to the composer so the user can retry.
-                // Only restore the composer if the user is still on the session that sent
-                // this message; otherwise we'd clobber another session's draft.
+                val current = state.value
+                val sameOwner = current.currentHostProfileId == ownerHostId && current.currentSessionId == sessionId
+                val sameSelection = sameOwner && current.composerSelectionEpoch == selectionEpoch
+                val latestText = if (sameSelection) current.inputText else ""
+                val mergedText = mergeSendFailure(text, latestText)
+                val mergedAttachments = if (sameSelection) {
+                    val byId = unionAttachmentsById(
+                        attachments.map { it.id },
+                        current.imageAttachments.map { it.id },
+                    ).toSet()
+                    (attachments + current.imageAttachments).filter { it.id in byId }.distinctBy { it.id }
+                } else {
+                    current.imageAttachments
+                }
+                if (!sameSelection && ownerHostId != null && settingsManager != null) {
+                    val sourceDraft = settingsManager.getOwnedDraftOrNull(ownerHostId, sessionId).orEmpty()
+                    settingsManager.setOwnedDraft(ownerHostId, sessionId, mergeSendFailure(text, sourceDraft))
+                }
                 state.update {
                     it.copy(
                         messages = it.messages.filter { m -> m.info.id != messageId },
                         pendingOptimisticMessageIds = it.pendingOptimisticMessageIds - messageId,
-                        inputText = if (it.currentSessionId == sessionId) text else it.inputText,
-                        imageAttachments = if (it.currentSessionId == sessionId) attachments else it.imageAttachments,
+                        inputText = if (sameSelection) mergedText else it.inputText,
+                        imageAttachments = if (sameSelection) mergedAttachments else it.imageAttachments,
                         error = errorMessageOrFallback(error, "Failed to send message")
                     )
                 }

@@ -174,12 +174,55 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getBoolean(KEY_NFC_AUTO_SEND, false)
         set(value) = encryptedPrefs.edit().putBoolean(KEY_NFC_AUTO_SEND, value).apply()
 
+    var layoutPreference: String
+        get() = encryptedPrefs.getString(KEY_LAYOUT_PREFERENCE, "AUTOMATIC") ?: "AUTOMATIC"
+        set(value) = encryptedPrefs.edit().putString(KEY_LAYOUT_PREFERENCE, value).apply()
+
+    var voiceFirstInput: Boolean
+        get() = encryptedPrefs.getBoolean(KEY_VOICE_FIRST_INPUT, false)
+        set(value) = encryptedPrefs.edit().putBoolean(KEY_VOICE_FIRST_INPUT, value).apply()
+
     fun getDraftText(sessionId: String): String {
         val json = encryptedPrefs.getString(KEY_SESSION_DRAFTS, null) ?: return ""
         return try {
             Json.decodeFromString<Map<String, String>>(json)[sessionId] ?: ""
         } catch (e: Exception) {
             ""
+        }
+    }
+
+    fun getOwnedDraftOrNull(hostId: String, sessionId: String): String? {
+        val json = encryptedPrefs.getString(KEY_SESSION_DRAFTS, null) ?: return null
+        val map = try {
+            Json.decodeFromString<Map<String, String>>(json)
+        } catch (e: Exception) {
+            return null
+        }
+        return map[com.yage.opencode_client.ui.ownedDraftStorageKey(hostId, sessionId)]
+    }
+
+    fun setOwnedDraft(hostId: String, sessionId: String, text: String) {
+        val json = encryptedPrefs.getString(KEY_SESSION_DRAFTS, null)
+        val map: MutableMap<String, String> = try {
+            json?.let { Json.decodeFromString<Map<String, String>>(it).toMutableMap() } ?: mutableMapOf()
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+        val key = com.yage.opencode_client.ui.ownedDraftStorageKey(hostId, sessionId)
+        if (text.isBlank()) map.remove(key) else map[key] = text
+        encryptedPrefs.edit().putString(KEY_SESSION_DRAFTS, Json.encodeToString(map)).apply()
+    }
+
+    fun replaceDraftMap(map: Map<String, String>) {
+        encryptedPrefs.edit().putString(KEY_SESSION_DRAFTS, Json.encodeToString(map)).apply()
+    }
+
+    fun draftMap(): Map<String, String> {
+        val json = encryptedPrefs.getString(KEY_SESSION_DRAFTS, null) ?: return emptyMap()
+        return try {
+            Json.decodeFromString<Map<String, String>>(json)
+        } catch (e: Exception) {
+            emptyMap()
         }
     }
 
@@ -306,6 +349,8 @@ class SettingsManager @Inject constructor(
         private const val KEY_NFC_ENABLED = "nfc_enabled"
         private const val KEY_NFC_PROMPT = "nfc_prompt"
         private const val KEY_NFC_AUTO_SEND = "nfc_auto_send"
+        private const val KEY_LAYOUT_PREFERENCE = "layout_preference"
+        private const val KEY_VOICE_FIRST_INPUT = "voice_first_input"
 
         private const val MODEL_PRESET_SCHEMA_VERSION = 1
 

@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FilterCenterFocus
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
@@ -97,7 +99,8 @@ internal data class ChatTopBarState(
     val aiUsageDashboardUrl: String = "",
     val showSettingsButton: Boolean = true,
     val showNewSessionInTopBar: Boolean = true,
-    val showSessionListInTopBar: Boolean = true
+    val showSessionListInTopBar: Boolean = true,
+    val layoutPreference: com.yage.opencode_client.ui.LayoutPreference = com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC,
 )
 
 internal data class ChatTopBarActions(
@@ -114,7 +117,8 @@ internal data class ChatTopBarActions(
     val onOpenAIUsage: () -> Unit = {},
     val onRefreshAIUsage: () -> Unit = {},
     val onNavigateToSettings: () -> Unit = {},
-    val onRenameSession: (String) -> Unit = {}
+    val onRenameSession: (String) -> Unit = {},
+    val onSetLayoutPreference: (com.yage.opencode_client.ui.LayoutPreference) -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -227,6 +231,34 @@ internal fun ChatTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    IconButton(
+                        onClick = {
+                            actions.onSetLayoutPreference(
+                                if (state.layoutPreference == com.yage.opencode_client.ui.LayoutPreference.FOCUS) {
+                                    com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC
+                                } else {
+                                    com.yage.opencode_client.ui.LayoutPreference.FOCUS
+                                }
+                            )
+                        },
+                        modifier = Modifier.size(48.dp).testTag("chat-layout"),
+                    ) {
+                        Icon(
+                            if (state.layoutPreference == com.yage.opencode_client.ui.LayoutPreference.FOCUS) {
+                                Icons.Default.FilterCenterFocus
+                            } else {
+                                Icons.Default.ViewColumn
+                            },
+                            contentDescription = stringResource(
+                                if (state.layoutPreference == com.yage.opencode_client.ui.LayoutPreference.FOCUS) {
+                                    R.string.settings_layout_automatic
+                                } else {
+                                    R.string.settings_layout_focus
+                                }
+                            ),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Box(modifier = Modifier.weight(1f, fill = false)) {
                         Surface(
                             onClick = { showModelMenu = true },

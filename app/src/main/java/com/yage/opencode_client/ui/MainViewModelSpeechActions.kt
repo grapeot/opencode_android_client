@@ -23,6 +23,23 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import java.io.File
 
+internal class HostActivityForegroundGate {
+    private var nextToken = 0L
+    private var foregroundToken = 0L
+
+    fun onStart(): Long {
+        nextToken += 1
+        foregroundToken = nextToken
+        return foregroundToken
+    }
+
+    fun onStop(token: Long, changingConfigurations: Boolean): Boolean {
+        if (changingConfigurations || token == 0L || token != foregroundToken) return false
+        foregroundToken = 0L
+        return true
+    }
+}
+
 internal data class SpeechInputConfig(
     val token: String,
     val baseURL: String,
@@ -51,6 +68,7 @@ internal fun currentSpeechInputConfig(settingsManager: SettingsManager): SpeechI
 internal data class SpeechDraftTarget(
     val sessionId: String?,
     val existingInput: String,
+    val hostId: String? = null,
 )
 
 internal sealed interface PreservedSpeechRecording {

@@ -42,7 +42,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import com.yage.opencode_client.ui.AppWidthClass
+import com.yage.opencode_client.ui.EffectiveLayout
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.resolveEffectiveLayout
 import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequest
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequestSaver
@@ -118,12 +121,17 @@ class MainActivity : AppCompatActivity() {
             }
             val lifecycleOwner = LocalLifecycleOwner.current
             DisposableEffect(lifecycleOwner, mainViewModel) {
+                var hostToken = 0L
                 val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_STOP) {
-                        mainViewModel.setAppForeground(false)
-                        mainViewModel.stopSpeechForBackground()
+                    if (event == Lifecycle.Event.ON_START) {
+                        hostToken = mainViewModel.onHostActivityStart()
                     }
-                    if (event == Lifecycle.Event.ON_START) mainViewModel.setAppForeground(true)
+                    if (event == Lifecycle.Event.ON_STOP) {
+                        mainViewModel.onHostActivityStop(
+                            token = hostToken,
+                            changingConfigurations = this@MainActivity.isChangingConfigurations,
+                        )
+                    }
                 }
                 lifecycleOwner.lifecycle.addObserver(observer)
                 onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -158,35 +166,32 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
             }
             val windowSizeClass = calculateWindowSizeClass(this)
-            val isTablet = windowSizeClass.widthSizeClass == WindowWidthSizeClass.Expanded
+            val widthClass = when (windowSizeClass.widthSizeClass) {
+                WindowWidthSizeClass.Compact -> AppWidthClass.COMPACT
+                WindowWidthSizeClass.Medium -> AppWidthClass.MEDIUM
+                WindowWidthSizeClass.Expanded -> AppWidthClass.EXPANDED
+                else -> AppWidthClass.COMPACT
+            }
+            val effectiveLayout = resolveEffectiveLayout(state.layoutPreference, widthClass)
             var dockedPreviewRequest by rememberSaveable(stateSaver = ChatFilePreviewRequestSaver) {
                 mutableStateOf<ChatFilePreviewRequest?>(null)
             }
             LaunchedEffect(
-                isTablet,
-                dockedPreviewRequest,
+                effectiveLayout,
+                state.appliedLayout,
                 state.currentHostProfileId,
                 state.currentSessionId,
-                state.currentSession?.directory
+                state.currentSession?.directory,
+                state.columnPreview,
+                dockedPreviewRequest,
             ) {
-                val request = dockedPreviewRequest ?: return@LaunchedEffect
-                if (!request.belongsTo(state.currentHostProfileId, state.currentSessionId, state.currentSession?.directory)) {
-                    if (dockedPreviewRequest === request) {
-                        dockedPreviewRequest = null
-                    }
-                    return@LaunchedEffect
-                }
-                if (isTablet) {
-                    mainViewModel.showFileInFiles(request.path)
-                    if (dockedPreviewRequest === request) {
-                        dockedPreviewRequest = null
-                    }
-                }
+                val inline = mainViewModel.reconcilePreviewLayout(effectiveLayout, dockedPreviewRequest)
+                if (dockedPreviewRequest != inline) dockedPreviewRequest = inline
             }
 
             OpenCodeTheme(darkTheme = darkTheme) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (isTablet) {
+                    if (effectiveLayout == EffectiveLayout.REGULAR) {
                         TabletLayout(viewModel = mainViewModel)
                     } else {
                         PhoneLayout(
@@ -493,7 +498,7 @@ private fun TabletLayout(viewModel: MainViewModel) {
                         pathToShow = state.filePathToShowInFiles,
                         sessionDirectory = state.currentSession?.directory,
                         onCloseFile = { viewModel.clearFileToShow() },
-                        onFileClick = { }
+                        onFileClick = { path -> viewModel.showFilesBrowserFile(path) }
                     )
                     if (sessionsPaneCollapsed) {
                         Surface(
