@@ -1,5 +1,11 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-16 — 配置重建时保持录音
+
+- 修复旋转、折叠重建 Activity 时，旧 `ON_STOP` 无条件把应用标为后台并停录的问题。每次 `ON_START` 生成前台 Activity 的 Long 标记；仅当前标记匹配且不是配置变化时，才执行原后台停录及音频保留逻辑。新 Activity 启动后，旧 Activity 迟到的停止事件不再影响它。
+- ViewModel 不持有 Activity Context；手动停止、重试及丢弃流程保持原样。新增测试通过真实 ViewModel 入口驱动假麦克风，覆盖配置重建、重复及过期事件、真实后台停录和原会话音频恢复。
+- 定向与全量 `testDebugUnitTest` 通过，全量 555 项、0 失败、0 跳过；`assembleDebug` 通过。独立 code/privacy review 无阻断。未做 `ActivityScenario.recreate` 或真机麦克风验证；按用户要求仅提交 PR，保持未合并。
+
 ## 2026-10-14 — 独立审查 MEDIUM：自动导航不确认父行提醒
 
 - 审查发现此前 `selectSession` 也供列表刷新/分页和删除替补调用，可能在没有显式点选时确认父行子来源。拆出私有 `navigateToSession` 共用原有 markViewed、草稿/current 切换和加载行为；只有显式 `selectSession` 执行蓝色快照确认。

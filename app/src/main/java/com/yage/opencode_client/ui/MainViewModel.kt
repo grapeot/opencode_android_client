@@ -656,6 +656,7 @@ class MainViewModel @Inject constructor(
         VoiceFlowRecordingStrategy.OPENAI_REALTIME
     private var speechAttemptId = 0L
     private var activeSpeechAttemptId = 0L
+    private val hostActivityForegroundGate = HostActivityForegroundGate()
     private var preservedSpeechRecording: PreservedSpeechRecording? = null
     private var lastHealthCheckTime = 0L
     private var deepLinkRouteGeneration = 0L
@@ -1351,6 +1352,18 @@ class MainViewModel @Inject constructor(
 
     fun stopSpeechForBackground() {
         scheduleSpeechCleanup()
+    }
+
+    fun onHostActivityStart(): Long {
+        val token = hostActivityForegroundGate.onStart()
+        setAppForeground(true)
+        return token
+    }
+
+    fun onHostActivityStop(token: Long, changingConfigurations: Boolean) {
+        if (!hostActivityForegroundGate.onStop(token, changingConfigurations)) return
+        setAppForeground(false)
+        stopSpeechForBackground()
     }
 
     private fun scheduleSpeechCleanup() {

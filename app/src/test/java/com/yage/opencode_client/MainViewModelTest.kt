@@ -2568,6 +2568,130 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `configuration recreation keeps recording and original host session`() = runTest {
+        val grokFile = File.createTempFile("opencode-rotate-keep", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns TranscriptionResult(text = "heard", requestId = "rotate-1")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "source",
+                currentHostProfileId = "test-host",
+                inputText = "prefix",
+                aiBuilderConnectionOK = true,
+            )
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        assertTrue(viewModel.state.value.isRecording)
+        val epochWhileRecording = viewModel.state.value.statusEpoch
+
+        val first = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(first, changingConfigurations = true)
+        val second = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(first, changingConfigurations = false)
+        viewModel.onHostActivityStop(second, changingConfigurations = true)
+        val third = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(first, changingConfigurations = true)
+        runCurrent()
+
+        assertTrue(viewModel.state.value.isRecording)
+        assertTrue(viewModel.state.value.appForeground)
+        assertEquals("source", viewModel.state.value.currentSessionId)
+        assertEquals("test-host", viewModel.state.value.currentHostProfileId)
+        assertEquals("prefix", viewModel.state.value.inputText)
+        assertTrue(viewModel.state.value.statusEpoch >= epochWhileRecording)
+        coVerify(exactly = 0) { microphone.stop() }
+
+        val epochAfterRecreate = viewModel.state.value.statusEpoch
+        viewModel.onHostActivityStop(second, changingConfigurations = false)
+        runCurrent()
+        assertTrue(viewModel.state.value.isRecording)
+        assertTrue(viewModel.state.value.appForeground)
+        assertEquals(epochAfterRecreate, viewModel.state.value.statusEpoch)
+        coVerify(exactly = 0) { microphone.stop() }
+
+        viewModel.toggleRecording()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isRecording)
+        assertEquals("prefix heard", viewModel.state.value.inputText)
+        verify { settingsManager.setDraftText("source", "prefix heard") }
+        assertEquals("test-host", viewModel.state.value.currentHostProfileId)
+        coVerify(exactly = 1) { microphone.stop() }
+        grokFile.delete()
+    }
+
+    @Test
+    fun `real background stop preserves audio for the originating session`() = runTest {
+        val grokFile = File.createTempFile("opencode-background-owner", ".wav").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        every { settingsManager.aiBuilderToken } returns "token"
+        every { settingsManager.aiBuilderRecordingStrategy } returns "GROK_BATCH"
+        every { settingsManager.getDraftText("destination") } returns "destination draft"
+        coEvery {
+            microphone.start(
+                strategy = VoiceFlowRecordingStrategy.GROK_BATCH,
+                persist = any(),
+                onPCMChunk = null,
+            )
+        } just runs
+        coEvery { microphone.stop() } returns grokFile
+        coEvery {
+            voiceFlowClient.transcribe(grokFile, VoiceFlowRecordingStrategy.GROK_BATCH, any())
+        } returns TranscriptionResult(text = "heard", requestId = "background-1")
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentSessionId = "source",
+                currentHostProfileId = "test-host",
+                inputText = "prefix",
+                aiBuilderConnectionOK = true,
+            )
+        }
+
+        viewModel.toggleRecording()
+        runCurrent()
+        val token = viewModel.onHostActivityStart()
+        viewModel.onHostActivityStop(token, changingConfigurations = false)
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isRecording)
+        assertFalse(viewModel.state.value.appForeground)
+        assertTrue(viewModel.state.value.hasPreservedSpeechAudio)
+        assertEquals("source", viewModel.state.value.currentSessionId)
+        assertEquals("test-host", viewModel.state.value.currentHostProfileId)
+        coVerify(exactly = 1) { microphone.stop() }
+
+        viewModel.selectSession("destination")
+        runCurrent()
+        assertEquals("destination draft", viewModel.state.value.inputText)
+
+        viewModel.retryPreservedSpeechAudio()
+        advanceUntilIdle()
+
+        assertEquals("destination draft", viewModel.state.value.inputText)
+        verify { settingsManager.setDraftText("source", "prefix heard") }
+        assertFalse(grokFile.exists())
+    }
+
+    @Test
     fun `discard joins active retry before deleting preserved file`() = runTest {
         val grokFile = File.createTempFile("opencode-grok-discard-join", ".wav").apply {
             writeBytes(byteArrayOf(1, 2, 3))

@@ -118,12 +118,17 @@ class MainActivity : AppCompatActivity() {
             }
             val lifecycleOwner = LocalLifecycleOwner.current
             DisposableEffect(lifecycleOwner, mainViewModel) {
+                var hostToken = 0L
                 val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_STOP) {
-                        mainViewModel.setAppForeground(false)
-                        mainViewModel.stopSpeechForBackground()
+                    if (event == Lifecycle.Event.ON_START) {
+                        hostToken = mainViewModel.onHostActivityStart()
                     }
-                    if (event == Lifecycle.Event.ON_START) mainViewModel.setAppForeground(true)
+                    if (event == Lifecycle.Event.ON_STOP) {
+                        mainViewModel.onHostActivityStop(
+                            token = hostToken,
+                            changingConfigurations = this@MainActivity.isChangingConfigurations,
+                        )
+                    }
                 }
                 lifecycleOwner.lifecycle.addObserver(observer)
                 onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
