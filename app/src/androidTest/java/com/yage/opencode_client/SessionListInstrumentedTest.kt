@@ -48,7 +48,7 @@ class SessionListInstrumentedTest {
                 com.yage.opencode_client.ui.theme.OpenCodeTheme {
                     SessionList(sessions = sessions, currentSessionId = if (fontScale == 1f) "parent" else "child",
                         expandedSessionIds = setOf("parent"),
-                        sessionStatuses = sessions.associate { it.id to SessionStatus(if (it.id == "parent") "busy" else "idle") },
+                        sessionStatuses = sessions.associate { it.id to SessionStatus(if (it.id == "parent") "retry" else "idle") },
                         unreadCounts = mapOf("unread" to 1), failureCounts = mapOf("parent" to 1, "child" to 1, "failure" to 1),
                         onSelectSession = {}, onCreateSession = {}, onDeleteSession = {})
                 }
@@ -124,7 +124,10 @@ class SessionListInstrumentedTest {
                     onSelectSession = {}, onCreateSession = {}, onDeleteSession = {})
             }
         }
-        composeRule.onNodeWithText("Running · 1 subagent running").assertIsDisplayed()
+        composeRule.onNodeWithText("Running").assertDoesNotExist()
+        composeRule.onNodeWithText("1 subagent running").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("1 subagent running").assertIsDisplayed()
+        composeRule.onNodeWithText("Retrying").assertIsDisplayed()
         composeRule.onNodeWithText("Status awaiting sync").assertIsDisplayed()
         composeRule.onNodeWithTag("session-indicator-running", useUnmergedTree = true).assertContentDescriptionEquals("Running")
         val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
@@ -340,7 +343,9 @@ class SessionListInstrumentedTest {
         }
 
         composeRule.onNodeWithText("Busy Session").assertIsDisplayed()
-        composeRule.onNodeWithText("Running").assertIsDisplayed()
+        composeRule.onNodeWithText("Running").assertDoesNotExist()
+        composeRule.onNodeWithTag("session-indicator-session-busy", useUnmergedTree = true)
+            .assertContentDescriptionEquals("Running")
     }
 
     @Test
@@ -398,7 +403,7 @@ class SessionListInstrumentedTest {
 
         composeRule.onNodeWithText("Parent").assertIsDisplayed()
         composeRule.onNodeWithText("Need attention").assertDoesNotExist()
-        composeRule.onNodeWithText("Running").assertIsDisplayed()
+        composeRule.onNodeWithText("Running").assertDoesNotExist()
         composeRule.onNodeWithTag("session-indicator-parent", useUnmergedTree = true)
             .assertIsDisplayed()
             .assertContentDescriptionEquals("Needs your attention")
