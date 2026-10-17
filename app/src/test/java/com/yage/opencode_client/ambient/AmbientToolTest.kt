@@ -1,5 +1,7 @@
 package com.yage.opencode_client.ambient
 
+import com.yage.opencode_client.ambient.gateway.AmbientLiveGateway
+import com.yage.opencode_client.ambient.gateway.AmbientOpenCodeClients
 import com.yage.opencode_client.ambient.protocol.AmbientAuthorizingGateway
 import com.yage.opencode_client.ambient.protocol.AmbientBinding
 import com.yage.opencode_client.ambient.protocol.AmbientCapturedConfig
@@ -9,11 +11,17 @@ import com.yage.opencode_client.ambient.protocol.AmbientHostedFunction
 import com.yage.opencode_client.ambient.protocol.AmbientHttpResult
 import com.yage.opencode_client.ambient.protocol.AmbientLease
 import com.yage.opencode_client.ambient.protocol.AmbientPromptWire
+import com.yage.opencode_client.ambient.protocol.AmbientToolCodes
 import com.yage.opencode_client.ambient.protocol.AmbientToolDefaults
 import com.yage.opencode_client.ambient.protocol.AmbientToolEffect
 import com.yage.opencode_client.ambient.tools.AmbientToolRunner
+import com.yage.opencode_client.ambient.tools.AmbientToolTrace
+import com.yage.opencode_client.ambient.tools.ambientToolTraceLine
+import com.yage.opencode_client.data.repository.OpenCodeRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -28,6 +36,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+private const val WIDE_CURSOR = "1792230000123"
+private const val SECRET_MARKER = "SECRET_MARKER"
+private const val URL_MARKER = "https://synthetic.invalid/marker"
+private const val TITLE_MARKER = "TITLE_MARKER"
+private const val ID_MARKER = "ses_MARKER_ID"
+private const val ARG_MARKER = "ARG_MARKER"
 
 class AmbientToolTest {
     @Test fun recentRootsPageAndExcludeDescendants() {
@@ -386,12 +401,195 @@ class AmbientToolTest {
         assertEquals("unknown_function", json(effect.output).getValue("error").jsonPrimitive.content)
         assertFalse(effect.output.isEmpty())
     }
+
+    @Test fun wideMillisecondCursorReturnsRecordsAndReplaysExactDecimal() = runBlocking {
+        val server = MockWebServer()
+        val http = AmbientOpenCodeClients.create()
+        server.start()
+        try {
+            val repository = OpenCodeRepository()
+            val base = server.url("/").toString().trimEnd('/')
+            repository.configure(base, "synthetic-user", "synthetic-pass")
+            val gateway = AmbientLiveGateway(repository, baseClient = http, httpTrace = { _, _, _ -> })
+            val lease = AmbientLease("host", 3L, "/work", 4L, "owner")
+            val token = gateway.arm("host", 3L, "/work", 4L, "owner")
+            val runner = AmbientToolRunner(
+                gateway = gateway.authorizing,
+                currentLease = { lease },
+                currentBinding = { null },
+                currentAgent = { "plan" },
+                nowEpochMillis = { 1_700_000_000_000L },
+                nextMessageId = { "msg_fixed" },
+                trace = AmbientToolTrace { },
+            )
+            val roots = (0 until 50).joinToString(",") { sessionBody("r$it", archived = 5) }
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("x-next-cursor", WIDE_CURSOR)
+                    .setBody("[$roots]"),
+            )
+            server.enqueue(MockResponse().setResponseCode(200).setBody("[${sessionBody("r50", archived = 6)}]"))
+            val effect = runner.execute(
+                AmbientHostedFunction.QUERY_JOBS,
+                queryArgs(skip = 0, count = 50),
+                lease,
+                token,
+            )
+            val payload = json(effect.output)
+            assertEquals(JsonPrimitive(true), payload["ok"])
+            assertNull(payload["error"])
+            assertFalse(effect.output.contains(AmbientToolCodes.LIST_FAILED_MESSAGE))
+            val ids = payload.getValue("records").jsonArray.map { it.jsonObject.getValue("id").jsonPrimitive.content }
+            assertEquals(50, ids.size)
+            assertEquals("r0", ids.first())
+            assertEquals("r49", ids.last())
+            assertFalse(ids.contains("r50"))
+            val page = payload.getValue("pagination").jsonObject
+            assertEquals("0", page.getValue("skip").jsonPrimitive.content)
+            assertEquals("50", page.getValue("count").jsonPrimitive.content)
+            assertEquals(50, page.getValue("returned").jsonPrimitive.content.toInt())
+            assertEquals(JsonPrimitive(true), page["hasMore"])
+            assertEquals("50", page.getValue("nextSkip").jsonPrimitive.content)
+            assertEquals(2, server.requestCount)
+            val first = server.takeRequest()
+            val second = server.takeRequest()
+            for (recorded in listOf(first, second)) {
+                assertEquals("/experimental/session", recorded.requestUrl?.encodedPath)
+                assertEquals("true", recorded.requestUrl?.queryParameter("roots"))
+                assertEquals("true", recorded.requestUrl?.queryParameter("archived"))
+                assertEquals("50", recorded.requestUrl?.queryParameter("limit"))
+                assertEquals(AmbientLiveGateway.basic("synthetic-user", "synthetic-pass"), recorded.getHeader("Authorization"))
+            }
+            assertNull(first.requestUrl?.queryParameter("cursor"))
+            assertEquals(WIDE_CURSOR, second.requestUrl?.queryParameter("cursor"))
+            assertTrue(WIDE_CURSOR.toLong() > Int.MAX_VALUE)
+        } finally {
+            server.shutdown()
+            http.dispatcher.executorService.shutdown()
+            http.connectionPool.evictAll()
+        }
+    }
+
+    @Test fun malformedCursorAndLongOverflowFailClosed() {
+        for (header in listOf("9223372036854775808", "1792230000123.0", "+1792230000123", "01792230000123", "cur-2")) {
+            val script = AmbientToolScript()
+            script.handler = {
+                toolHttp(200, "[${sessionBody("a1", archived = 5)}]", mapOf("x-next-cursor" to listOf(header)))
+            }
+            val effect = script.execute(AmbientHostedFunction.QUERY_JOBS, queryArgs(skip = 0, count = 10))
+            assertTrue(header, script.calls.size == 1)
+            assertEquals("GET", script.calls.single().method)
+            assertNull(script.calls.single().query["cursor"])
+            assertEquals("50", script.calls.single().query["limit"])
+            assertNull(script.calls.single().query["skip"])
+            val payload = json(effect.output)
+            assertEquals(JsonPrimitive(false), payload["ok"])
+            assertEquals("failed", payload.getValue("error").jsonPrimitive.content)
+            assertNull(payload["records"])
+            assertNull(payload["pagination"])
+            assertFalse(effect.output.contains(header))
+        }
+    }
+
+    @Test fun runnerTraceKeepsOnlyCanonicalDiagnostics() {
+        val lines = mutableListOf<String>()
+        val script = AmbientToolScript(trace = AmbientToolTrace { lines += it })
+        script.handler = {
+            toolHttp(
+                200,
+                "[${sessionBody(ID_MARKER, title = "$TITLE_MARKER $URL_MARKER $SECRET_MARKER", archived = 5)}]",
+            )
+        }
+        val listed = script.execute(
+            AmbientHostedFunction.QUERY_JOBS,
+            queryArgs(text = "$ARG_MARKER $SECRET_MARKER"),
+        )
+        assertTrue(listed.output.contains(SECRET_MARKER))
+        assertTrue(listed.output.contains(ID_MARKER))
+        assertTrue(listed.output.contains(URL_MARKER))
+        assertEquals(1, lines.size)
+        assertTrue(lines.single().matches(Regex("^fn=query_jobs stage=ok http=200 ms=\\d+ count=1$")))
+        assertTraceClosed(lines.single())
+
+        script.handler = {
+            toolHttp(
+                500,
+                """{"title":"$TITLE_MARKER","id":"$ID_MARKER","url":"$URL_MARKER","arguments":"$ARG_MARKER","secret":"$SECRET_MARKER"}""",
+            )
+        }
+        val failed = script.execute(AmbientHostedFunction.QUERY_JOBS, queryArgs(text = ARG_MARKER))
+        assertEquals("failed", json(failed.output).getValue("error").jsonPrimitive.content)
+        assertFalse(failed.output.contains(SECRET_MARKER))
+        assertTrue(lines.last().matches(Regex("^fn=query_jobs stage=failed http=500 ms=\\d+ count=-$")))
+        assertTraceClosed(lines.last())
+
+        script.execute("query_jobs$SECRET_MARKER", """{"text":"$ARG_MARKER","url":"$URL_MARKER","sessionID":"$ID_MARKER"}""")
+        assertTrue(lines.last().matches(Regex("^fn=other stage=unknown_function http=- ms=\\d+ count=-$")))
+        assertTraceClosed(lines.last())
+
+        val poisoned = buildJsonObject {
+            put("ok", false)
+            put("error", "failed $SECRET_MARKER")
+            put("status", TITLE_MARKER)
+            put("message", URL_MARKER)
+            put("sessionID", ID_MARKER)
+            put("arguments", ARG_MARKER)
+            put("http_status", SECRET_MARKER)
+            put("pagination", buildJsonObject { put("returned", ARG_MARKER) })
+        }.toString()
+        val other = ambientToolTraceLine("query_jobs $SECRET_MARKER", poisoned, null, 15)
+        assertEquals("fn=other stage=other http=- ms=15 count=-", other)
+        assertTraceClosed(other)
+        val failedWithoutStatus = ambientToolTraceLine(
+            AmbientHostedFunction.QUERY_JOBS,
+            """{"ok":false,"error":"failed","message":"$SECRET_MARKER $URL_MARKER","sessionID":"$ID_MARKER","title":"$TITLE_MARKER"}""",
+            null,
+            3,
+        )
+        assertEquals("fn=query_jobs stage=failed http=- ms=3 count=-", failedWithoutStatus)
+        assertTraceClosed(failedWithoutStatus)
+        val failedWithStatus = ambientToolTraceLine(
+            AmbientHostedFunction.QUERY_JOBS,
+            """{"ok":false,"error":"failed","message":"$SECRET_MARKER","http_status":404}""",
+            null,
+            3,
+        )
+        assertEquals("fn=query_jobs stage=failed http=404 ms=3 count=-", failedWithStatus)
+        assertTraceClosed(failedWithStatus)
+        val ok = ambientToolTraceLine(
+            AmbientHostedFunction.QUERY_JOBS,
+            buildJsonObject {
+                put("ok", true)
+                put("title", TITLE_MARKER)
+                put("records", buildJsonArray {
+                    add(buildJsonObject { put("id", ID_MARKER) })
+                })
+                put("pagination", buildJsonObject { put("returned", 2) })
+            }.toString(),
+            200,
+            9,
+        )
+        assertEquals("fn=query_jobs stage=ok http=200 ms=9 count=2", ok)
+        assertTraceClosed(ok)
+    }
+
+    @Test fun defaultToolTraceSinkSurvivesJvm() {
+        AmbientToolTrace.DEVICE.record("fn=other stage=other http=- ms=0 count=-")
+    }
+
+    private fun assertTraceClosed(line: String) {
+        for (token in listOf(SECRET_MARKER, URL_MARKER, TITLE_MARKER, ID_MARKER, ARG_MARKER)) {
+            assertFalse(line, line.contains(token))
+        }
+    }
 }
 
 internal class AmbientToolScript(
     directory: String? = "/work",
     agentName: String? = "plan",
     bindingSession: AmbientBinding? = null,
+    private val trace: AmbientToolTrace = AmbientToolTrace.DEVICE,
 ) {
     var lease: AmbientLease? = AmbientLease("host", 3L, directory, 4L, "owner")
     var binding: AmbientBinding? = bindingSession
@@ -429,6 +627,7 @@ internal class AmbientToolScript(
             currentAgent = { agent },
             nowEpochMillis = { 1_700_000_000_000L },
             nextMessageId = { "msg_fixed" },
+            trace = trace,
         )
     }
 
@@ -551,10 +750,11 @@ internal fun queryArgs(
     archivedOnly: Boolean? = true,
     skip: Int? = 0,
     count: Int? = 10,
+    text: String = "",
 ): String = buildJsonObject {
     put("queryScope", scope)
     if (sessionId == null) put("sessionID", JsonNull) else put("sessionID", sessionId)
-    put("text", "")
+    put("text", text)
     if (archivedOnly == null) put("archivedOnly", JsonNull) else put("archivedOnly", archivedOnly)
     if (skip == null) put("skip", JsonNull) else put("skip", skip)
     if (count == null) put("count", JsonNull) else put("count", count)

@@ -7,6 +7,7 @@ import com.yage.opencode_client.ambient.protocol.AmbientGatewayCall
 import com.yage.opencode_client.ambient.protocol.AmbientGatewayExchange
 import com.yage.opencode_client.ambient.protocol.AmbientHttpResult
 import com.yage.opencode_client.data.repository.OpenCodeRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -131,6 +132,7 @@ class AmbientLiveGateway(
     val gate: AmbientDispatchGate = AmbientDispatchGate(),
     private val baseClient: OkHttpClient = AmbientOpenCodeClients.create(),
     private val beforeDispatch: suspend (Long) -> Unit = {},
+    private val httpTrace: (String, Int?, Long) -> Unit = ::ambientLiveTrace,
 ) {
     val authorizing: AmbientAuthorizingGateway = AmbientAuthorizingGateway(gate, ::dispatch)
 
@@ -167,23 +169,59 @@ class AmbientLiveGateway(
         call: AmbientGatewayCall,
         token: Long,
     ): AmbientHttpResult {
-        if (!AmbientLivePaths.accepts(call)) throw AmbientLiveTransportError()
-        beforeDispatch(token)
-        val live = gate.authorize(token) ?: return AmbientHttpResult(0, emptyMap(), "")
-        if (!sameAuthority(live, config)) return AmbientHttpResult(0, emptyMap(), "")
-        val url = AmbientLivePaths.buildUrl(live.baseUrl, call) ?: throw AmbientLiveTransportError()
-        val request = Request.Builder()
-            .url(url)
-            .method(call.method.trim().uppercase(), requestBody(call))
-            .header("Accept", "application/json")
-            .build()
-        val response = execute(clientFor(token, live), request)
+        val started = System.nanoTime()
+        var stage = "transport"
+        var httpStatus: Int? = null
+        var report = true
         try {
-            return withContext(Dispatchers.IO) {
-                response.use { http -> readResult(token, http) }
+            if (!AmbientLivePaths.accepts(call)) throw AmbientLiveTransportError()
+            beforeDispatch(token)
+            val live = gate.authorize(token) ?: run {
+                stage = "stale"
+                return AmbientHttpResult(0, emptyMap(), "")
             }
+            if (!sameAuthority(live, config)) {
+                stage = "stale"
+                return AmbientHttpResult(0, emptyMap(), "")
+            }
+            val url = AmbientLivePaths.buildUrl(live.baseUrl, call) ?: throw AmbientLiveTransportError()
+            val request = Request.Builder()
+                .url(url)
+                .method(call.method.trim().uppercase(), requestBody(call))
+                .header("Accept", "application/json")
+                .build()
+            val response = execute(clientFor(token, live), request)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    response.use { http -> readResult(token, http) }
+                }
+                if (result.code == 0 && result.headers.isEmpty()) {
+                    stage = "stale"
+                } else {
+                    stage = "http"
+                    httpStatus = result.code
+                }
+                return result
+            } finally {
+                response.close()
+            }
+        } catch (cancelled: CancellationException) {
+            report = false
+            throw cancelled
+        } catch (_: Exception) {
+            stage = "transport"
+            httpStatus = null
+            throw AmbientLiveTransportError()
         } finally {
-            response.close()
+            if (report) {
+                val durationMs = ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(0L)
+                try {
+                    httpTrace(stage, httpStatus, durationMs)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                }
+            }
         }
     }
 
@@ -279,3 +317,18 @@ class AmbientLiveGateway(
 }
 
 private class AmbientLiveTransportError : Exception("transport")
+
+internal fun ambientLiveTrace(stage: String, httpStatus: Int?, durationMs: Long) {
+    try {
+        android.util.Log.i("AmbientLive", ambientLiveTraceLine(stage, httpStatus, durationMs))
+    } catch (_: Throwable) {
+    }
+}
+
+internal fun ambientLiveTraceLine(stage: String, httpStatus: Int?, durationMs: Long): String {
+    val token = when (stage) {
+        "http", "transport", "stale" -> stage
+        else -> "other"
+    }
+    return "stage=$token http=${httpStatus?.toString() ?: "-"} ms=$durationMs"
+}

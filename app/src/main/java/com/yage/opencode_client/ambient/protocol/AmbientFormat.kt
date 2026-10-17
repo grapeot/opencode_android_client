@@ -88,7 +88,7 @@ object AmbientPromptWire {
     fun sessionCreate(title: String?): String =
         if (title == null) "{}" else buildJsonObject { put("title", title) }.toString()
 
-    fun sessionPageQuery(cursor: Int?): List<Pair<String, String>> {
+    fun sessionPageQuery(cursor: Long?): List<Pair<String, String>> {
         val items = mutableListOf(
             "roots" to "true",
             "archived" to "true",
@@ -96,6 +96,18 @@ object AmbientPromptWire {
         )
         if (cursor != null) items.add("cursor" to cursor.toString())
         return items
+    }
+
+    /**
+     * `x-next-cursor` is `String(time.updated)`: decimal milliseconds, wider than Int.
+     * Only a canonical non-negative Long is accepted, so the next request can send that exact text.
+     * Leading zeros, signs, fractions, and values past Long are malformed.
+     */
+    fun listCursor(header: String): Long? {
+        if (header.isEmpty() || header.length > 19 || header.any { it < '0' || it > '9' }) return null
+        if (header.length > 1 && header[0] == '0') return null
+        val value = header.toLongOrNull() ?: return null
+        return if (value.toString() == header) value else null
     }
 
     fun startData(messageId: String, text: String, agent: String, providerId: String, modelId: String): String =
@@ -238,7 +250,7 @@ data class AmbientListItem(
     val parentId: String,
 )
 
-data class AmbientListPage(val rows: List<AmbientListItem>, val nextCursor: Int?)
+data class AmbientListPage(val rows: List<AmbientListItem>, val nextCursor: Long?)
 
 data class AmbientListWindow(
     val records: List<AmbientListItem>,
@@ -267,7 +279,7 @@ object AmbientSessionWalk {
     ): AmbientListWindow {
         val seen = HashSet<String>()
         val qualified = ArrayList<AmbientListItem>()
-        var cursor: Int? = null
+        var cursor: Long? = null
         var fetched = 0
         var exhausted = false
         var stalled = false

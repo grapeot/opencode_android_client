@@ -3,6 +3,8 @@ package com.yage.opencode_client.ambient
 import com.yage.opencode_client.ambient.gateway.AmbientLiveGateway
 import com.yage.opencode_client.ambient.gateway.AmbientLivePaths
 import com.yage.opencode_client.ambient.gateway.AmbientOpenCodeClients
+import com.yage.opencode_client.ambient.gateway.ambientLiveTrace
+import com.yage.opencode_client.ambient.gateway.ambientLiveTraceLine
 import com.yage.opencode_client.ambient.protocol.AmbientGatewayCall
 import com.yage.opencode_client.ambient.protocol.AmbientGatewayExchange
 import com.yage.opencode_client.data.repository.OpenCodeRepository
@@ -203,6 +205,76 @@ class AmbientLiveGatewayTest {
         repository.configure(base(), "synthetic-user", "synthetic-pass")
         assertNull(gateway.gate.authorize(token))
         assertFalse(gateway.retire(token))
+        val rejected = gateway.exchange(token, AmbientGatewayCall("GET", "/provider"))
+        assertTrue(rejected is AmbientGatewayExchange.StaleLease)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun healthSameNormalizedHostKeepsAuthorizationAndDispatches() = runBlocking {
+        val gateway = gateway()
+        val token = arm(gateway)
+        assertFalse(repository.configureForHealth(base(), "synthetic-user", "synthetic-pass"))
+        assertFalse(repository.configureForHealth(base() + "/", "synthetic-user", "synthetic-pass"))
+        assertFalse(repository.configureForHealth(base().removePrefix("http://"), "synthetic-user", "synthetic-pass"))
+        assertTrue(gateway.gate.authorize(token) != null)
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        val done = gateway.exchange(token, AmbientGatewayCall("GET", "/provider")) as AmbientGatewayExchange.Completed
+        assertEquals(200, done.http.code)
+        assertBasic(server.takeRequest())
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun healthChangedHostOrCredentialsDropTheOldToken() = runBlocking {
+        val gateway = gateway()
+        val hostToken = arm(gateway)
+        assertTrue(repository.configureForHealth("http://127.0.0.1:9", "synthetic-user", "synthetic-pass"))
+        assertNull(gateway.gate.authorize(hostToken))
+        assertTrue(gateway.exchange(hostToken, AmbientGatewayCall("GET", "/provider")) is AmbientGatewayExchange.StaleLease)
+
+        repository.configure(base(), "synthetic-user", "synthetic-pass")
+        val userToken = arm(gateway)
+        assertTrue(repository.configureForHealth(base(), "other-user", "synthetic-pass"))
+        assertNull(gateway.gate.authorize(userToken))
+        assertTrue(gateway.exchange(userToken, AmbientGatewayCall("GET", "/provider")) is AmbientGatewayExchange.StaleLease)
+
+        repository.configure(base(), "synthetic-user", "synthetic-pass")
+        val passwordToken = arm(gateway)
+        assertTrue(repository.configureForHealth(base(), "synthetic-user", "other-pass"))
+        assertNull(gateway.gate.authorize(passwordToken))
+        assertTrue(gateway.exchange(passwordToken, AmbientGatewayCall("GET", "/provider")) is AmbientGatewayExchange.StaleLease)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun liveTraceOmitsRequestAndResponseBodies() = runBlocking {
+        val lines = mutableListOf<String>()
+        val gateway = AmbientLiveGateway(repository, baseClient = http, httpTrace = { stage, status, ms ->
+            lines += ambientLiveTraceLine(stage, status, ms)
+        })
+        val token = arm(gateway)
+        val marker = "SECRET_MARKER"
+        val body = """{"title":"TITLE_MARKER","id":"ses_MARKER_ID","url":"https://synthetic.invalid/marker","arguments":"ARG_MARKER","secret":"$marker"}"""
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val done = gateway.exchange(
+            token,
+            AmbientGatewayCall("POST", "/session/ses_1/prompt_async", emptyMap(), body),
+        ) as AmbientGatewayExchange.Completed
+        assertEquals(body, done.http.body)
+        assertEquals(1, lines.size)
+        val line = lines.single()
+        assertTrue(line.matches(Regex("^stage=http http=200 ms=\\d+$")))
+        for (tokenText in listOf(marker, "TITLE_MARKER", "ses_MARKER_ID", "https://synthetic.invalid", "ARG_MARKER", "127.0.0.1")) {
+            assertFalse(line, line.contains(tokenText))
+        }
+        assertEquals(body, server.takeRequest().body.readUtf8())
+    }
+
+    @Test
+    fun defaultLiveTraceSinkSurvivesJvm() {
+        ambientLiveTrace("http", 200, 0)
+        ambientLiveTrace("SECRET_MARKER", null, 1)
     }
 
     @Test

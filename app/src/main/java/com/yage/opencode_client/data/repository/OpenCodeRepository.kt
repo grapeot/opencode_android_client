@@ -122,11 +122,29 @@ class OpenCodeRepository @Inject constructor() {
     @Synchronized
     fun configure(baseUrl: String, username: String? = null, password: String? = null) {
         ambientGate?.invalidate()
-        val normalized = if (baseUrl.startsWith("http")) baseUrl else "http://$baseUrl"
-        this.baseUrl = normalized.trimEnd('/')
+        this.baseUrl = normalizedBaseUrl(baseUrl)
         this.username = username
         this.password = password
         rebuildClients()
+    }
+
+    /**
+     * Foreground health only. Returns true only when the normalized base URL or Basic
+     * credentials change. That path still [configure]s, which revokes the live gate before
+     * the replacement clients exist. The same values return false and leave the gate armed.
+     * Explicit [configure] always revokes, including a same-host call.
+     */
+    @Synchronized
+    fun configureForHealth(baseUrl: String, username: String? = null, password: String? = null): Boolean {
+        val normalized = normalizedBaseUrl(baseUrl)
+        if (this.baseUrl == normalized && this.username == username && this.password == password) return false
+        configure(normalized, username, password)
+        return true
+    }
+
+    private fun normalizedBaseUrl(baseUrl: String): String {
+        val withScheme = if (baseUrl.startsWith("http")) baseUrl else "http://$baseUrl"
+        return withScheme.trimEnd('/')
     }
 
     private suspend fun <T> apiCall(block: suspend () -> T): Result<T> {

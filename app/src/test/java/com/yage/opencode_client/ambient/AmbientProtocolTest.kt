@@ -8,6 +8,7 @@ import com.yage.opencode_client.ambient.protocol.AmbientFunctionOutput
 import com.yage.opencode_client.ambient.protocol.AmbientHostedFunction
 import com.yage.opencode_client.ambient.protocol.AmbientHostedInbound
 import com.yage.opencode_client.ambient.protocol.AmbientModels
+import com.yage.opencode_client.ambient.protocol.AmbientPromptWire
 import com.yage.opencode_client.ambient.protocol.AmbientProtocol
 import com.yage.opencode_client.ambient.protocol.AmbientSchema
 import com.yage.opencode_client.ambient.protocol.AmbientServerEvent
@@ -163,6 +164,26 @@ class AmbientProtocolTest {
         book.collect(call.callId, call.name)
         book.noteLifecycle(lifecycle.outputCount)
         assertEquals(listOf("call_1" to "query_jobs"), book.pending)
+    }
+
+    @Test fun listCursorKeepsMillisecondTextPastInt() {
+        val millis = "1729160345123"
+        val pastInt = "2147483648"
+        val wide = "1792230000123"
+        assertEquals(1_729_160_345_123L, AmbientPromptWire.listCursor(millis))
+        assertEquals(2_147_483_648L, AmbientPromptWire.listCursor(pastInt))
+        assertEquals(1_792_230_000_123L, AmbientPromptWire.listCursor(wide))
+        assertTrue(1_792_230_000_123L > Int.MAX_VALUE)
+        assertEquals(millis, AmbientPromptWire.sessionPageQuery(AmbientPromptWire.listCursor(millis)).last().second)
+        assertEquals(pastInt, AmbientPromptWire.sessionPageQuery(AmbientPromptWire.listCursor(pastInt)).last().second)
+        assertEquals(wide, AmbientPromptWire.sessionPageQuery(AmbientPromptWire.listCursor(wide)).last().second)
+        assertEquals("50", AmbientPromptWire.sessionPageQuery(50L).last().second)
+        assertNull(AmbientPromptWire.listCursor("9223372036854775808"))
+        assertNull(AmbientPromptWire.listCursor("50.0"))
+        assertNull(AmbientPromptWire.listCursor("+50"))
+        assertNull(AmbientPromptWire.listCursor("050"))
+        assertNull(AmbientPromptWire.listCursor("cur-2"))
+        assertNull(AmbientPromptWire.listCursor(""))
     }
 
     @Test fun portalUnconfirmedAndNonfatalInvalidAudio() {

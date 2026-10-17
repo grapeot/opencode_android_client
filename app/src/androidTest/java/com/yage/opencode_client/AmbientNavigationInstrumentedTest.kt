@@ -31,6 +31,8 @@ import com.yage.opencode_client.util.SettingsManager
 import java.io.File
 import java.io.FileOutputStream
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -67,11 +69,18 @@ class AmbientNavigationInstrumentedTest {
         try {
             waitForPhoneNav()
             composeRule.onNodeWithTag(AmbientNavigationTags.PHONE_NAV).assertDoesNotExist()
+            assertHorizontalNavOrder(R.string.nav_chat, R.string.nav_files, R.string.nav_settings)
 
             nav(R.string.nav_settings).performClick().assertIsSelected()
             ambientSwitch().performScrollTo().assertIsOff().performClick()
 
             waitUntilTag(AmbientNavigationTags.PHONE_NAV, present = true)
+            assertHorizontalNavOrder(
+                R.string.nav_chat,
+                R.string.nav_files,
+                R.string.ambient_nav,
+                R.string.nav_settings,
+            )
             composeRule.onNodeWithTag(AmbientNavigationTags.PHONE_NAV)
                 .assertIsDisplayed()
                 .performClick()
@@ -195,6 +204,18 @@ class AmbientNavigationInstrumentedTest {
         } catch (_: AssertionError) {
             false
         }
+
+    private fun assertHorizontalNavOrder(vararg labelRes: Int) {
+        val bounds = labelRes.map { nav(it).fetchSemanticsNode().boundsInRoot }
+        for (index in 1 until bounds.size) {
+            assertTrue(
+                "${text(labelRes[index - 1])} should sit left of ${text(labelRes[index])}",
+                bounds[index - 1].left < bounds[index].left &&
+                    bounds[index - 1].right <= bounds[index].left + 1f,
+            )
+            assertEquals("shared nav row", bounds[0].top, bounds[index].top, 1f)
+        }
+    }
 
     private fun nav(labelRes: Int) =
         composeRule.onNode(hasText(text(labelRes)) and isSelectable())

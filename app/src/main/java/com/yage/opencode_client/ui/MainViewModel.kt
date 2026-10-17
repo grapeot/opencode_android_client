@@ -884,7 +884,10 @@ class MainViewModel @Inject constructor(
         repository.configure(profile.serverUrl, profile.basicAuth?.username, password)
     }
 
-    private suspend fun configureRepositoryForProfileAsync(profile: HostProfile): Boolean {
+    private suspend fun configureRepositoryForProfileAsync(
+        profile: HostProfile,
+        forHealth: Boolean = false,
+    ): Boolean {
         selectReadStateHost(profile.id)
         val password = profile.basicAuth?.passwordId?.let { settingsManager.basicAuthPassword(it) }
         val baseUrl = when (profile.transport) {
@@ -910,8 +913,18 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
-        repository.configure(baseUrl, profile.basicAuth?.username, password)
+        val username = profile.basicAuth?.username
+        if (forHealth) {
+            if (repository.configureForHealth(baseUrl, username, password)) invalidateCurrentAmbient()
+        } else {
+            repository.configure(baseUrl, username, password)
+        }
         return true
+    }
+
+    /** The health path replaced host or Basic credentials, so the captured live run cannot continue. */
+    private fun invalidateCurrentAmbient() {
+        ambientCoordinator?.invalidateDisconnected()
     }
 
     fun getSavedConnectionSettings(): ConnectionFormSettings = ConnectionFormSettings(
@@ -1797,7 +1810,7 @@ class MainViewModel @Inject constructor(
         hostRuntimeScope.launch {
             _state.update { it.copy(isConnecting = true, error = null, connectionPhase = null) }
             val profile = hostProfileStore.currentProfile()
-            if (!configureRepositoryForProfileAsync(profile)) return@launch
+            if (!configureRepositoryForProfileAsync(profile, forHealth = true)) return@launch
             repository.checkHealth()
                 .onSuccess { health ->
                     _state.update {

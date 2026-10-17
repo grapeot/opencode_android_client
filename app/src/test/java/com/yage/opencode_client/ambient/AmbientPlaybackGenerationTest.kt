@@ -10,6 +10,9 @@ import com.yage.opencode_client.ambient.audio.AmbientPlaybackLedger
 import com.yage.opencode_client.ambient.audio.AmbientPlaybackPump
 import com.yage.opencode_client.ambient.audio.AmbientResampler
 import com.yage.opencode_client.ambient.audio.AmbientRouteDevice
+import com.yage.opencode_client.ambient.audio.AmbientSpeakerChoice
+import com.yage.opencode_client.ambient.audio.AmbientSpeakerRoute
+import com.yage.opencode_client.ambient.audio.AmbientSpeakerSnapshot
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -118,7 +121,25 @@ class AmbientPlaybackGenerationTest {
         assertTrue(AmbientAudioSignals.endsOnFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK))
         assertFalse(AmbientAudioSignals.endsOnFocusChange(AudioManager.AUDIOFOCUS_GAIN))
         assertFalse(AmbientAudioSignals.reopensAfterFocusGain())
-        assertFalse(AmbientAudioSignals.forcesSpeakerphone())
+        val earpieceOnly = AmbientSpeakerRoute.choose(
+            AmbientSpeakerSnapshot(
+                api31 = true,
+                outputs = listOf(
+                    AmbientRouteDevice(5, AmbientAudioRoute.TYPE_BUILTIN_EARPIECE),
+                    AmbientRouteDevice(6, AmbientAudioRoute.TYPE_BUILTIN_SPEAKER),
+                ),
+                communicationDevices = listOf(
+                    AmbientRouteDevice(5, AmbientAudioRoute.TYPE_BUILTIN_EARPIECE),
+                    AmbientRouteDevice(6, AmbientAudioRoute.TYPE_BUILTIN_SPEAKER),
+                ),
+                current = AmbientRouteDevice(5, AmbientAudioRoute.TYPE_BUILTIN_EARPIECE),
+                communicationDenied = false,
+                speakerphoneOn = false,
+                wiredHeadsetOn = false,
+                bluetoothScoOn = false,
+            ),
+        ) as AmbientSpeakerChoice.CommunicationDevice
+        assertEquals(6, earpieceOnly.id)
         assertFalse(AmbientAudioSignals.ducks())
         assertEquals("focus_loss", AmbientAudioCodes.FOCUS_LOSS)
         assertEquals("headset_removed", AmbientAudioCodes.HEADSET_REMOVED)

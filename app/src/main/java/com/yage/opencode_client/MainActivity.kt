@@ -302,7 +302,8 @@ private fun PhoneLayout(
     val currentRoute = navBackStackEntry?.destination?.route
     val state by viewModel.state.collectAsStateWithLifecycle()
     val destinations = if (state.ambientEnabled) {
-        listOf(Screen.Chat, Screen.Ambient, Screen.Files, Screen.Settings)
+        // Same phone and focus order as iPhone: Chat, Files, Ambient, Settings.
+        listOf(Screen.Chat, Screen.Files, Screen.Ambient, Screen.Settings)
     } else {
         screens
     }

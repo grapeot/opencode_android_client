@@ -57,14 +57,14 @@ import com.yage.opencode_client.ambient.protocol.AmbientMeter
 import com.yage.opencode_client.ambient.protocol.AmbientPhase
 import com.yage.opencode_client.ui.theme.StopRed
 import java.math.BigDecimal
+import java.math.RoundingMode
 import kotlin.math.roundToInt
 
 internal val AmbientControlHeight = AmbientMeter.CONTROL_ROW_DP.dp
 
 internal fun formatPlain(value: Double): String {
     if (!value.isFinite()) return ""
-    val raw = BigDecimal(value.toString()).stripTrailingZeros().toPlainString()
-    return if (raw == "0.0" || raw == "-0" || raw == "-0.0") "0" else raw
+    return BigDecimal(value.toString()).setScale(2, RoundingMode.HALF_UP).toPlainString()
 }
 
 internal fun levelText(raw: Double, unconfirmed: String): String {
@@ -401,7 +401,9 @@ internal fun AmbientVolumeSlider(
     val shown = (drag ?: external).coerceIn(0, max)
     val volumeName = stringResource(R.string.ambient_output_volume)
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

@@ -42,7 +42,9 @@ import java.util.concurrent.TimeUnit
  * Full-duplex voice engine. The constructor keeps [Context.getApplicationContext]
  * and does not open the microphone, request focus, or change the route.
  * [startCapture] is the explicit start, after the coordinator has checked
- * permission and foreground-service eligibility.
+ * permission and foreground-service eligibility. After communication mode and
+ * focus, a builtin-only route prefers the handset speaker. Wired, USB, and
+ * active Bluetooth routes are not overridden.
  *
  * [volumeStream] is the platform stream for [AudioAttributes.USAGE_VOICE_COMMUNICATION].
  */
@@ -69,6 +71,7 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
     private var modeOwner = 0L
     private var modeChanged = false
     private var savedMode = AudioManager.MODE_NORMAL
+    private val speakerOwnership = AmbientSpeakerOwnership()
     private var watchedIds: Set<Int> = emptySet()
     private var captureReadBytes = AMBIENT_UPLINK_FRAME_BYTES
     private var record: AudioRecord? = null
@@ -161,7 +164,11 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
                     val code = codeOf(error)
                     failureCode = code
                     bag = unlink(attempt.generation, code)
-                    if (bag != null) restoreMode(audioManager(), attempt.generation)
+                    if (bag != null) {
+                        val manager = audioManager()
+                        restoreSpeaker(manager, attempt.generation)
+                        restoreMode(manager, attempt.generation)
+                    }
                     ownsTeardown = bag != null ||
                         attempt.record != null ||
                         attempt.track != null ||
@@ -270,6 +277,14 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
                 throw AmbientAudioStartException(AmbientAudioCodes.FOCUS_DENIED)
             }
             focusRequest = request
+        }
+        routeDefaultSpeaker(manager, generation)
+        val selectedWatch = currentRouteWatch(manager)
+        synchronized(stateLock) {
+            if (!ledger.acceptCallback(generation)) {
+                throw AmbientAudioStartException(AmbientAudioCodes.FOCUS_DENIED)
+            }
+            watchedIds = selectedWatch
         }
         val callback = routeCallback(generation)
         synchronized(stateLock) {
@@ -487,7 +502,9 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
     private fun endRun(generation: Long, cause: AmbientAudioCause?, code: String?) {
         val bag = synchronized(lifecycleLock) {
             val taken = unlink(generation, code) ?: return
-            restoreMode(audioManager(), generation)
+            val manager = audioManager()
+            restoreSpeaker(manager, generation)
+            restoreMode(manager, generation)
             teardownActive = true
             teardownGeneration = generation
             taken
@@ -598,6 +615,96 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
         try {
             manager.mode = previous
         } catch (_: SecurityException) {
+        }
+    }
+
+    private fun routeDefaultSpeaker(manager: AudioManager, generation: Long) {
+        val adapter = EngineSpeakerAdapter(manager)
+        when (val outcome = AmbientSpeakerRoute.applyDefault(adapter, generation)) {
+            is AmbientSpeakerOutcome.Failed -> throw AmbientAudioStartException(outcome.code)
+            is AmbientSpeakerOutcome.Ready -> {
+                val kept = synchronized(stateLock) {
+                    if (!ledger.acceptCallback(generation)) {
+                        false
+                    } else {
+                        speakerOwnership.retain(generation, outcome.hold)
+                        true
+                    }
+                }
+                if (!kept) {
+                    AmbientSpeakerRoute.undo(adapter, outcome.hold, generation) { true }
+                    throw AmbientAudioStartException(AmbientAudioCodes.FOCUS_DENIED)
+                }
+            }
+        }
+    }
+
+    private fun restoreSpeaker(manager: AudioManager?, generation: Long) {
+        if (manager == null) return
+        val hold = synchronized(stateLock) { speakerOwnership.take(generation) } ?: return
+        AmbientSpeakerRoute.undo(EngineSpeakerAdapter(manager), hold, generation) {
+            synchronized(stateLock) { speakerOwnership.currentOwner() == 0L }
+        }
+    }
+
+    private fun currentRouteWatch(manager: AudioManager): Set<Int> {
+        val base = snapshotRoute(manager)
+        return base + AmbientSpeakerRoute.watchIds(readSpeakerSnapshot(manager))
+    }
+
+    private fun readSpeakerSnapshot(manager: AudioManager): AmbientSpeakerSnapshot {
+        val outputs = try {
+            manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { device ->
+                AmbientRouteDevice(device.id, device.type)
+            }
+        } catch (_: SecurityException) {
+            throw AmbientAudioStartException(AmbientAudioCodes.BLUETOOTH_ROUTE_UNREADABLE)
+        }
+        val api31 = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        val communication = readCommunication(manager)
+        var denied = communication is Communication.Denied
+        val current = (communication as? Communication.Selected)?.let { selected ->
+            AmbientRouteDevice(selected.id, selected.type)
+        }
+        val available = if (!api31 || denied) {
+            null
+        } else {
+            val listed = readAvailableCommunication(manager)
+            if (listed == null) denied = true
+            listed
+        }
+        return AmbientSpeakerSnapshot(
+            api31 = api31,
+            outputs = outputs,
+            communicationDevices = available,
+            current = current,
+            communicationDenied = denied,
+            speakerphoneOn = readSpeakerphone(manager),
+            wiredHeadsetOn = readWired(manager),
+            bluetoothScoOn = readSco(manager),
+        )
+    }
+
+    private fun readAvailableCommunication(manager: AudioManager): List<AmbientRouteDevice>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        return readAvailableCommunicationS(manager)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun readAvailableCommunicationS(manager: AudioManager): List<AmbientRouteDevice>? {
+        return try {
+            manager.availableCommunicationDevices.map { device -> AmbientRouteDevice(device.id, device.type) }
+        } catch (_: SecurityException) {
+            null
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readSpeakerphone(manager: AudioManager): Boolean? {
+        return try {
+            manager.isSpeakerphoneOn
+        } catch (_: SecurityException) {
+            null
         }
     }
 
@@ -819,7 +926,7 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
         if (!isLive(generation)) return
         val manager = audioManager() ?: return
         val watched = try {
-            snapshotRoute(manager)
+            currentRouteWatch(manager)
         } catch (error: AmbientAudioStartException) {
             if (error.code == AmbientAudioCodes.BLUETOOTH_ROUTE_UNREADABLE) {
                 failAsync(generation, error.code)
@@ -938,6 +1045,54 @@ class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
         private fun ownedTrack(stillOwner: () -> Boolean): AudioTrack? {
             if (!stillOwner()) return null
             return track
+        }
+    }
+
+    private inner class EngineSpeakerAdapter(
+        private val manager: AudioManager,
+    ) : AmbientSpeakerAdapter {
+        override fun snapshot(): AmbientSpeakerSnapshot = readSpeakerSnapshot(manager)
+
+        override fun setCommunicationDevice(id: Int): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+            return setCommunicationDeviceS(id)
+        }
+
+        @RequiresApi(Build.VERSION_CODES.S)
+        private fun setCommunicationDeviceS(id: Int): Boolean {
+            val match = try {
+                manager.availableCommunicationDevices.firstOrNull { it.id == id }
+            } catch (_: SecurityException) {
+                return false
+            } ?: return false
+            return try {
+                manager.setCommunicationDevice(match)
+            } catch (_: SecurityException) {
+                false
+            }
+        }
+
+        override fun clearCommunicationDevice() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+            clearCommunicationDeviceS()
+        }
+
+        @RequiresApi(Build.VERSION_CODES.S)
+        private fun clearCommunicationDeviceS() {
+            try {
+                manager.clearCommunicationDevice()
+            } catch (_: SecurityException) {
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        override fun setSpeakerphoneOn(on: Boolean): Boolean {
+            return try {
+                manager.setSpeakerphoneOn(on)
+                true
+            } catch (_: SecurityException) {
+                false
+            }
         }
     }
 

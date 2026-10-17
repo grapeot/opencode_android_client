@@ -33,6 +33,7 @@ import com.yage.opencode_client.ambient.protocol.jsonBoolean
 import com.yage.opencode_client.ambient.protocol.jsonObject
 import com.yage.opencode_client.ambient.protocol.jsonString
 import com.yage.opencode_client.ambient.protocol.jsonWhole
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -46,6 +47,9 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.util.UUID
 import kotlin.collections.ArrayDeque
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 /**
  * Eight OpenCode tools for one Ambient run.
@@ -74,6 +78,7 @@ class AmbientToolRunner(
     private val nextMessageId: () -> String = {
         "msg_" + UUID.randomUUID().toString().replace("-", "")
     },
+    private val trace: AmbientToolTrace = AmbientToolTrace.DEVICE,
 ) : AmbientToolExecutor {
 
     override suspend fun execute(
@@ -82,24 +87,38 @@ class AmbientToolRunner(
         lease: AmbientLease,
         dispatchToken: Long,
     ): AmbientToolEffect {
-        val effect = if (!owns(lease)) {
-            staleEffect()
-        } else {
-            when (name) {
-                AmbientHostedFunction.QUERY_JOBS -> queryJobs(arguments, lease, dispatchToken)
-                AmbientHostedFunction.GET_SESSION_MESSAGES -> history(arguments, lease, dispatchToken)
-                AmbientHostedFunction.START_JOB -> startJob(arguments, lease, dispatchToken)
-                AmbientHostedFunction.CONTINUE_JOB -> continueJob(arguments, lease, dispatchToken)
-                AmbientHostedFunction.STOP_JOB -> stopJob(arguments, lease, dispatchToken)
-                AmbientHostedFunction.ANSWER_PENDING -> answerPending(arguments, lease, dispatchToken)
-                AmbientHostedFunction.ARCHIVE_JOB -> archiveJob(arguments, lease, dispatchToken, archiving = true)
-                AmbientHostedFunction.UNARCHIVE_JOB -> archiveJob(arguments, lease, dispatchToken, archiving = false)
-                else -> unknownEffect()
+        val started = System.nanoTime()
+        val slot = TraceSlot()
+        return withContext(slot) {
+            val effect = if (!owns(lease)) {
+                staleEffect()
+            } else {
+                when (name) {
+                    AmbientHostedFunction.QUERY_JOBS -> queryJobs(arguments, lease, dispatchToken)
+                    AmbientHostedFunction.GET_SESSION_MESSAGES -> history(arguments, lease, dispatchToken)
+                    AmbientHostedFunction.START_JOB -> startJob(arguments, lease, dispatchToken)
+                    AmbientHostedFunction.CONTINUE_JOB -> continueJob(arguments, lease, dispatchToken)
+                    AmbientHostedFunction.STOP_JOB -> stopJob(arguments, lease, dispatchToken)
+                    AmbientHostedFunction.ANSWER_PENDING -> answerPending(arguments, lease, dispatchToken)
+                    AmbientHostedFunction.ARCHIVE_JOB -> archiveJob(arguments, lease, dispatchToken, archiving = true)
+                    AmbientHostedFunction.UNARCHIVE_JOB -> archiveJob(arguments, lease, dispatchToken, archiving = false)
+                    else -> unknownEffect()
+                }
             }
+            val bounded = AmbientFunctionOutput.ensureSendable(effect.output)
+            val result = if (bounded == effect.output) effect else AmbientToolEffect(output = bounded)
+            try {
+                trace.record(ambientToolTraceLine(name, result.output, slot.http, elapsedMs(started)))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+            }
+            result
         }
-        val bounded = AmbientFunctionOutput.ensureSendable(effect.output)
-        return if (bounded == effect.output) effect else AmbientToolEffect(output = bounded)
     }
+
+    private fun elapsedMs(started: Long): Long =
+        ((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(0L)
 
     private suspend fun queryJobs(arguments: String, lease: AmbientLease, token: Long): AmbientToolEffect {
         val args = jsonObject(arguments) ?: return badEffect()
@@ -114,7 +133,7 @@ class AmbientToolRunner(
     private suspend fun queryRecent(args: JsonObject, lease: AmbientLease, token: Long): AmbientToolEffect {
         val paging = paging(args) ?: return badEffect()
         val pages = ArrayList<AmbientListPage>()
-        var cursor: Int? = null
+        var cursor: Long? = null
         while (true) {
             when (val fetched = fetch(lease, token, get("/experimental/session", pageQuery(cursor)))) {
                 Fetched.Stale -> return staleEffect()
@@ -600,7 +619,10 @@ class AmbientToolRunner(
         return when (val exchange = gateway.exchange(token, call)) {
             AmbientGatewayExchange.StaleLease -> Fetched.Stale
             is AmbientGatewayExchange.TransportFailed -> Fetched.Transport
-            is AmbientGatewayExchange.Completed -> if (owns(lease)) Fetched.Ok(exchange.http) else Fetched.Stale
+            is AmbientGatewayExchange.Completed -> {
+                coroutineContext[TraceSlot]?.http = exchange.http.code
+                if (owns(lease)) Fetched.Ok(exchange.http) else Fetched.Stale
+            }
         }
     }
 
@@ -702,7 +724,7 @@ class AmbientToolRunner(
             id.length <= 200 &&
             id.none { it == '/' || it == '\\' || it == '?' || it == '#' || it.isWhitespace() || it.isISOControl() }
 
-    private fun pageQuery(cursor: Int?): Map<String, String> =
+    private fun pageQuery(cursor: Long?): Map<String, String> =
         LinkedHashMap<String, String>().apply {
             for ((key, value) in AmbientPromptWire.sessionPageQuery(cursor)) put(key, value)
         }
@@ -846,7 +868,7 @@ class AmbientToolRunner(
         val header = http.header(AmbientProtocol.CURSOR_HEADER)
         val next = when (header) {
             null -> null
-            else -> header.toIntOrNull() ?: return null
+            else -> AmbientPromptWire.listCursor(header) ?: return null
         }
         return AmbientListPage(rows, next)
     }
@@ -1033,4 +1055,58 @@ class AmbientToolRunner(
         data object Stale : Collect
         data class Failed(val effect: AmbientToolEffect) : Collect
     }
+
+    private class TraceSlot : AbstractCoroutineContextElement(Key) {
+        var http: Int? = null
+
+        companion object Key : CoroutineContext.Key<TraceSlot>
+    }
 }
+
+fun interface AmbientToolTrace {
+    fun record(line: String)
+
+    companion object {
+        val DEVICE: AmbientToolTrace = AmbientToolTrace { line ->
+            try {
+                android.util.Log.i("AmbientLive", line)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+}
+
+internal fun ambientToolTraceLine(name: String, output: String, httpStatus: Int?, durationMs: Long): String {
+    val function = if (name in AmbientHostedFunction.names) name else "other"
+    val root = jsonObject(output)
+    val error = jsonString(root?.get("error"))
+    val status = jsonString(root?.get("status"))
+    val stage = when {
+        error != null && error in TRACE_STAGES -> error
+        status != null && status in TRACE_STAGES -> status
+        jsonBoolean(root?.get("ok")) == true -> "ok"
+        else -> "other"
+    }
+    val http = httpStatus ?: jsonWhole(root?.get("http_status"))
+    val count = jsonWhole(asObject(root?.get("pagination"))?.get("returned"))
+    return "fn=$function stage=$stage http=${http?.toString() ?: "-"} ms=$durationMs count=${count?.toString() ?: "-"}"
+}
+
+private val TRACE_STAGES = setOf(
+    "ok",
+    "accepted",
+    "cancelled",
+    "archived",
+    "unarchived",
+    "partial",
+    AmbientToolCodes.STALE_CONTEXT,
+    AmbientToolCodes.DIRECTORY_UNKNOWN,
+    AmbientToolCodes.BAD_ARGUMENTS,
+    AmbientToolCodes.UNKNOWN_FUNCTION,
+    AmbientToolCodes.UNKNOWN_MODEL,
+    AmbientToolCodes.NEEDS_INPUT,
+    AmbientToolCodes.OUTPUT_TOO_LARGE,
+    AmbientToolCodes.ENCODE,
+    AmbientToolCodes.NOT_CONFIRMED,
+    AmbientToolCodes.FAILED,
+)
