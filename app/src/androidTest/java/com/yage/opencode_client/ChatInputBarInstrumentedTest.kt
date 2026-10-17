@@ -107,6 +107,7 @@ class ChatInputBarInstrumentedTest {
         }
 
         composeRule.onNodeWithText("Stop transcription wait").assertIsDisplayed()
+        composeRule.onNodeWithText("Transcribing").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Send").assertIsNotEnabled()
     }
 
@@ -137,5 +138,93 @@ class ChatInputBarInstrumentedTest {
 
         composeRule.onNodeWithContentDescription("Retry this segment").assertIsEnabled()
         composeRule.onNodeWithText("Discard audio").assertIsDisplayed()
+        composeRule.onNodeWithText("Preserved audio").assertDoesNotExist()
+        composeRule.onNodeWithText("Retry this segment").assertDoesNotExist()
+    }
+
+    @Test
+    fun recordingKeepsListeningOnTransportOnly() {
+        composeRule.setContent {
+            MaterialTheme {
+                ChatInputBar(
+                    text = "",
+                    isRecording = true,
+                    isTranscribing = false,
+                    hasPreservedSpeechAudio = false,
+                    isRetryingSpeech = false,
+                    speechAudioLevel = 0.4f,
+                    isSpeechConfigured = true,
+                    imageAttachments = emptyList(),
+                    onTextChange = {},
+                    onSend = {},
+                    onAddImages = {},
+                    onRemoveImage = {},
+                    onAbortSpeech = {},
+                    onRetrySpeech = {},
+                    onDiscardSpeech = {},
+                    onToggleRecording = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Listening").assertIsEnabled()
+        composeRule.onNodeWithText("Listening").assertDoesNotExist()
+    }
+
+    @Test
+    fun idleHidesTapToSpeakLabel() {
+        composeRule.setContent {
+            MaterialTheme {
+                ChatInputBar(
+                    text = "",
+                    isRecording = false,
+                    isTranscribing = false,
+                    hasPreservedSpeechAudio = false,
+                    isRetryingSpeech = false,
+                    speechAudioLevel = 0f,
+                    isSpeechConfigured = true,
+                    imageAttachments = emptyList(),
+                    onTextChange = {},
+                    onSend = {},
+                    onAddImages = {},
+                    onRemoveImage = {},
+                    onAbortSpeech = {},
+                    onRetrySpeech = {},
+                    onDiscardSpeech = {},
+                    onToggleRecording = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Tap to speak").assertIsEnabled()
+        composeRule.onNodeWithText("Tap to speak").assertDoesNotExist()
+    }
+
+    @Test
+    fun unconfiguredSpeechStillShowsConfigureHint() {
+        composeRule.setContent {
+            MaterialTheme {
+                ChatInputBar(
+                    text = "",
+                    isRecording = false,
+                    isTranscribing = false,
+                    hasPreservedSpeechAudio = false,
+                    isRetryingSpeech = false,
+                    speechAudioLevel = 0f,
+                    isSpeechConfigured = false,
+                    imageAttachments = emptyList(),
+                    onTextChange = {},
+                    onSend = {},
+                    onAddImages = {},
+                    onRemoveImage = {},
+                    onAbortSpeech = {},
+                    onRetrySpeech = {},
+                    onDiscardSpeech = {},
+                    onToggleRecording = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Configure speech").assertIsDisplayed()
     }
 }

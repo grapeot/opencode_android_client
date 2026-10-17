@@ -68,9 +68,9 @@ Quiet Tech 的 token 定义在 `ui/theme/Color.kt`，并在 `ui/theme/Theme.kt` 
 ## Composer（`ChatInputBar`）
 
 - F3 后与 iOS 一致采用 **voice rail + text review field** 两行结构，而不是把 mic 塞在单个输入 pill 内。语音是手机 steer 的主输入模态；文本框承担转写审阅、轻量修正和 fallback typing。
-- **Voice rail** 位于文本框上方：左侧 transport、中央 waveform/status、右侧轻量恢复动作。录音中 waveform 消费 `VoiceFlowMicrophone.audioLevel` 的真实 0..1 smoothed mic level；转写和 retry 中显示 generating waveform。
-- 左侧 transport：空闲为 `Tap to speak` mic；录音中变 stop，点击是正常结束采集并进入转写；preserved-audio 状态变 `Retry this segment`，点击重新识别同一段已保存 PCM。转写中 transport disabled，避免把等待恢复误读为重新录音。
-- 右侧轻量动作：转写等待显示 `Stop transcription wait`，调用 `abortPreservingAudio()` 并保留音频；preserved-audio 状态显示 `Discard audio`，用于放弃缓存并退出恢复状态。retry 是唯一主恢复动作，discard 是退出动作，不能出现两个 retry 入口。
+- **Voice rail** 位于文本框上方：左侧 transport、中央 waveform、右侧只放会改变阶段的动作。进行中的阶段词（Listening / Transcribing / Preserved audio / Retry this segment）只出现在 composer 上方的状态栏，不在 rail 上再写一遍。空闲的 Tap to speak 不进状态栏，只留在 transport 的无障碍名上。录音中 waveform 消费 `VoiceFlowMicrophone.audioLevel` 的真实 0..1 smoothed mic level；转写和 retry 中显示 generating waveform。
+- 左侧 transport：空闲为 mic，无障碍名仍是 `Tap to speak`；录音中变 stop，无障碍名 `Listening`，点击是正常结束采集并进入转写；preserved-audio 状态变 `Retry this segment`，点击重新识别同一段已保存 PCM。转写中 transport disabled，避免把等待恢复误读为重新录音。
+- 右侧可见文字只有三处：转写等待显示 `Stop transcription wait`，调用 `abortPreservingAudio()` 并保留音频；preserved-audio 状态显示 `Discard audio`，用于放弃缓存并退出恢复状态；语音未配置时显示 `Configure speech`，因为麦克风看起来能点、实际不会工作。retry 是唯一主恢复动作，discard 是退出动作，不能出现两个 retry 入口。空闲和录音时右侧没有阶段标签。
 - **Text review field**：下方单个圆角 pill，底色 `surfaceVariant`，无边框 `BasicTextField`，`heightIn(min = 66.dp, max = 132.dp)`。语音转写和 retry partial transcript 写入文本框，用户可审阅和修正；普通打字保持系统默认编辑行为。
 - **send 始终存在**：实底电蓝 36dp 圆角方块固定在 text review field 右侧。session busy 时仍可发送，因为服务端 `prompt_async` 支持排队；speech transcribing/retrying 时禁用，避免发送半成品转写。
 - **agent interrupt 降权**：agent running 用 composer 附近 quiet status row 表达，例如 `Agent running · Transcribing`。`Interrupt agent` 放入 `⋯` overflow menu，作为低频 escape hatch，不再占据主输入区红色 stop 按钮，也不和语音 stop-wait 共用同一 glyph。
