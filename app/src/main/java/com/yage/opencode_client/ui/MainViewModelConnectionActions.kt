@@ -43,6 +43,7 @@ internal fun applySavedSettings(
             languageMode = settingsManager.languageMode,
             layoutPreference = LayoutPreference.fromRaw(settingsManager.layoutPreference),
             voiceFirstInput = settingsManager.voiceFirstInput,
+            ambientEnabled = settingsManager.ambientEnabled,
         )
     }
 

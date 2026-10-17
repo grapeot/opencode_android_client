@@ -1,5 +1,27 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-17 — PR #138 真机反馈修复与双端共享 PM 提示词
+
+- **版本与真机安装状态**：在 TriFold 首版基线（`970b716`）之上分两阶段完成原位安装与启动验证。两个包均含共享 PM 提示词，第二阶段另含 `16dp` 音量行右侧留白与两位小数展示。PR #138 保持未合并。
+- **导航与控件几何**：手机与 Focus 导航顺序为 `Chat`、`Files`、`Ambient`、`Settings`；48dp RMS 麦克风采用与 iOS 一致的 28 单位胶囊、托架和底座比例。音量行右侧增加 16dp 留白。
+- **默认外放与路由生命周期**：通过 `AudioManager` 默认选择内置扬声器，保留有线耳机、USB 与蓝牙外设路由，并按所属 generation 恢复原路由。
+- **查询与健康检查**：13 位毫秒分页游标使用 `Long` 并精确回传，避免正常 HTTP 200 响应因 Int 溢出被判为失败。前台健康检查在 host 与凭据未变时保留实时工具权限，配置实际变化或显式重配仍撤销旧权限。
+- **诊断与显示**：`AmbientLive` 只记录函数名、固定阶段和数值元数据，不记录参数、正文、URL、会话 ID 或凭据。Details 的 RMS、秒数与估算值按 HALF_UP 显示两位小数；原始数据与账本不变，整数仍为整数，未知或未确认状态不变。
+- **共享提示词**：由 Antigravity 整体重写为项目经理与语音助理职责，Android 前端 170、后端 1326 个 Unicode 字符，除平台名外与 iPhone 核心一致。先按语义定位工作、读实际历史，再按上下文派发；进度询问只查询；明确转交的原话保持原文；对当前入口的纠正不外发。区分当前入口、用户及单独命名的“GPT Live 1”目标会话，不混同底层模型标识。继续工具不提供模型参数，异常来源依据可见元数据核查；401 不等于模型退役，已受理不等于已完成，不承诺未实现的主动通知。八工具 schema 未改。
+- **本地验证**：737 项 JVM 单测、61 suites，0 失败、错误或跳过；两类 APK 构建成功。8 个模拟器用例首次通过 7 个，剩余像素用例修正测试夹具后定向通过；显示改动后 Details 与实际导航两项再次通过。已读回合成控件、空闲竖屏和音量留白截图。
+- **用户真机反馈与边界**：用户反馈当前手机测试中的工具回复、扬声器，以及跨 Tab、最小化、熄屏交互均正常。这属于用户实测反馈，不是 Agent 的真实 AudioRecord 自动化证明；未穷举全部八工具与外接耳机矩阵，也未进行付费实时模型行为评测。
+
+## 2026-10-17 — Ambient Mode 对齐 iOS：已实现，本地验证完成
+
+- 分支 `feat/ambient-mode-live` 含基础包提交 `9dee182`，基线 `02ffe6f`。未跟踪的 `docs/context_usage_sync_design.md` 与 `docs/plan_halfwidth_process_rows.md` 不纳入。未读取真实 `.env`，未安装实体 Android。
+- 设置默认关闭，写在加密偏好里。用户在前台自己开始。手机和专注布局用静态波形入口，展开布局在内容栏切换。同一轮运行跨导航和配置变化。
+- Hosted Builder 的 session POST 只带 Bearer。WebSocket 必须与门户同源，query 只有 ticket，且与响应中的 ticket 一致。OpenCode Basic 不进入这条客户端。
+- 八个工具：`query_jobs`、`get_session_messages`、`start_job`、`continue_job`、`stop_job`、`answer_pending`、`archive_job`、`unarchive_job`。开始和继续走 `prompt_async`，HTTP 200/202/204 即返回，不等待任务跑完。租约不再属于当前 owner 时拒绝。递归归档后序、同一时间戳；递归解除归档前序，并把归档时间写成 0。结束语音不中止 OpenCode 任务。
+- 麦克风前台服务从可见状态下的 `startService` 进入，服务再提升为 microphone 类型并确认后才采集。被拒绝的运行不使用 `startForegroundService` 的超时承诺。通知 Stop 保留前台服务直到音频清理完成。连接中离开前台会取消；正在听或说且服务已就绪时保持；撤销或服务销毁不会自动重启。
+- 静音是 48dp RMS 胶囊，控制行 72dp，输出音量使用系统 `STREAM_VOICE_CALL`。页面费用是本地标准价估算，与最近的门户用量快照分开。会议记录、sleep 工具和新的主动通知不在本次范围。
+- 验证：`testDebugUnitTest` 60 suites / 720 tests，0 失败、0 错误、0 跳过。`assembleDebug` 与 `assembleDebugAndroidTest` 通过。API 34 模拟器上，`AmbientControlsInstrumentedTest` 4 项与 `AmbientServiceInstrumentedTest` 2 项先通过；修复导航图在返回栈就绪前被访问之后，`AmbientNavigationInstrumentedTest` 1 项通过，覆盖实际 MainActivity 导航与重建。这 7 项不是同一次调用全部通过。服务仪器测试使用真实 Android service 与通知，host 是内存中的假准入对象，没有 `AudioRecord`。后续代码审查与隐私审查通过，`git diff --check` 通过。
+- 尚未验证真实麦克风、耳机、回声、OEM 息屏持续性、实体机安装，以及付费 Live API 或真实凭证。导航截图是空闲手机竖屏。新 PR 保持未合并，由主线程发布。
+
 ## 2026-10-16 — 会话列表去掉重复的运行文字
 
 - 对齐 iOS：列表副文字不再写 Running。自身或后代执行中仍由呼吸灯表达，灯的无障碍名保持 Running。后代数量改为分支图标加数字，朗读仍是「N 个子代理运行中」。Retrying 和状态待同步继续用文字。composer 状态栏未改。

@@ -228,6 +228,13 @@ fun SettingsScreen(
 
             SettingsSectionDivider()
 
+            AmbientEnableSection(
+                enabled = state.ambientEnabled,
+                onEnabledChange = viewModel::setAmbientEnabled,
+            )
+
+            SettingsSectionDivider()
+
             SpeechRecognitionSection(
                 state = state,
                 aiBuilderBaseURL = aiBuilderBaseURL,

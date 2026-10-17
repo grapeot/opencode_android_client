@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.nfc.NfcAdapter
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -13,9 +14,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
@@ -37,11 +40,15 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import kotlinx.coroutines.flow.first
+import com.yage.opencode_client.ambient.ui.AmbientNavigationTags
+import com.yage.opencode_client.ambient.ui.AmbientRoute
 import com.yage.opencode_client.ui.AppWidthClass
 import com.yage.opencode_client.ui.EffectiveLayout
 import com.yage.opencode_client.ui.MainViewModel
@@ -87,6 +94,13 @@ sealed class Screen(
         R.string.nav_settings,
         Icons.Default.Settings,
         Icons.Outlined.Settings
+    )
+
+    object Ambient : Screen(
+        "ambient",
+        R.string.ambient_nav,
+        Icons.Filled.GraphicEq,
+        Icons.Outlined.GraphicEq
     )
 }
 
@@ -188,16 +202,32 @@ class MainActivity : AppCompatActivity() {
                 val inline = mainViewModel.reconcilePreviewLayout(effectiveLayout, dockedPreviewRequest)
                 if (dockedPreviewRequest != inline) dockedPreviewRequest = inline
             }
+            var ambientDestinationVisible by rememberSaveable { mutableStateOf(false) }
+            var appliedDeepLinkVersion by rememberSaveable { mutableLongStateOf(state.deepLinkNavigationVersion) }
+            LaunchedEffect(state.ambientEnabled) {
+                if (!state.ambientEnabled) ambientDestinationVisible = false
+            }
+            LaunchedEffect(state.deepLinkNavigationVersion) {
+                if (state.deepLinkNavigationVersion == appliedDeepLinkVersion) return@LaunchedEffect
+                appliedDeepLinkVersion = state.deepLinkNavigationVersion
+                if (state.deepLinkNavigationVersion > 0) ambientDestinationVisible = false
+            }
 
             OpenCodeTheme(darkTheme = darkTheme) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (effectiveLayout == EffectiveLayout.REGULAR) {
-                        TabletLayout(viewModel = mainViewModel)
+                        TabletLayout(
+                            viewModel = mainViewModel,
+                            ambientDestinationVisible = ambientDestinationVisible,
+                            onAmbientDestinationVisible = { ambientDestinationVisible = it },
+                        )
                     } else {
                         PhoneLayout(
                             viewModel = mainViewModel,
                             dockedPreviewRequest = dockedPreviewRequest,
-                            onDockedPreviewRequestChange = { dockedPreviewRequest = it }
+                            onDockedPreviewRequestChange = { dockedPreviewRequest = it },
+                            ambientDestinationVisible = ambientDestinationVisible,
+                            onAmbientDestinationVisible = { ambientDestinationVisible = it },
                         )
                     }
                     DeepLinkFeedback(
@@ -263,15 +293,31 @@ class MainActivity : AppCompatActivity() {
 private fun PhoneLayout(
     viewModel: MainViewModel,
     dockedPreviewRequest: ChatFilePreviewRequest?,
-    onDockedPreviewRequestChange: (ChatFilePreviewRequest?) -> Unit
+    onDockedPreviewRequestChange: (ChatFilePreviewRequest?) -> Unit,
+    ambientDestinationVisible: Boolean,
+    onAmbientDestinationVisible: (Boolean) -> Unit,
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val destinations = if (state.ambientEnabled) {
+        // Same phone and focus order as iPhone: Chat, Files, Ambient, Settings.
+        listOf(Screen.Chat, Screen.Files, Screen.Ambient, Screen.Settings)
+    } else {
+        screens
+    }
+    val restoreAmbientOnEntry = remember {
+        ambientDestinationVisible && state.ambientEnabled && state.deepLinkNavigationVersion == 0L
+    }
+    val ambientVisibleNow = rememberUpdatedState(ambientDestinationVisible)
+
+    suspend fun awaitBackStackReady() {
+        navController.currentBackStackEntryFlow.first()
+    }
 
     fun navigateToTopLevel(route: String) {
-        if (currentRoute == route) return
+        if (navController.currentDestination?.route == route) return
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) {
                 saveState = true
@@ -281,8 +327,46 @@ private fun PhoneLayout(
         }
     }
 
+    DisposableEffect(navController) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            when (destination.route) {
+                Screen.Ambient.route -> onAmbientDestinationVisible(true)
+                Screen.Chat.route -> onAmbientDestinationVisible(false)
+            }
+        }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
+    }
+
+    BackHandler(enabled = currentRoute == Screen.Ambient.route) {
+        onAmbientDestinationVisible(false)
+        navigateToTopLevel(Screen.Chat.route)
+    }
+
+    LaunchedEffect(Unit) {
+        if (!restoreAmbientOnEntry) return@LaunchedEffect
+        awaitBackStackReady()
+        val latest = viewModel.state.value
+        if (!latest.ambientEnabled || latest.deepLinkNavigationVersion > 0L || !ambientVisibleNow.value) {
+            return@LaunchedEffect
+        }
+        val route = navController.currentDestination?.route
+        if (route == Screen.Files.route || route == Screen.Settings.route || route == Screen.Ambient.route) {
+            return@LaunchedEffect
+        }
+        navigateToTopLevel(Screen.Ambient.route)
+    }
+
+    LaunchedEffect(state.ambientEnabled) {
+        if (!state.ambientEnabled && navController.currentDestination?.route == Screen.Ambient.route) {
+            navigateToTopLevel(Screen.Chat.route)
+        }
+    }
+
     LaunchedEffect(state.deepLinkNavigationVersion) {
-        if (state.deepLinkNavigationVersion > 0) {
+        if (state.deepLinkNavigationVersion <= 0L) return@LaunchedEffect
+        awaitBackStackReady()
+        if (viewModel.state.value.deepLinkNavigationVersion > 0L) {
             navigateToTopLevel(Screen.Chat.route)
         }
     }
@@ -291,19 +375,28 @@ private fun PhoneLayout(
         contentWindowInsets = WindowInsets.statusBars,
         bottomBar = {
             NavigationBar {
-                screens.forEach { screen ->
+                destinations.forEach { screen ->
                     val selected = currentRoute == screen.route
                     val title = stringResource(screen.titleRes)
                     NavigationBarItem(
                         selected = selected,
-                        onClick = { navigateToTopLevel(screen.route) },
+                        onClick = {
+                            if (screen == Screen.Chat) onAmbientDestinationVisible(false)
+                            if (screen == Screen.Ambient) onAmbientDestinationVisible(true)
+                            navigateToTopLevel(screen.route)
+                        },
                         icon = {
                             Icon(
                                 if (selected) screen.selectedIcon else screen.unselectedIcon,
                                 contentDescription = title
                             )
                         },
-                        label = { Text(title) }
+                        label = { Text(title) },
+                        modifier = if (screen == Screen.Ambient) {
+                            Modifier.testTag(AmbientNavigationTags.PHONE_NAV)
+                        } else {
+                            Modifier
+                        },
                     )
                 }
             }
@@ -348,6 +441,7 @@ private fun PhoneLayout(
                         val origin = state.filePreviewOriginRoute
                         viewModel.clearFileToShow()
                         if (origin == Screen.Chat.route) {
+                            onAmbientDestinationVisible(false)
                             navigateToTopLevel(Screen.Chat.route)
                         }
                     },
@@ -356,6 +450,9 @@ private fun PhoneLayout(
             }
             composable(Screen.Settings.route) {
                 SettingsScreen(viewModel = viewModel)
+            }
+            composable(Screen.Ambient.route) {
+                AmbientRoute(viewModel = viewModel)
             }
         }
     }
@@ -414,7 +511,11 @@ private fun BoxScope.DeepLinkFeedback(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TabletLayout(viewModel: MainViewModel) {
+private fun TabletLayout(
+    viewModel: MainViewModel,
+    ambientDestinationVisible: Boolean,
+    onAmbientDestinationVisible: (Boolean) -> Unit,
+) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var sessionsPaneCollapsed by rememberSaveable { mutableStateOf(false) }
     // Opening Settings (e.g. from the chat "Manage models" jump) must also expand
@@ -533,19 +634,79 @@ private fun TabletLayout(viewModel: MainViewModel) {
                 colorScheme = MaterialTheme.colorScheme,
                 typography = compactTypography(MaterialTheme.typography)
             ) {
-                ChatScreen(
-                    viewModel = viewModel,
-                    onNavigateToFiles = { path ->
-                        viewModel.showFileInFiles(path)
-                    },
-                    useInlineFilePreview = true,
-                    onNavigateToSettings = onOpenSettings,
-                    onManageModels = onOpenSettings,
-                    showSettingsButton = false,
-                    showNewSessionInTopBar = false,
-                    showSessionListInTopBar = false
-                )
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (state.ambientEnabled) {
+                        AmbientContentSwitch(
+                            ambientSelected = ambientDestinationVisible,
+                            onSelectChat = { onAmbientDestinationVisible(false) },
+                            onSelectAmbient = { onAmbientDestinationVisible(true) },
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        if (ambientDestinationVisible && state.ambientEnabled) {
+                            AmbientRoute(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            ChatScreen(
+                                viewModel = viewModel,
+                                onNavigateToFiles = { path ->
+                                    viewModel.showFileInFiles(path)
+                                },
+                                useInlineFilePreview = true,
+                                onNavigateToSettings = onOpenSettings,
+                                onManageModels = onOpenSettings,
+                                showSettingsButton = false,
+                                showNewSessionInTopBar = false,
+                                showSessionListInTopBar = false
+                            )
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AmbientContentSwitch(
+    ambientSelected: Boolean,
+    onSelectChat: () -> Unit,
+    onSelectAmbient: () -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag(AmbientNavigationTags.CONTENT_SWITCH),
+    ) {
+        SegmentedButton(
+            selected = !ambientSelected,
+            onClick = onSelectChat,
+            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            modifier = Modifier.testTag(AmbientNavigationTags.CONTENT_CHAT),
+            icon = {
+                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
+            },
+        ) {
+            Text(stringResource(R.string.nav_chat))
+        }
+        SegmentedButton(
+            selected = ambientSelected,
+            onClick = onSelectAmbient,
+            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            modifier = Modifier.testTag(AmbientNavigationTags.CONTENT_AMBIENT),
+            icon = {
+                Icon(Icons.Filled.GraphicEq, contentDescription = null)
+            },
+        ) {
+            Text(stringResource(R.string.ambient_nav))
         }
     }
 }

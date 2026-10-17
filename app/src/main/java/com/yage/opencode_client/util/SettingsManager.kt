@@ -182,6 +182,10 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getBoolean(KEY_VOICE_FIRST_INPUT, false)
         set(value) = encryptedPrefs.edit().putBoolean(KEY_VOICE_FIRST_INPUT, value).apply()
 
+    var ambientEnabled: Boolean
+        get() = encryptedPrefs.getBoolean(KEY_AMBIENT_ENABLED, false)
+        set(value) = encryptedPrefs.edit().putBoolean(KEY_AMBIENT_ENABLED, value).apply()
+
     fun getDraftText(sessionId: String): String {
         val json = encryptedPrefs.getString(KEY_SESSION_DRAFTS, null) ?: return ""
         return try {
@@ -351,6 +355,7 @@ class SettingsManager @Inject constructor(
         private const val KEY_NFC_AUTO_SEND = "nfc_auto_send"
         private const val KEY_LAYOUT_PREFERENCE = "layout_preference"
         private const val KEY_VOICE_FIRST_INPUT = "voice_first_input"
+        private const val KEY_AMBIENT_ENABLED = "ambient_enabled"
 
         private const val MODEL_PRESET_SCHEMA_VERSION = 1
 

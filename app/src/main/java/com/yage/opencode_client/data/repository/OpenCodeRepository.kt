@@ -1,5 +1,7 @@
 package com.yage.opencode_client.data.repository
 
+import com.yage.opencode_client.ambient.protocol.AmbientCapturedConfig
+import com.yage.opencode_client.ambient.protocol.AmbientDispatchGate
 import com.yage.opencode_client.data.api.*
 import com.yage.opencode_client.data.model.*
 import kotlinx.coroutines.CancellationException
@@ -18,6 +20,7 @@ class OpenCodeRepository @Inject constructor() {
     private var baseUrl: String = DEFAULT_SERVER
     private var username: String? = null
     private var password: String? = null
+    private var ambientGate: AmbientDispatchGate? = null
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -75,13 +78,73 @@ class OpenCodeRepository @Inject constructor() {
         sseClient = SSEClient(sseHttpClient)
     }
 
+    /**
+     * Binds the live-gateway gate. [configure] invalidates it before swapping host or credentials.
+     * One gate per repository. The Chat Basic interceptor is unchanged.
+     */
+    @Synchronized
+    fun bindAmbientGate(gate: AmbientDispatchGate) {
+        ambientGate = gate
+    }
+
+    /**
+     * Captures the current host and Basic credentials, then arms [gate].
+     * Serialized with [configure] so the snapshot cannot pair a new token with a newer host.
+     */
+    @Synchronized
+    fun armAmbient(
+        gate: AmbientDispatchGate,
+        hostProfileId: String,
+        runtimeGeneration: Long,
+        directory: String?,
+        epoch: Long,
+        ownerToken: String,
+    ): Long {
+        ambientGate = gate
+        return gate.configure(
+            AmbientCapturedConfig(
+                hostProfileId = hostProfileId,
+                runtimeGeneration = runtimeGeneration,
+                directory = directory,
+                epoch = epoch,
+                ownerToken = ownerToken,
+                baseUrl = baseUrl,
+                username = username.orEmpty(),
+                password = password.orEmpty(),
+            ),
+        )
+    }
+
+    /** Retires [token] only when it is still the active live run. */
+    @Synchronized
+    fun retireAmbient(token: Long): Boolean = ambientGate?.retire(token) ?: false
+
     @Synchronized
     fun configure(baseUrl: String, username: String? = null, password: String? = null) {
-        val normalized = if (baseUrl.startsWith("http")) baseUrl else "http://$baseUrl"
-        this.baseUrl = normalized.trimEnd('/')
+        ambientGate?.invalidate()
+        this.baseUrl = normalizedBaseUrl(baseUrl)
         this.username = username
         this.password = password
         rebuildClients()
+    }
+
+    /**
+     * Foreground health only. Returns true only when the normalized base URL or Basic
+     * credentials change. That path still [configure]s, which revokes the live gate before
+     * the replacement clients exist. The same values return false and leave the gate armed.
+     * Explicit [configure] always revokes, including a same-host call.
+     */
+    @Synchronized
+    fun configureForHealth(baseUrl: String, username: String? = null, password: String? = null): Boolean {
+        val normalized = normalizedBaseUrl(baseUrl)
+        if (this.baseUrl == normalized && this.username == username && this.password == password) return false
+        configure(normalized, username, password)
+        return true
+    }
+
+    private fun normalizedBaseUrl(baseUrl: String): String {
+        val withScheme = if (baseUrl.startsWith("http")) baseUrl else "http://$baseUrl"
+        return withScheme.trimEnd('/')
     }
 
     private suspend fun <T> apiCall(block: suspend () -> T): Result<T> {

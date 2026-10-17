@@ -9,7 +9,7 @@
 | **产品名称** | OpenCode Android Client |
 | **状态** | v1.4 (SSH Host Profiles parity planning) |
 | **创建日期** | 2026-02 |
-| **最后更新** | 2026-06-21 |
+| **最后更新** | 2026-10-17 |
 | **参考** | iOS Client PRD |
 
 ---
@@ -234,6 +234,18 @@ iOS 在每条 assistant 消息旁显示回复该消息的模型名称（如 `ant
 - **主题**：Light / Dark / System ✅
 - **语音识别配置**：AI Builder Base URL、Token、Prompt、Terminology、连接测试 ✅
 
+#### Ambient Mode（对齐 iOS，2026-10-17）
+
+设置默认关闭。打开后，手机和专注布局出现静态波形入口，展开布局在内容栏切换到同一页面。用户在前台自己开始。连接尚未完成时离开前台会取消；已经在听或说时可以保持。应用不会自动重开这场语音。
+
+语音走 Hosted Builder 全双工：PCM16 单声道 24 kHz，采集按设备采样率重采样。静音是 48dp 胶囊，填充跟随输入 RMS；控制行高 72dp；播放音量使用系统通话音量。
+
+工具限于八个：查询会话、读取消息、开始、继续、停止、回答待处理、归档、解除归档。开始和继续在服务端接受请求后即返回，不等待任务跑完。归档带上子会话；解除归档把归档时间写成 0。过期或不再属于当前 owner 的调用会被拒绝。结束这场语音不会中止已经交给 OpenCode 的任务。
+
+麦克风前台服务只在用户已经开始、并且界面可见时启动。服务先进入前台并确认，然后才采集。被拒绝的启动不会卡在前台启动超时上。通知里的停止会等音频收干净再撤下前台服务。
+
+页面上的费用是本地标准价估算，与最近一次门户用量快照分开。会议记录、sleep，以及 question/permission 的新主动通知不在这次范围内。
+
 ### 3.2 平板适配
 
 - **手机**：底部 Tab 导航（Chat / Files / Settings） ✅
@@ -320,6 +332,8 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 
 **首次启动配置复杂度**：OpenCode Server 本身的配置较为复杂（需要配 Tailscale、Provider API key 等），首次连接对新用户存在一定门槛。这是一个真实痛点，但优先级较低——当前用户群主要是已有 OpenCode 使用经验的开发者。
 
+**Ambient 设备边界**：API 34 模拟器覆盖了控件、真实前台服务通知，以及导航与 Activity 重建。服务仪器测试没有真实 `AudioRecord`。耳机、回声、OEM 息屏持续性和付费 Live 调用尚未验证，也没有安装到实体手机。
+
 ---
 
 ## 非功能需求
@@ -357,6 +371,7 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 | Markdown Web Preview | Files 默认 Web Preview，Native/Source 回退 | 🔲 Phase 7 | 对齐 iOS PR #94，Android 使用本地 WebView + bundled JS/CSS |
 | Tablet Sessions pane collapse | 左侧 Sessions pane 可折叠 | 🔲 Phase 7 | 对齐 iOS PR #95，只影响 expanded width 三栏布局 |
 | Session Deep Link | `opencode://session/<id>` cold/warm + Chat Markdown | ✅ 已对齐 | 当前 Host 验证、pending reconnect、旧响应失效 |
+| Ambient 全双工 | Hosted Live、八工具、递归归档、48dp 电平、前台保持 | ✅ 本分支已实现，未合并 | 默认关；用户开始；麦克风前台服务；结束语音不中止 OpenCode 任务 |
 
 ---
 
@@ -374,6 +389,7 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 | 7 | Markdown Web Preview、Native/Web/Source 三态、平板 Sessions pane 折叠 | 🔲 规划中 (2026-06-14) |
 | 8 | Host Profiles、SSH Tunnel、iOS import/export parity、分阶段连接诊断 | 🔲 规划中 (2026-06-21) |
 | NFC | NFC Quick Prompt（Experimental）：写入 prompt 到 NTAG215、亮屏靠近自动拉起 App 新建 session 并发送 | ✅ 完成 (2026-06-30) |
+| Ambient | 默认关闭的全双工语音、八工具、麦克风前台服务 | ✅ 本地验证完成 (2026-10-17)，PR 未合并 |
 | Future | Session 变更文件列表、后台通知/Foreground Service | 🔲 未来可选 |
 
 ---
@@ -401,6 +417,7 @@ Session 搜索继续由 Agent 和 semantic-search 负责，客户端不建设搜
 6. **后台 SSE 连接**：不保持。App 进入后台时断开 SSE，回到前台时通过 REST 全量同步 + 重建 SSE 恢复。
 7. **SSH Tunnel**：Android 端进入 Phase 8 实现，目标是与 iOS 完成 Host Profiles + SSH Tunnel feature parity。底层采用 JSch app 内 local forward，不使用系统 VPN，不依赖 Termux/OpenSSH，不承诺后台永久保活。
 8. **模型列表管理**：聊天 picker 只显示用户维护的短名单，候选目录从 `/provider` 动态生成。按 model ID 持久化选择态（非 index）。首启播种 9 个默认模型（存量迁移，非 iOS 的空短名单）。重排用"上移/下移"不做拖拽（iOS 拖拽 bug 是独立 follow-up）。退役模型直接从短名单消失，不做静默 ID 替换。
+9. **Ambient Mode**：默认关闭，由用户在前台开始。开始和继续任务在请求被接受后返回，不等待任务跑完。结束语音不中止 OpenCode 任务。麦克风前台服务先以可见 `startService` 进入，再提升为麦克风类型。会议记录、sleep 和新的主动通知不纳入。
 
 ---
 
