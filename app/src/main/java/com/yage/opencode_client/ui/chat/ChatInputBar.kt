@@ -362,8 +362,8 @@ private fun VoiceRail(
             ) {
                 Text(stringResource(R.string.chat_discard_audio), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            else -> Text(
-                text = if (isSpeechConfigured) railTitle else stringResource(R.string.chat_configure_speech),
+            !isSpeechConfigured -> Text(
+                text = stringResource(R.string.chat_configure_speech),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

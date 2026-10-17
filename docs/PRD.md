@@ -133,7 +133,7 @@ Android Client 提供以下核心能力：
 - **Context Usage**：环形进度显示上下文占用（绿/橙/红三色），AI 回答中也始终可见 ✅
 - **权限审批**：手动批准/拒绝 permission 请求 ✅
 - **Abort**：中止当前任务 ✅
-- **语音输入**：底部 composer 采用 `voice rail + text review field`。Voice rail 承载录音 transport、真实 mic-level waveform、转写等待恢复和 preserved-audio retry；text review field 承载转写审阅、轻量修正、fallback typing 和固定 send。Agent running 降为 quiet status row，`Interrupt agent` 放在 overflow menu。通过 VoiceFlowKit realtime session 录制 PCM16 mono 24kHz 音频；Kit 内部写入本地 PCM cache，WebSocket 断线或发送失败时自动新建 session 并从 cache offset 0 replay；转写卡住时 `Stop transcription wait` 保留已录 PCM，随后 `Retry this segment` 重新识别同一段，或 `Discard audio` 退出恢复状态 ✅
+- **语音输入**：底部 composer 采用 `voice rail + text review field`。Voice rail 承载录音 transport、真实 mic-level waveform、转写等待恢复和 preserved-audio retry；Listening / Transcribing / Preserved audio 等阶段词只在 composer 上方状态栏出现，rail 不重复。text review field 承载转写审阅、轻量修正、fallback typing 和固定 send。Agent running 降为 quiet status row，`Interrupt agent` 放在 overflow menu。通过 VoiceFlowKit realtime session 录制 PCM16 mono 24kHz 音频；Kit 内部写入本地 PCM cache，WebSocket 断线或发送失败时自动新建 session 并从 cache offset 0 replay；转写卡住时 `Stop transcription wait` 保留已录 PCM，随后 `Retry this segment` 重新识别同一段，或 `Discard audio` 退出恢复状态 ✅
 
 #### Chat Toolbar 布局（Phase 5 对齐 iOS）
 

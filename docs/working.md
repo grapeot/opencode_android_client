@@ -1,5 +1,11 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-16 — 语音阶段词只留状态栏
+
+- 语音栏不再显示 Listening、Tap to speak、Transcribing、Preserved audio、Retry this segment。进行中的阶段词只在 composer 上方状态栏出现；Tap to speak 不进状态栏，只留在 transport 的无障碍名上。栏内右侧只保留会改变阶段的动作：转写等待的 Stop transcription wait、保留音频的 Discard audio，以及语音未配置时的 Configure speech。
+- 文档同步改了 `docs/design.md` 与 `docs/PRD.md`。未改状态栏计数、中断菜单和输入框占位符。
+- 验证：`testDebugUnitTest` 571 项、0 失败/错误/跳过。`ANDROID_SERIAL=emulator-5568` 的 `ChatInputBarInstrumentedTest` 7 项通过，未装到 TriFold。
+
 ## 2026-10-16 — 专注布局与语音优先迁移
 
 - 在同一 PR #135 内保留旋转停录修复，增加设备本地 Automatic / Focus 偏好：自动模式沿用 Expanded 三栏、Compact / Medium 单内容，专注模式始终单内容。已应用布局保存在 ViewModel，预览跨配置重建迁移，以当前可见源为准，并保留 host / session / workspace 与 Chat / Files 来源。
