@@ -1,11 +1,20 @@
 package com.yage.opencode_client
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
@@ -16,6 +25,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.yage.opencode_client.ambient.protocol.AmbientActivity
 import com.yage.opencode_client.ambient.protocol.AmbientBackendUsage
@@ -153,14 +164,113 @@ class AmbientControlsInstrumentedTest {
         composeRule.onNodeWithTag(AmbientTags.DETAILS_BODY).assertIsDisplayed()
         composeRule.onNodeWithTag(AmbientTags.INPUT_LEVEL, useUnmergedTree = true).assertTextEquals("0.13")
         composeRule.onNodeWithTag(AmbientTags.OUTPUT_LEVEL, useUnmergedTree = true).assertTextEquals("0.12")
-        composeRule.onNodeWithTag(AmbientTags.VOICE_DURATION, useUnmergedTree = true).assertTextEquals("3.23")
-        composeRule.onNodeWithTag(AmbientTags.SESSION_DURATION, useUnmergedTree = true).assertTextEquals("30")
-        composeRule.onNodeWithTag(AmbientTags.INPUT_TOKENS, useUnmergedTree = true).assertTextEquals("1200")
+        composeRule.onNodeWithTag(AmbientTags.VOICE_DURATION, useUnmergedTree = true).assertTextEquals("00:00:03")
+        composeRule.onNodeWithTag(AmbientTags.SESSION_DURATION, useUnmergedTree = true).assertTextEquals("00:00:30")
+        composeRule.onNodeWithTag(AmbientTags.INPUT_TOKENS, useUnmergedTree = true).assertTextEquals("1.2K")
+        composeRule.onNodeWithTag(AmbientTags.INPUT_TOKENS, useUnmergedTree = true)
+            .assertContentDescriptionEquals("1200")
         composeRule.onNodeWithTag(AmbientTags.OUTPUT_TOKENS, useUnmergedTree = true).assertTextEquals("340")
+        composeRule.onNodeWithTag(AmbientTags.OUTPUT_TOKENS, useUnmergedTree = true)
+            .assertContentDescriptionEquals("340")
         composeRule.onNodeWithTag(AmbientTags.CACHE_READ, useUnmergedTree = true).assertTextEquals("50")
+        composeRule.onNodeWithTag(AmbientTags.CACHE_READ, useUnmergedTree = true)
+            .assertContentDescriptionEquals("50")
         composeRule.onNodeWithTag(AmbientTags.CACHE_WRITE, useUnmergedTree = true).assertTextEquals("10")
-        composeRule.onNodeWithTag(AmbientTags.LOCAL_ESTIMATE, useUnmergedTree = true).assertTextEquals("0.14")
+        composeRule.onNodeWithTag(AmbientTags.CACHE_WRITE, useUnmergedTree = true)
+            .assertContentDescriptionEquals("10")
+        composeRule.onNodeWithTag(AmbientTags.LOCAL_ESTIMATE, useUnmergedTree = true).assertTextEquals('$' + "0.14")
         composeRule.onNodeWithTag(AmbientTags.PORTAL_ESTIMATE, useUnmergedTree = true).assertTextEquals("Unconfirmed")
+        composeRule.onNodeWithText("Ordinary Input").assertIsDisplayed()
+        composeRule.onNodeWithText("Cost Reference (USD)").assertIsDisplayed()
+        composeRule.onNodeWithText("Reasoning Reference Estimate (Luna)").assertIsDisplayed()
+        composeRule.onNodeWithText("Platform Session Estimate (Voice + Reasoning)").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Both figures are reference estimates only, not a final bill; the platform estimate already includes reasoning, so do not add them together. The Luna estimate covers hosted reasoning tokens only and excludes voice and delegated worker execution.",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText('$' + "1.34").assertDoesNotExist()
+    }
+
+    @Test
+    fun detailsGridAdaptsToNarrowWidthAndLargeFont() {
+        val metrics = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics
+        val screenDp = metrics.widthPixels / metrics.density
+        val width = mutableStateOf(minOf(screenDp, 400f).dp)
+        val fontScale = mutableStateOf(1f)
+        composeRule.setContent {
+            val base = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale.value)) {
+                OpenCodeTheme {
+                    Box(Modifier.requiredWidth(width.value).fillMaxHeight()) {
+                        AmbientScreen(
+                            snapshot = snapshot(
+                                phase = AmbientPhase.LISTENING,
+                                inputRms = 0.126,
+                                outputRms = 0.124,
+                                voiceSeconds = 3723.9,
+                                local = AmbientBackendUsage(
+                                    inputTokens = 1200,
+                                    outputTokens = 1_234_567,
+                                    cachedRead = 999,
+                                    cacheWrite = 1000,
+                                    estimatedUsd = 0.135,
+                                    unpricedCount = 0,
+                                ),
+                                portalUsd = 1.2,
+                                portalSettled = true,
+                                elapsedSeconds = 90_061L,
+                            ),
+                            outputVolume = AmbientOutputVolume(value = 4, max = 15),
+                            onConnect = {},
+                            onSetMuted = {},
+                            onInterruptPlayback = {},
+                            onEnd = {},
+                            onOutputVolumeChange = {},
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.onNodeWithTag(AmbientTags.DETAILS).performClick()
+        composeRule.onNodeWithTag(AmbientTags.VOICE_DURATION, useUnmergedTree = true).assertTextEquals("01:02:03")
+        composeRule.onNodeWithTag(AmbientTags.SESSION_DURATION, useUnmergedTree = true).assertTextEquals("25:01:01")
+        composeRule.onNodeWithTag(AmbientTags.OUTPUT_TOKENS, useUnmergedTree = true).assertTextEquals("1.23M")
+        composeRule.onNodeWithTag(AmbientTags.OUTPUT_TOKENS, useUnmergedTree = true)
+            .assertContentDescriptionEquals("1234567")
+        composeRule.onNodeWithTag(AmbientTags.LOCAL_ESTIMATE, useUnmergedTree = true).assertTextEquals('$' + "0.14")
+        composeRule.onNodeWithTag(AmbientTags.PORTAL_ESTIMATE, useUnmergedTree = true).assertTextEquals('$' + "1.20")
+        composeRule.onNodeWithText('$' + "1.34").assertDoesNotExist()
+        assertDetailsContentWidth(atLeastDp = 220f, atMostDp = 599f)
+        assertLabelsSideBySide("Voice duration", "Session duration")
+        assertLabelsSideBySide("Ordinary Input", "Output")
+        assertLabelsSideBySide("Cache read", "Cache write")
+        assertLabelsSideBySide("Input level", "Output level")
+        assertLabelsStacked("Voice duration", "Ordinary Input")
+        assertLabelsStacked("Cache read", "Input level")
+        assertLabelAboveValue("Reasoning Reference Estimate (Luna)", AmbientTags.LOCAL_ESTIMATE)
+        assertWrapped("Reasoning Reference Estimate (Luna)", "Output")
+        assertFullWidthNote()
+        assertDetailsLeaveControlsVisible()
+        captureDetails("details-refresh-normal.png")
+
+        composeRule.runOnIdle { width.value = 160.dp }
+        composeRule.waitForIdle()
+        assertDetailsContentWidth(atLeastDp = 48f, atMostDp = 200f)
+        assertLabelsStacked("Voice duration", "Session duration")
+        assertLabelsStacked("Ordinary Input", "Output")
+        assertLabelsStacked("Input level", "Output level")
+        assertDetailsLeaveControlsVisible()
+        captureDetails("details-refresh-narrow.png")
+
+        composeRule.runOnIdle {
+            width.value = minOf(screenDp, 400f).dp
+            fontScale.value = 1.5f
+        }
+        composeRule.waitForIdle()
+        assertLabelsStacked("Voice duration", "Session duration")
+        assertLabelsStacked("Ordinary Input", "Output")
+        assertWrapped("Platform Session Estimate (Voice + Reasoning)", "Output")
+        assertDetailsLeaveControlsVisible()
+        captureDetails("details-refresh-large-font.png")
     }
 
     @Test
@@ -304,6 +414,7 @@ class AmbientControlsInstrumentedTest {
         portalUsd: Double? = null,
         portalSettled: Boolean = false,
         usageUnconfirmed: Boolean = false,
+        elapsedSeconds: Long = 30L,
     ) = AmbientSnapshot(
         phase = phase,
         captions = captions,
@@ -319,8 +430,90 @@ class AmbientControlsInstrumentedTest {
         portalSettled = portalSettled,
         usageUnconfirmed = usageUnconfirmed,
         statusMessage = null,
-        elapsedSeconds = 30L,
+        elapsedSeconds = elapsedSeconds,
     )
+
+    private fun labelBounds(label: String): Rect =
+        unclippedBounds(composeRule.onNodeWithText(label).fetchSemanticsNode())
+
+    private fun unclippedBounds(node: SemanticsNode): Rect {
+        val origin = node.positionInRoot
+        return Rect(
+            origin.x,
+            origin.y,
+            origin.x + node.size.width,
+            origin.y + node.size.height,
+        )
+    }
+
+    private fun assertDetailsContentWidth(atLeastDp: Float, atMostDp: Float) {
+        val width = heightDp(unclippedBounds(
+            composeRule.onNodeWithTag(AmbientTags.DETAILS_BODY, useUnmergedTree = true).fetchSemanticsNode(),
+        ).width)
+        assertTrue("details width $width dp", width in atLeastDp..atMostDp)
+    }
+
+    private fun assertLabelsSideBySide(leftLabel: String, rightLabel: String) {
+        val left = labelBounds(leftLabel)
+        val right = labelBounds(rightLabel)
+        assertEquals("$leftLabel top", left.top, right.top, 2f)
+        assertTrue("$leftLabel is left of $rightLabel", left.right <= right.left + 1f)
+    }
+
+    private fun assertLabelsStacked(upperLabel: String, lowerLabel: String) {
+        val upper = labelBounds(upperLabel)
+        val lower = labelBounds(lowerLabel)
+        assertTrue("$upperLabel is above $lowerLabel", upper.bottom <= lower.top + 1f)
+        assertEquals("$upperLabel left", upper.left, lower.left, 2f)
+    }
+
+    private fun assertLabelAboveValue(label: String, valueTag: String) {
+        val labelBounds = this.labelBounds(label)
+        val value = unclippedBounds(
+            composeRule.onNodeWithTag(valueTag, useUnmergedTree = true).fetchSemanticsNode(),
+        )
+        assertTrue("$label sits above $valueTag", labelBounds.bottom <= value.top + 1f)
+        assertTrue(labelBounds.left <= value.left + 2f)
+    }
+
+    private fun assertWrapped(longLabel: String, shortLabel: String) {
+        val longBounds = labelBounds(longLabel)
+        val shortBounds = labelBounds(shortLabel)
+        assertTrue("$longLabel wraps", longBounds.height > shortBounds.height * 1.4f)
+    }
+
+    private fun assertFullWidthNote() {
+        val note = unclippedBounds(
+            composeRule.onNodeWithTag(AmbientTags.COST_NOTE, useUnmergedTree = true).fetchSemanticsNode(),
+        )
+        val body = unclippedBounds(
+            composeRule.onNodeWithTag(AmbientTags.DETAILS_BODY, useUnmergedTree = true).fetchSemanticsNode(),
+        )
+        assertEquals("cost note width", body.width, note.width, 4f)
+    }
+
+    private fun assertDetailsLeaveControlsVisible() {
+        composeRule.onNodeWithTag(AmbientTags.VOLUME).assertIsDisplayed()
+        composeRule.onNodeWithTag(AmbientTags.CONTROLS).assertIsDisplayed()
+        val body = bounds(AmbientTags.DETAILS_BODY)
+        val volume = bounds(AmbientTags.VOLUME)
+        assertTrue("details stay above the volume control", body.bottom <= volume.top + 1f)
+        assertTrue("details keep the height cap", heightDp(body.height) <= 280.5f)
+    }
+
+    private fun captureDetails(name: String) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val dir = File(context.filesDir, "ambient-port")
+        dir.mkdirs()
+        val bitmap = composeRule.onNodeWithTag(AmbientTags.SCREEN).captureToImage().asAndroidBitmap()
+        try {
+            FileOutputStream(File(dir, name)).use { out ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
 
     private fun settle() {
         composeRule.waitForIdle()

@@ -292,12 +292,14 @@
     <string name="ambient_output_level">输出电平</string>
     <string name="ambient_voice_duration">语音时长</string>
     <string name="ambient_session_duration">会话时长</string>
-    <string name="ambient_input_usage">输入</string>
+    <string name="ambient_input_usage">普通输入</string>
     <string name="ambient_output_usage">输出</string>
     <string name="ambient_cache_read">缓存读取</string>
     <string name="ambient_cache_write">缓存写入</string>
-    <string name="ambient_local_estimate_note">标准价估算</string>
-    <string name="ambient_portal_estimate">门户估算</string>
+    <string name="ambient_local_estimate_note">推理参考估算（Luna）</string>
+    <string name="ambient_portal_estimate">平台会话估算（语音＋推理）</string>
+    <string name="ambient_cost_heading">费用参考（USD）</string>
+    <string name="ambient_cost_explanation">两项均为非账单参考值，平台估算已包含当前会话的推理部分，请勿相加。Luna 估算仅统计云端推理 token，不含语音时长及委派任务开销。</string>
     <string name="ambient_usage_unconfirmed">未确认</string>
     <string name="ambient_tool">工具</string>
     <string name="ambient_tool_arguments">参数</string>

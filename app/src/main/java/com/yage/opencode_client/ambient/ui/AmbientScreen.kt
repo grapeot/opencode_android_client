@@ -43,6 +43,8 @@ object AmbientTags {
     const val CACHE_WRITE = "ambient-cache-write"
     const val LOCAL_ESTIMATE = "ambient-local-estimate"
     const val PORTAL_ESTIMATE = "ambient-portal-estimate"
+    const val COST_HEADING = "ambient-cost-heading"
+    const val COST_NOTE = "ambient-cost-note"
     const val VOLUME = "ambient-volume"
     const val CONTROLS = "ambient-controls"
     const val MUTE = "ambient-mute"

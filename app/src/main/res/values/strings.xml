@@ -293,12 +293,14 @@
     <string name="ambient_output_level">Output level</string>
     <string name="ambient_voice_duration">Voice duration</string>
     <string name="ambient_session_duration">Session duration</string>
-    <string name="ambient_input_usage">Input</string>
+    <string name="ambient_input_usage">Ordinary Input</string>
     <string name="ambient_output_usage">Output</string>
     <string name="ambient_cache_read">Cache read</string>
     <string name="ambient_cache_write">Cache write</string>
-    <string name="ambient_local_estimate_note">Standard-price estimate</string>
-    <string name="ambient_portal_estimate">Portal estimate</string>
+    <string name="ambient_local_estimate_note">Reasoning Reference Estimate (Luna)</string>
+    <string name="ambient_portal_estimate">Platform Session Estimate (Voice + Reasoning)</string>
+    <string name="ambient_cost_heading">Cost Reference (USD)</string>
+    <string name="ambient_cost_explanation">Both figures are reference estimates only, not a final bill; the platform estimate already includes reasoning, so do not add them together. The Luna estimate covers hosted reasoning tokens only and excludes voice and delegated worker execution.</string>
     <string name="ambient_usage_unconfirmed">Unconfirmed</string>
     <string name="ambient_tool">Tool</string>
     <string name="ambient_tool_arguments">Arguments</string>

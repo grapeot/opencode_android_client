@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -37,6 +39,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -45,7 +48,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -58,6 +60,7 @@ import com.yage.opencode_client.ambient.protocol.AmbientPhase
 import com.yage.opencode_client.ui.theme.StopRed
 import java.math.BigDecimal
 import java.math.RoundingMode
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 internal val AmbientControlHeight = AmbientMeter.CONTROL_ROW_DP.dp
@@ -72,35 +75,82 @@ internal fun levelText(raw: Double, unconfirmed: String): String {
     return formatPlain(raw)
 }
 
+/** Values at or above 2^63 do not fit in a signed second count. */
+private const val MAX_CLOCK_SECONDS = 9223372036854775808.0
+
+internal fun wholeSecondsOrNull(seconds: Double): Long? {
+    if (!seconds.isFinite() || seconds < 0.0 || seconds >= MAX_CLOCK_SECONDS) return null
+    val whole = floor(seconds)
+    if (!whole.isFinite() || whole >= MAX_CLOCK_SECONDS) return null
+    return whole.toLong()
+}
+
+internal fun formatHms(totalSeconds: Long): String {
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val secs = totalSeconds % 60
+    return hours.toString().padStart(2, '0') +
+        ":" + minutes.toString().padStart(2, '0') +
+        ":" + secs.toString().padStart(2, '0')
+}
+
 internal fun voiceDurationText(
     seconds: Double,
     hasSnapshot: Boolean,
     unconfirmedFlag: Boolean,
     unconfirmed: String,
 ): String {
-    if (!hasSnapshot || unconfirmedFlag || !seconds.isFinite() || seconds < 0.0) return unconfirmed
-    return formatPlain(seconds)
+    if (!hasSnapshot || unconfirmedFlag) return unconfirmed
+    val whole = wholeSecondsOrNull(seconds) ?: return unconfirmed
+    return formatHms(whole)
 }
 
-internal fun elapsedText(seconds: Long): String = seconds.coerceAtLeast(0L).toString()
+internal fun elapsedText(seconds: Long, unconfirmed: String): String {
+    if (seconds < 0L) return unconfirmed
+    return formatHms(seconds)
+}
+
+internal fun formatTokenCount(value: Long): String {
+    if (value < 1_000L) return value.toString()
+    val divisors = longArrayOf(1_000L, 1_000_000L, 1_000_000_000L)
+    val suffixes = arrayOf("K", "M", "B")
+    var index = 0
+    for (i in divisors.indices) {
+        if (value >= divisors[i]) index = i
+    }
+    while (true) {
+        val scaled = BigDecimal.valueOf(value).divide(
+            BigDecimal.valueOf(divisors[index]),
+            2,
+            RoundingMode.HALF_UP,
+        )
+        if (scaled >= BigDecimal.valueOf(1_000L) && index < divisors.lastIndex) {
+            index += 1
+            continue
+        }
+        return scaled.stripTrailingZeros().toPlainString() + suffixes[index]
+    }
+}
+
+internal fun tokenExactText(value: Long): String = value.toString()
+
+internal fun formatUsdAmount(amount: Double): String? {
+    if (!amount.isFinite() || amount < 0.0) return null
+    if (amount == 0.0) return "\$0.00"
+    if (amount < 0.01) return "<\$0.01"
+    val plain = BigDecimal(amount.toString()).setScale(2, RoundingMode.HALF_UP).toPlainString()
+    return "\$" + plain
+}
 
 internal fun localEstimateText(
     local: AmbientBackendUsage,
     usageUnconfirmed: Boolean,
     unconfirmed: String,
 ): String {
-    val amount = local.estimatedUsd
-    val finite = amount.isFinite() && amount >= 0.0
-    if (finite && local.unpricedCount == 0 && !usageUnconfirmed) return formatPlain(amount)
-    val hasSignal = finite && (
-        amount > 0.0 ||
-            local.inputTokens > 0 ||
-            local.outputTokens > 0 ||
-            local.cachedRead > 0 ||
-            local.cacheWrite > 0
-        )
-    if (hasSignal) return formatPlain(amount) + " · " + unconfirmed
-    return unconfirmed
+    val shown = formatUsdAmount(local.estimatedUsd) ?: return unconfirmed
+    val confirmed = local.unpricedCount == 0 && !usageUnconfirmed
+    if (confirmed) return shown
+    return shown + " · " + unconfirmed
 }
 
 internal fun portalValueText(
@@ -109,10 +159,22 @@ internal fun portalValueText(
     usageUnconfirmed: Boolean,
     unconfirmed: String,
 ): String {
-    if (usd == null || !usd.isFinite() || usd < 0.0) return unconfirmed
-    val amount = formatPlain(usd)
-    if (!settled || usageUnconfirmed) return amount + " · " + unconfirmed
-    return amount
+    if (usd == null) return unconfirmed
+    val shown = formatUsdAmount(usd) ?: return unconfirmed
+    if (!settled || usageUnconfirmed) return shown + " · " + unconfirmed
+    return shown
+}
+
+/**
+ * Column count from the Details container width, in dp, and the current font scale.
+ * Large text and extremely narrow panes use one column. Wider panes use up to four.
+ */
+internal fun detailColumnCount(widthDp: Float, fontScale: Float): Int {
+    if (!widthDp.isFinite() || widthDp < 220f) return 1
+    if (!fontScale.isFinite() || fontScale >= 1.3f) return 1
+    if (widthDp < 600f) return 2
+    if (widthDp < 900f) return 3
+    return 4
 }
 
 @Composable
@@ -296,96 +358,164 @@ internal fun AmbientDetails(
             )
         }
         if (open && bodyMaxHeight > 0.dp) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = bodyMaxHeight)
-                    .verticalScroll(rememberScrollState())
-                    .testTag(AmbientTags.DETAILS_BODY),
+            val voice = voiceDurationText(
+                seconds = snapshot.voiceSeconds,
+                hasSnapshot = snapshot.voiceHasSnapshot,
+                unconfirmedFlag = snapshot.voiceUnconfirmed,
+                unconfirmed = unconfirmed,
+            )
+            val session = elapsedText(snapshot.elapsedSeconds, unconfirmed)
+            val ordinary = snapshot.local.inputTokens.toLong()
+            val output = snapshot.local.outputTokens.toLong()
+            val cacheRead = snapshot.local.cachedRead.toLong()
+            val cacheWrite = snapshot.local.cacheWrite.toLong()
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val columns = detailColumnCount(maxWidth.value, LocalDensity.current.fontScale)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = bodyMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .testTag(AmbientTags.DETAILS_BODY),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DetailMetricGrid(
+                        columns = columns,
+                        metrics = listOf(
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_voice_duration),
+                                value = voice,
+                                tag = AmbientTags.VOICE_DURATION,
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_session_duration),
+                                value = session,
+                                tag = AmbientTags.SESSION_DURATION,
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_input_usage),
+                                value = formatTokenCount(ordinary),
+                                tag = AmbientTags.INPUT_TOKENS,
+                                exact = tokenExactText(ordinary),
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_output_usage),
+                                value = formatTokenCount(output),
+                                tag = AmbientTags.OUTPUT_TOKENS,
+                                exact = tokenExactText(output),
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_cache_read),
+                                value = formatTokenCount(cacheRead),
+                                tag = AmbientTags.CACHE_READ,
+                                exact = tokenExactText(cacheRead),
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_cache_write),
+                                value = formatTokenCount(cacheWrite),
+                                tag = AmbientTags.CACHE_WRITE,
+                                exact = tokenExactText(cacheWrite),
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_input_level),
+                                value = levelText(snapshot.inputRms, unconfirmed),
+                                tag = AmbientTags.INPUT_LEVEL,
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_output_level),
+                                value = levelText(snapshot.outputRms, unconfirmed),
+                                tag = AmbientTags.OUTPUT_LEVEL,
+                            ),
+                        ),
+                    )
+                    Text(
+                        text = stringResource(R.string.ambient_cost_heading),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(AmbientTags.COST_HEADING),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    DetailMetricGrid(
+                        columns = columns,
+                        metrics = listOf(
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_local_estimate_note),
+                                value = localEstimateText(snapshot.local, snapshot.usageUnconfirmed, unconfirmed),
+                                tag = AmbientTags.LOCAL_ESTIMATE,
+                            ),
+                            DetailMetric(
+                                label = stringResource(R.string.ambient_portal_estimate),
+                                value = portalValueText(
+                                    usd = snapshot.portalUsd,
+                                    settled = snapshot.portalSettled,
+                                    usageUnconfirmed = snapshot.usageUnconfirmed,
+                                    unconfirmed = unconfirmed,
+                                ),
+                                tag = AmbientTags.PORTAL_ESTIMATE,
+                            ),
+                        ),
+                    )
+                    Text(
+                        text = stringResource(R.string.ambient_cost_explanation),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(AmbientTags.COST_NOTE),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class DetailMetric(
+    val label: String,
+    val value: String,
+    val tag: String,
+    val exact: String? = null,
+)
+
+@Composable
+private fun DetailMetricGrid(columns: Int, metrics: List<DetailMetric>) {
+    val count = columns.coerceIn(1, 4)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        metrics.chunked(count).forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                DetailRow(
-                    label = stringResource(R.string.ambient_input_level),
-                    value = levelText(snapshot.inputRms, unconfirmed),
-                    tag = AmbientTags.INPUT_LEVEL,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_output_level),
-                    value = levelText(snapshot.outputRms, unconfirmed),
-                    tag = AmbientTags.OUTPUT_LEVEL,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_voice_duration),
-                    value = voiceDurationText(
-                        seconds = snapshot.voiceSeconds,
-                        hasSnapshot = snapshot.voiceHasSnapshot,
-                        unconfirmedFlag = snapshot.voiceUnconfirmed,
-                        unconfirmed = unconfirmed,
-                    ),
-                    tag = AmbientTags.VOICE_DURATION,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_session_duration),
-                    value = elapsedText(snapshot.elapsedSeconds),
-                    tag = AmbientTags.SESSION_DURATION,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_input_usage),
-                    value = snapshot.local.inputTokens.toString(),
-                    tag = AmbientTags.INPUT_TOKENS,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_output_usage),
-                    value = snapshot.local.outputTokens.toString(),
-                    tag = AmbientTags.OUTPUT_TOKENS,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_cache_read),
-                    value = snapshot.local.cachedRead.toString(),
-                    tag = AmbientTags.CACHE_READ,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_cache_write),
-                    value = snapshot.local.cacheWrite.toString(),
-                    tag = AmbientTags.CACHE_WRITE,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_local_estimate_note),
-                    value = localEstimateText(snapshot.local, snapshot.usageUnconfirmed, unconfirmed),
-                    tag = AmbientTags.LOCAL_ESTIMATE,
-                )
-                DetailRow(
-                    label = stringResource(R.string.ambient_portal_estimate),
-                    value = portalValueText(
-                        usd = snapshot.portalUsd,
-                        settled = snapshot.portalSettled,
-                        usageUnconfirmed = snapshot.usageUnconfirmed,
-                        unconfirmed = unconfirmed,
-                    ),
-                    tag = AmbientTags.PORTAL_ESTIMATE,
-                )
+                rowItems.forEach { metric ->
+                    DetailMetricCell(metric, Modifier.weight(1f))
+                }
+                repeat(count - rowItems.size) {
+                    Spacer(Modifier.weight(1f))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DetailRow(label: String, value: String, tag: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+private fun DetailMetricCell(metric: DetailMetric, modifier: Modifier) {
+    Column(modifier) {
         Text(
-            text = label,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
+            text = metric.label,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = value,
-            modifier = Modifier.weight(1f).testTag(tag),
-            style = MaterialTheme.typography.bodyMedium,
+            text = metric.value,
+            modifier = Modifier
+                .testTag(metric.tag)
+                .semantics {
+                    val exact = metric.exact
+                    if (exact != null) contentDescription = exact
+                },
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.End,
         )
     }
 }
