@@ -11,6 +11,9 @@ import com.yage.opencode_client.ui.session.SessionIndicator
 import com.yage.opencode_client.ui.session.failureCountsBySession
 import com.yage.opencode_client.util.SessionReadState
 import com.yage.opencode_client.util.SessionReadStateStore
+import com.yage.opencode_client.ambient.protocol.AmbientSnapshot
+import com.yage.opencode_client.ambient.session.AmbientCoordinator
+import com.yage.opencode_client.ambient.session.AmbientStreamVolume
 import com.yage.opencode_client.data.api.AIUsageClient
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
@@ -155,7 +158,8 @@ data class AppState(
     val aiUsageQuotaSnapshot: AIUsageQuotaSnapshot? = null,
     val isLoadingAIUsage: Boolean = false,
     val isRefreshingAIUsage: Boolean = false,
-    val aiUsageError: String? = null
+    val aiUsageError: String? = null,
+    val ambientEnabled: Boolean = false,
 ) {
     data class NfcPendingAction(val prompt: String, val autoSend: Boolean)
     data class ModelOption(val displayName: String, val providerId: String, val modelId: String, val customShortName: String? = null) {
@@ -639,11 +643,19 @@ class MainViewModel @Inject constructor(
     private val sshKeyManager: SSHKeyManager,
     private val sessionStatsStore: SessionStatsStore,
     private val readStateStore: SessionReadStateStore,
-    private val aiUsageClient: AIUsageClient = AIUsageClient()
+    private val aiUsageClient: AIUsageClient = AIUsageClient(),
+    // Null only when a unit test omits this argument. Hilt passes the process singleton.
+    private val ambientCoordinator: AmbientCoordinator? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppState())
     val state: StateFlow<AppState> = _state.asStateFlow()
+    val ambientSnapshot: StateFlow<AmbientSnapshot> =
+        ambientCoordinator?.snapshot ?: MutableStateFlow(idleAmbientSnapshot())
+    val ambientOutputVolume: StateFlow<AmbientStreamVolume> =
+        ambientCoordinator?.outputVolume ?: MutableStateFlow(AmbientStreamVolume(0, 0, 0))
+    private var ambientStartupJob: Job? = null
+    private var ambientForegroundToken: Long = 0L
 
     private var sseJob: Job? = null
     private var watchdogJob: Job? = null
@@ -688,6 +700,7 @@ class MainViewModel @Inject constructor(
 
     init {
         loadSettings()
+        watchAmbientLink()
     }
 
     private fun loadSettings() {
@@ -697,10 +710,97 @@ class MainViewModel @Inject constructor(
     }
 
     fun configureServer(url: String, username: String? = null, password: String? = null) {
+        ambientCoordinator?.invalidateDisconnected()
         settingsManager.serverUrl = url
         settingsManager.username = username
         settingsManager.password = password
         repository.configure(url, username, password)
+    }
+
+    fun startAmbient() {
+        val coordinator = ambientCoordinator ?: return
+        if (ambientStartupJob?.isActive == true || coordinator.microphoneReserved.value) return
+        val state = _state.value
+        val startContext = ambientStartContext(state)
+        val composerBusy = composerMicrophoneBusy(
+            speechCaptureOpen = speechCaptureOpen,
+            isRecording = state.isRecording,
+            captureReserved = activeSpeechFileOwner != null &&
+                !state.isRecording &&
+                !state.isTranscribing &&
+                !state.isRetryingSpeech,
+            startupJobActive = speechTranscriptionJob?.isActive == true &&
+                !state.isRecording &&
+                !state.isTranscribing &&
+                !state.isRetryingSpeech,
+            cleanupJobActive = speechCleanupJob?.isActive == true,
+        )
+        val job = viewModelScope.launch {
+            coordinator.start(startContext, composerBusy)
+        }
+        ambientStartupJob = job
+        job.invokeOnCompletion {
+            if (ambientStartupJob === job) ambientStartupJob = null
+        }
+    }
+
+    fun endAmbient() {
+        val startup = ambientStartupJob
+        if (ambientStartupJob === startup) ambientStartupJob = null
+        val coordinator = ambientCoordinator ?: return
+        viewModelScope.launch {
+            if (ambientStartupJob == null) coordinator.end()
+        }
+    }
+
+    fun setAmbientMuted(muted: Boolean) {
+        ambientCoordinator?.mute(muted)
+    }
+
+    fun interruptAmbientPlayback() {
+        ambientCoordinator?.interrupt()
+    }
+
+    fun setAmbientOutputVolume(index: Int) {
+        ambientCoordinator?.setOutputVolume(index)
+    }
+
+    fun setAmbientEnabled(enabled: Boolean) {
+        settingsManager.ambientEnabled = enabled
+        _state.update { it.copy(ambientEnabled = enabled) }
+        if (!enabled) {
+            ambientCoordinator?.invalidateFeatureDisabled()
+            val startup = ambientStartupJob
+            ambientStartupJob = null
+            startup?.cancel()
+        }
+    }
+
+    private fun watchAmbientLink() {
+        viewModelScope.launch {
+            var previous: AmbientLinkSample? = null
+            _state
+                .map { state ->
+                    AmbientLinkSample(
+                        hostProfileId = state.currentHostProfileId,
+                        runtimeGeneration = state.runtimeGeneration,
+                        connected = state.isConnected,
+                    )
+                }
+                .distinctUntilChanged()
+                .collect { current ->
+                    val revocation = ambientLinkRevocation(previous, current)
+                    previous = current
+                    val coordinator = ambientCoordinator ?: return@collect
+                    if (revocation.hostOrRuntime) {
+                        coordinator.invalidateHost(
+                            current.hostProfileId.orEmpty(),
+                            current.runtimeGeneration,
+                        )
+                    }
+                    if (revocation.disconnected) coordinator.invalidateDisconnected()
+                }
+        }
     }
 
     fun getHostProfiles(): List<HostProfile> = hostProfileStore.profiles()
@@ -918,6 +1018,12 @@ class MainViewModel @Inject constructor(
         }
         if (currentState.isRetryingSpeech) {
             Log.w(TAG, "Ignoring toggle while preserved audio retry is in progress")
+            return
+        }
+        if (!currentState.isRecording &&
+            (ambientStartupJob?.isActive == true || ambientCoordinator?.microphoneReserved?.value == true)
+        ) {
+            setSpeechError("Ambient Mode is using the microphone.")
             return
         }
         if (currentState.isRecording) {
@@ -1506,12 +1612,14 @@ class MainViewModel @Inject constructor(
 
     fun onHostActivityStart(): Long {
         val token = hostActivityForegroundGate.onStart()
+        ambientForegroundToken = ambientCoordinator?.onActivityStart() ?: 0L
         setAppForeground(true)
         return token
     }
 
     fun onHostActivityStop(token: Long, changingConfigurations: Boolean) {
         if (!hostActivityForegroundGate.onStop(token, changingConfigurations)) return
+        ambientCoordinator?.onActivityStop(ambientForegroundToken, changingConfigurations)
         setAppForeground(false)
         stopSpeechForBackground()
     }
@@ -1925,6 +2033,10 @@ class MainViewModel @Inject constructor(
     }
 
     private fun resetRuntimeForHostSwitch() {
+        ambientCoordinator?.invalidateHost(
+            _state.value.currentHostProfileId.orEmpty(),
+            _state.value.runtimeGeneration + 1,
+        )
         val current = _state.value
         current.currentSessionId?.let { sessionId ->
             saveDraft(current.currentHostProfileId, sessionId, current.inputText)

@@ -1,15 +1,15 @@
 # OpenCode Android 客户端工作日志
 
-## 2026-10-16 — Ambient Mode 对齐 iOS：设计审核与分阶段实现中
+## 2026-10-17 — Ambient Mode 对齐 iOS：已实现，本地验证完成
 
-- 分支 `feat/ambient-mode-live` 从最新 `origin/master` 建立；原未跟踪的两份设计文档保持不动，未读取真实 `.env` 或部署实体 Android。
-- Cursor CLI 的 `grok-4.7-high-fast` 已通过隔离读写探针，后台 wrapper 负责进程/产物验收，实际调查与实现由 Cursor 执行。
-- 第一轮已完成 Android 架构调查，主线程审核后要求补齐 native-rate 重采样、实际发送前租约/不可变认证快照、前台启动 microphone FGS、无选中会话时使用服务端默认目录，以及有界合法工具结果。
-- 先单一 owner 建立协议和共享 contracts；通过编译/单测后，再并行传输+gateway、八工具、音频。全局 Manifest / MainViewModel / Activity / 资源各自只有一个写入 owner。
-- 拟对齐 Hosted Live 全双工、八工具与递归子代理归档、48dp 胶囊输入电平、静态 waveform 导航、前台跨页保持及原生前台服务后台语音。会议记录、sleep 工具和新主动通知机制不在本次 port 范围。
-- 已确认存在 API 34 模拟器，仅在明确 emulator serial 下做组件/仪器验证；真实耳机、回声、OEM 息屏持续性不由模拟器证明。当前尚未进行设备测试或发布本轮 PR，基础包本地验证见后续 checkpoint；完成 code/privacy review 后新 PR 保持未合并。
-
-基础包 checkpoint：Cursor 大任务超时但留下协议源码，主线程保留失败记录并读回 partial；修复 Kotlin 集合长度、完善音频事件/代际、dispatch token 与 epoch 合同、Unicode code-point UTF-8 裁剪，并纠正三处错误的测试预期后，Ambient 六类 49 项测试通过。全量 `testDebugUnitTest` 为 49 suites / 620 tests，0 失败/错误/跳过；`assembleDebug` 成功。证据在 ignored `app/build/ambient-port/`，共享接口冻结供下一波传输、工具、音频并行实现。仍未运行实际 Ambient 页面、麦克风、FGS 或付费 API，不把协议/构建结果当成整功能完成。
+- 分支 `feat/ambient-mode-live` 含基础包提交 `9dee182`，基线 `02ffe6f`。未跟踪的 `docs/context_usage_sync_design.md` 与 `docs/plan_halfwidth_process_rows.md` 不纳入。未读取真实 `.env`，未安装实体 Android。
+- 设置默认关闭，写在加密偏好里。用户在前台自己开始。手机和专注布局用静态波形入口，展开布局在内容栏切换。同一轮运行跨导航和配置变化。
+- Hosted Builder 的 session POST 只带 Bearer。WebSocket 必须与门户同源，query 只有 ticket，且与响应中的 ticket 一致。OpenCode Basic 不进入这条客户端。
+- 八个工具：`query_jobs`、`get_session_messages`、`start_job`、`continue_job`、`stop_job`、`answer_pending`、`archive_job`、`unarchive_job`。开始和继续走 `prompt_async`，HTTP 200/202/204 即返回，不等待任务跑完。租约不再属于当前 owner 时拒绝。递归归档后序、同一时间戳；递归解除归档前序，并把归档时间写成 0。结束语音不中止 OpenCode 任务。
+- 麦克风前台服务从可见状态下的 `startService` 进入，服务再提升为 microphone 类型并确认后才采集。被拒绝的运行不使用 `startForegroundService` 的超时承诺。通知 Stop 保留前台服务直到音频清理完成。连接中离开前台会取消；正在听或说且服务已就绪时保持；撤销或服务销毁不会自动重启。
+- 静音是 48dp RMS 胶囊，控制行 72dp，输出音量使用系统 `STREAM_VOICE_CALL`。页面费用是本地标准价估算，与最近的门户用量快照分开。会议记录、sleep 工具和新的主动通知不在本次范围。
+- 验证：`testDebugUnitTest` 60 suites / 720 tests，0 失败、0 错误、0 跳过。`assembleDebug` 与 `assembleDebugAndroidTest` 通过。API 34 模拟器上，`AmbientControlsInstrumentedTest` 4 项与 `AmbientServiceInstrumentedTest` 2 项先通过；修复导航图在返回栈就绪前被访问之后，`AmbientNavigationInstrumentedTest` 1 项通过，覆盖实际 MainActivity 导航与重建。这 7 项不是同一次调用全部通过。服务仪器测试使用真实 Android service 与通知，host 是内存中的假准入对象，没有 `AudioRecord`。后续代码审查与隐私审查通过，`git diff --check` 通过。
+- 尚未验证真实麦克风、耳机、回声、OEM 息屏持续性、实体机安装，以及付费 Live API 或真实凭证。导航截图是空闲手机竖屏。新 PR 保持未合并，由主线程发布。
 
 ## 2026-10-16 — 会话列表去掉重复的运行文字
 

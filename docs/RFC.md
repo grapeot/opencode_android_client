@@ -10,7 +10,7 @@
 | **标题** | OpenCode Android Client 技术方案 |
 | **状态** | Accepted + Phase 8 SSH Host Profiles Draft |
 | **创建日期** | 2026-02 |
-| **最后更新** | 2026-09-21 |
+| **最后更新** | 2026-10-17 |
 | **PRD 引用** | [PRD.md](PRD.md) |
 
 ---
@@ -358,6 +358,20 @@ SSH Tunnel 状态机：
 2. App 进入后台时可以断开 SSE 与 tunnel；回前台先 `ensureStarted()`，再 REST 全量同步和重建 SSE。
 3. Phase 8 不实现后台永久 tunnel，不添加 Foreground Service，也不把 SSH tunnel 作为 notification transport。
 4. `testConnection()` 不能只复用 30 秒 health debounce。用户保存或修改 SSH config 后，必须重新跑 tunnel phase；health check 的防抖只作用于未变化的 resolved connection。
+
+### 3.6 Ambient Mode（2026-10-17）
+
+默认关闭，开关在加密偏好 `ambientEnabled`。用户在前台开始后，同一轮运行跨导航和配置变化。手机底部和专注布局使用静态波形目的地；展开布局在内容栏切换。
+
+链路使用独立 OkHttp 客户端，`POST /v1/audio/live/sessions` 只带 Builder Bearer。返回的 WebSocket 必须与门户同源，query 只有 ticket，解码后与响应里的 ticket 完全一致。该客户端不跟随重定向，也不携带 OpenCode Basic。工具调用走另一条客户端：没有 Builder Bearer；Basic 只在 dispatch 授权通过后盖上。租约不再属于当前 owner 时，工具结果为 stale，迟到回调也不能改写当前运行的界面状态。
+
+音频为 PCM16LE、单声道、24 kHz 全双工，采集侧按设备原生采样率重采样。静音上行发送同长度静音。输出音量使用 `AudioManager.STREAM_VOICE_CALL`。控件行高 72dp，静音胶囊与最小触控为 48dp，胶囊填充跟随输入 RMS。
+
+八个工具是 `query_jobs`、`get_session_messages`、`start_job`、`continue_job`、`stop_job`、`answer_pending`、`archive_job`、`unarchive_job`。开始和继续使用 `prompt_async`，HTTP 200/202/204 即返回，不等待任务结束。归档递归、后序、同一时间戳；解除归档递归、前序，并把归档时间写成 0。`SHUTDOWN_ABORTS_OPEN_CODE` 为 false：结束语音不调用 abort，也不清除 host 与目录绑定。界面用量是本地标准价估算，与最近一次门户用量快照分开。
+
+前台服务：可见 owner 通过 `startService` 进入 `AmbientVoiceService`。服务先把自身提升为 `FOREGROUND_SERVICE_TYPE_MICROPHONE` 并确认，采集才开始。被拒绝或过期的运行不走 `startForegroundService` 的时限。通知 Stop 保留前台通知直到音频清理完成。连接阶段离开前台会取消；正在听或说且服务已就绪时保持；服务销毁，以及 host、断线或关闭功能导致的撤销，都不会自动再开。
+
+会议记录、sleep 工具、question/permission 的新主动通知不在本次范围。
 
 ---
 
@@ -1201,6 +1215,10 @@ class SSHKeyManager(context: Context) {
     }
 }
 ```
+
+### 6.4 Ambient 凭证隔离
+
+Builder session POST 只使用加密存储里的 AI Builder token，形式为 Bearer。WebSocket 握手不带 Authorization，只带一次性 ticket。OpenCode Basic 留在工具网关，不进入 Builder 客户端。票据、URL 和异常文本不写入对外状态字符串。
 
 ---
 
