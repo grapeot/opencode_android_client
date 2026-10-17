@@ -1,5 +1,16 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-16 — Ambient Mode 对齐 iOS：设计审核与分阶段实现中
+
+- 分支 `feat/ambient-mode-live` 从最新 `origin/master` 建立；原未跟踪的两份设计文档保持不动，未读取真实 `.env` 或部署实体 Android。
+- Cursor CLI 的 `grok-4.7-high-fast` 已通过隔离读写探针，后台 wrapper 负责进程/产物验收，实际调查与实现由 Cursor 执行。
+- 第一轮已完成 Android 架构调查，主线程审核后要求补齐 native-rate 重采样、实际发送前租约/不可变认证快照、前台启动 microphone FGS、无选中会话时使用服务端默认目录，以及有界合法工具结果。
+- 先单一 owner 建立协议和共享 contracts；通过编译/单测后，再并行传输+gateway、八工具、音频。全局 Manifest / MainViewModel / Activity / 资源各自只有一个写入 owner。
+- 拟对齐 Hosted Live 全双工、八工具与递归子代理归档、48dp 胶囊输入电平、静态 waveform 导航、前台跨页保持及原生前台服务后台语音。会议记录、sleep 工具和新主动通知机制不在本次 port 范围。
+- 已确认存在 API 34 模拟器，仅在明确 emulator serial 下做组件/仪器验证；真实耳机、回声、OEM 息屏持续性不由模拟器证明。当前尚未进行设备测试或发布本轮 PR，基础包本地验证见后续 checkpoint；完成 code/privacy review 后新 PR 保持未合并。
+
+基础包 checkpoint：Cursor 大任务超时但留下协议源码，主线程保留失败记录并读回 partial；修复 Kotlin 集合长度、完善音频事件/代际、dispatch token 与 epoch 合同、Unicode code-point UTF-8 裁剪，并纠正三处错误的测试预期后，Ambient 六类 49 项测试通过。全量 `testDebugUnitTest` 为 49 suites / 620 tests，0 失败/错误/跳过；`assembleDebug` 成功。证据在 ignored `app/build/ambient-port/`，共享接口冻结供下一波传输、工具、音频并行实现。仍未运行实际 Ambient 页面、麦克风、FGS 或付费 API，不把协议/构建结果当成整功能完成。
+
 ## 2026-10-16 — 会话列表去掉重复的运行文字
 
 - 对齐 iOS：列表副文字不再写 Running。自身或后代执行中仍由呼吸灯表达，灯的无障碍名保持 Running。后代数量改为分支图标加数字，朗读仍是「N 个子代理运行中」。Retrying 和状态待同步继续用文字。composer 状态栏未改。
