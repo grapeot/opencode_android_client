@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -88,21 +89,41 @@ private fun formatRelativeTime(updatedMs: Long): String = DateUtils.getRelativeT
 
 @Composable
 private fun sessionStatusLabel(status: SessionStatus?): String? = when {
-    status == null -> null
-    status.isBusy -> stringResource(R.string.sessions_status_running)
-    status.isRetry -> stringResource(R.string.sessions_status_retrying)
+    status?.isRetry == true -> stringResource(R.string.sessions_status_retrying)
     else -> null
 }
 
 @Composable
 private fun sessionStatusColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant
 
-/** Label for the subordinate "subagents running" signal shown in place of the
- *  idle status word when a session has running descendant subagents. */
 @Composable
 private fun descendantBusyLabel(count: Int): String =
     if (count == 1) stringResource(R.string.sessions_subagents_running_one)
     else stringResource(R.string.sessions_subagents_running_many, count)
+
+@Composable
+private fun DescendantCount(count: Int, color: Color) {
+    val label = descendantBusyLabel(count)
+    Row(
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = label
+        },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Default.AccountTree,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(12.dp)
+        )
+        Spacer(modifier = Modifier.width(2.dp))
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            color = color
+        )
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -138,11 +159,11 @@ private fun SwipeRevealRow(
         isArchived -> MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.onSurface
     }
-    // The dot carries attention; the secondary line describes running work.
     val showsDescendantBusy = busyDescendantCount > 0
-    val statusLabel = listOfNotNull(sessionStatusLabel(status),
-        if (showsDescendantBusy) descendantBusyLabel(busyDescendantCount) else null,
-        if (unknown) stringResource(R.string.sessions_status_sync_pending) else null).joinToString(" · ").takeIf { it.isNotEmpty() }
+    val statusLabel = listOfNotNull(
+        sessionStatusLabel(status),
+        if (unknown) stringResource(R.string.sessions_status_sync_pending) else null
+    ).joinToString(" · ").takeIf { it.isNotEmpty() }
     val dragFlingBehavior = AnchoredDraggableDefaults.flingBehavior(
         state = dragState,
         positionalThreshold = { total: Float -> total * 0.5f }
@@ -218,7 +239,7 @@ private fun SwipeRevealRow(
                                 )
                             }
                             val showStatus = statusLabel != null
-                            if ((showStatus || showsDescendantBusy) && updatedTime != null) {
+                            if (showStatus && updatedTime != null) {
                                 Text("  ", style = MaterialTheme.typography.bodySmall)
                             }
                             if (showStatus) {
@@ -227,6 +248,12 @@ private fun SwipeRevealRow(
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                                     color = sessionStatusColor()
                                 )
+                            }
+                            if (showsDescendantBusy) {
+                                if (updatedTime != null || showStatus) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                DescendantCount(busyDescendantCount, sessionStatusColor())
                             }
                         }
                     }

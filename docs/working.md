@@ -1,5 +1,10 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-10-16 — 会话列表去掉重复的运行文字
+
+- 对齐 iOS：列表副文字不再写 Running。自身或后代执行中仍由呼吸灯表达，灯的无障碍名保持 Running。后代数量改为分支图标加数字，朗读仍是「N 个子代理运行中」。Retrying 和状态待同步继续用文字。composer 状态栏未改。
+- 验证：`testDebugUnitTest` 571 项通过。`ANDROID_SERIAL=emulator-5568` 的 `SessionListInstrumentedTest` 15 项通过，未装到 TriFold。
+
 ## 2026-10-16 — 语音阶段词只留状态栏
 
 - 语音栏不再显示 Listening、Tap to speak、Transcribing、Preserved audio、Retry this segment。进行中的阶段词只在 composer 上方状态栏出现；Tap to speak 不进状态栏，只留在 transport 的无障碍名上。栏内右侧只保留会改变阶段的动作：转写等待的 Stop transcription wait、保留音频的 Discard audio，以及语音未配置时的 Configure speech。
