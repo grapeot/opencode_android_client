@@ -9,8 +9,6 @@ internal data class AmbientRouteDevice(val id: Int, val type: Int)
  * [android.media.AudioDeviceInfo.getType]; product names are never read.
  */
 internal object AmbientAudioRoute {
-    const val VOLUME_STREAM: Int = AudioManager.STREAM_VOICE_CALL
-
     const val TYPE_BUILTIN_EARPIECE = 1
     const val TYPE_BUILTIN_SPEAKER = 2
     const val TYPE_WIRED_HEADSET = 3

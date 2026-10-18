@@ -287,7 +287,6 @@
     <string name="ambient_mute">Mute</string>
     <string name="ambient_unmute">Unmute</string>
     <string name="ambient_stop_playback">Stop playback</string>
-    <string name="ambient_output_volume">Output volume</string>
     <string name="ambient_details">Details</string>
     <string name="ambient_input_level">Input level</string>
     <string name="ambient_output_level">Output level</string>

@@ -45,12 +45,9 @@ import java.util.concurrent.TimeUnit
  * permission and foreground-service eligibility. After communication mode and
  * focus, a builtin-only route prefers the handset speaker. Wired, USB, and
  * active Bluetooth routes are not overridden.
- *
- * [volumeStream] is the platform stream for [AudioAttributes.USAGE_VOICE_COMMUNICATION].
  */
 class AmbientNativeAudioEngine(context: Context) : AmbientAudioEngine {
     private val appContext: Context = context.applicationContext
-    val volumeStream: Int = AmbientAudioRoute.VOLUME_STREAM
 
     @Volatile
     var failureCode: String? = null

@@ -45,7 +45,6 @@ object AmbientTags {
     const val PORTAL_ESTIMATE = "ambient-portal-estimate"
     const val COST_HEADING = "ambient-cost-heading"
     const val COST_NOTE = "ambient-cost-note"
-    const val VOLUME = "ambient-volume"
     const val CONTROLS = "ambient-controls"
     const val MUTE = "ambient-mute"
     const val STOP = "ambient-stop-playback"
@@ -58,21 +57,8 @@ object AmbientTags {
 }
 
 /**
- * Current index and maximum of the output stream the audio engine already plays.
- * Neither field is an application gain.
- */
-data class AmbientOutputVolume(
-    val value: Int,
-    val max: Int,
-)
-
-/**
  * Ambient session surface. Renders [snapshot] only. Composition does not open a
  * microphone, audio device, or network connection.
- *
- * [outputVolume] is the current index and maximum of the output stream the audio
- * engine uses. [onOutputVolumeChange] receives the index to apply on that same
- * stream. This function does not call AudioManager.
  *
  * [onConnect] starts or reconnects. [onSetMuted] receives the desired muted state.
  * [onInterruptPlayback] is momentary. [onEnd] ends the session.
@@ -83,12 +69,10 @@ data class AmbientOutputVolume(
 @Composable
 fun AmbientScreen(
     snapshot: AmbientSnapshot,
-    outputVolume: AmbientOutputVolume,
     onConnect: () -> Unit,
     onSetMuted: (Boolean) -> Unit,
     onInterruptPlayback: () -> Unit,
     onEnd: () -> Unit,
-    onOutputVolumeChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val rows = ambientRows(snapshot)
@@ -149,7 +133,6 @@ fun AmbientScreen(
                     AmbientDetails(snapshot, bodyMaxHeight = bodyMax)
                 }
             }
-            AmbientVolumeSlider(volume = outputVolume, onChange = onOutputVolumeChange)
             AmbientControlSlot(
                 phase = snapshot.phase,
                 muted = snapshot.muted,

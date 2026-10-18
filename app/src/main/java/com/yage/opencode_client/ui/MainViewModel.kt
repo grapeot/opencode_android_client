@@ -13,7 +13,6 @@ import com.yage.opencode_client.util.SessionReadState
 import com.yage.opencode_client.util.SessionReadStateStore
 import com.yage.opencode_client.ambient.protocol.AmbientSnapshot
 import com.yage.opencode_client.ambient.session.AmbientCoordinator
-import com.yage.opencode_client.ambient.session.AmbientStreamVolume
 import com.yage.opencode_client.data.api.AIUsageClient
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
@@ -652,8 +651,6 @@ class MainViewModel @Inject constructor(
     val state: StateFlow<AppState> = _state.asStateFlow()
     val ambientSnapshot: StateFlow<AmbientSnapshot> =
         ambientCoordinator?.snapshot ?: MutableStateFlow(idleAmbientSnapshot())
-    val ambientOutputVolume: StateFlow<AmbientStreamVolume> =
-        ambientCoordinator?.outputVolume ?: MutableStateFlow(AmbientStreamVolume(0, 0, 0))
     private var ambientStartupJob: Job? = null
     private var ambientForegroundToken: Long = 0L
 
@@ -759,10 +756,6 @@ class MainViewModel @Inject constructor(
 
     fun interruptAmbientPlayback() {
         ambientCoordinator?.interrupt()
-    }
-
-    fun setAmbientOutputVolume(index: Int) {
-        ambientCoordinator?.setOutputVolume(index)
     }
 
     fun setAmbientEnabled(enabled: Boolean) {
