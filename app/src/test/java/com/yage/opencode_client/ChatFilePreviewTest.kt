@@ -100,7 +100,7 @@ class ChatFilePreviewTest {
     @Test
     fun `loadChatPreviewContent returns file body`() = runTest {
         val repository = mockk<OpenCodeRepository>()
-        coEvery { repository.getFileContent("README.md") } returns Result.success(
+        coEvery { repository.getFileContent("README.md", "/workspace") } returns Result.success(
             FileContent(type = "text", content = "# Hello")
         )
         val request = ChatFilePreviewRequest("README.md", "host", "s1", "/workspace")
@@ -113,8 +113,8 @@ class ChatFilePreviewTest {
     @Test
     fun `loadChatPreviewContent falls back to directory listing`() = runTest {
         val repository = mockk<OpenCodeRepository>()
-        coEvery { repository.getFileContent("src") } returns Result.success(FileContent(type = "text", content = ""))
-        coEvery { repository.getFileTree("src") } returns Result.success(
+        coEvery { repository.getFileContent("src", "/workspace") } returns Result.success(FileContent(type = "text", content = ""))
+        coEvery { repository.getFileTree("src", "/workspace") } returns Result.success(
             listOf(FileNode(name = "Main.kt", path = "src/Main.kt", type = "file"))
         )
         val request = ChatFilePreviewRequest("src", "host", "s1", "/workspace")
@@ -137,7 +137,7 @@ class ChatFilePreviewTest {
     fun `cancelled load rethrows cancellation`() = runTest {
         val repository = mockk<OpenCodeRepository>()
         val gate = CompletableDeferred<Unit>()
-        coEvery { repository.getFileContent("slow.md") } coAnswers {
+        coEvery { repository.getFileContent("slow.md", "/ws") } coAnswers {
             gate.await()
             Result.success(FileContent(type = "text", content = "late"))
         }

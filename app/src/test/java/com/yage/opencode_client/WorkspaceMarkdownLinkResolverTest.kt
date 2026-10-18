@@ -33,8 +33,21 @@ class WorkspaceMarkdownLinkResolverTest {
     }
 
     @Test
-    fun relativeLinksRequireWorkspace() {
-        assertRejected(WorkspaceMarkdownLinkResolver.resolve("README.md", null))
+    fun filesBrowserWithoutWorkspaceResolvesRelativeLinksFromTheSourceDirectory() {
+        assertEquals(
+            WorkspaceMarkdownLinkResolver.Resolution.Preview("docs/b.md"),
+            WorkspaceMarkdownLinkResolver.resolve("b.md", null, sourceMarkdownPath = "docs/a.md")
+        )
+        assertEquals(
+            WorkspaceMarkdownLinkResolver.Resolution.Preview("docs/b.md"),
+            WorkspaceMarkdownLinkResolver.resolve("b.md", "  ", sourceMarkdownPath = "docs/a.md")
+        )
+        assertRejected(WorkspaceMarkdownLinkResolver.resolve("../outside.md", null, sourceMarkdownPath = "docs/a.md"))
+        assertRejected(WorkspaceMarkdownLinkResolver.resolve("docs\\b.md", null, sourceMarkdownPath = "docs/a.md"))
+        assertRejected(WorkspaceMarkdownLinkResolver.resolve("/Users/me/project/docs/b.md", null, sourceMarkdownPath = "docs/a.md"))
+        assertRejected(WorkspaceMarkdownLinkResolver.resolve("file:///Users/me/project/docs/b.md", null, sourceMarkdownPath = "docs/a.md"))
+        assertRejected(WorkspaceMarkdownLinkResolver.resolve("file://localhost/Users/me/project/docs/b.md", null, sourceMarkdownPath = "docs/a.md"))
+        assertRejected(WorkspaceMarkdownLinkResolver.resolve("file://example.com/Users/me/project/docs/b.md", null, sourceMarkdownPath = "docs/a.md"))
     }
 
     @Test

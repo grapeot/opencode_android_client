@@ -44,7 +44,6 @@ object WorkspaceMarkdownLinkResolver {
     }
 
     private fun resolveWorkspacePath(raw: String, workspaceDirectory: String?, sourceMarkdownPath: String?): Resolution {
-        if (workspaceDirectory.isNullOrBlank()) return Resolution.Rejected("No workspace is available for this link")
         val pathPart = raw.substringBefore('#')
         if (pathPart.isBlank()) return Resolution.Ignored
         if ('?' in pathPart) return Resolution.Rejected("File links with query are not supported")
@@ -54,6 +53,9 @@ object WorkspaceMarkdownLinkResolver {
         }
         if (decodedPath.startsWith('/')) return resolveAbsolutePath(decodedPath, workspaceDirectory)
         if ('\\' in decodedPath) return Resolution.Rejected("Workspace link escapes the workspace")
+        if (workspaceDirectory.isNullOrBlank()) {
+            return resolveServerDefaultRelative(decodedPath, sourceMarkdownPath)
+        }
         val baseDir = sourceMarkdownPath
             ?.let { resolveRelativePreviewPath(it, workspaceDirectory) }
             ?.substringBeforeLast('/', missingDelimiterValue = "")
@@ -66,6 +68,24 @@ object WorkspaceMarkdownLinkResolver {
                     if (output.isEmpty()) return Resolution.Rejected("Workspace link escapes the workspace")
                     output.removeAt(output.lastIndex)
                 }
+                else -> output += segment
+            }
+        }
+        return Resolution.Preview(output.joinToString("/"))
+    }
+
+    /** No workspace root: join onto the source directory and reject any parent segment. */
+    private fun resolveServerDefaultRelative(decodedPath: String, sourceMarkdownPath: String?): Resolution {
+        val source = sourceMarkdownPath?.trim().orEmpty()
+        if (source.startsWith('/') || '\\' in source || hasTraversal(source) || hasTraversal(decodedPath)) {
+            return Resolution.Rejected("Workspace link escapes the workspace")
+        }
+        val baseDir = source.substringBeforeLast('/', missingDelimiterValue = "")
+        val output = baseDir.split('/').filter { it.isNotBlank() }.toMutableList()
+        for (segment in decodedPath.split('/')) {
+            when (segment) {
+                "", "." -> Unit
+                ".." -> return Resolution.Rejected("Workspace link escapes the workspace")
                 else -> output += segment
             }
         }

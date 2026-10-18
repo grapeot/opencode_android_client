@@ -436,7 +436,7 @@ private fun PhoneLayout(
                 FilesScreen(
                     viewModel = filesViewModel,
                     pathToShow = state.filePathToShowInFiles,
-                    sessionDirectory = state.currentSession?.directory,
+                    sessionDirectory = state.columnPreview?.workspace,
                     onCloseFile = {
                         val origin = state.filePreviewOriginRoute
                         viewModel.clearFileToShow()
@@ -445,7 +445,8 @@ private fun PhoneLayout(
                             navigateToTopLevel(Screen.Chat.route)
                         }
                     },
-                    onFileClick = { }
+                    onFileClick = { },
+                    onPreviewPathChange = viewModel::retargetColumnPreview,
                 )
             }
             composable(Screen.Settings.route) {
@@ -597,9 +598,10 @@ private fun TabletLayout(
                     FilesScreen(
                         viewModel = filesViewModel,
                         pathToShow = state.filePathToShowInFiles,
-                        sessionDirectory = state.currentSession?.directory,
+                        sessionDirectory = state.columnPreview?.workspace,
                         onCloseFile = { viewModel.clearFileToShow() },
-                        onFileClick = { path -> viewModel.showFilesBrowserFile(path) }
+                        onFileClick = { path -> viewModel.showFilesBrowserFile(path) },
+                        onPreviewPathChange = viewModel::retargetColumnPreview,
                     )
                     if (sessionsPaneCollapsed) {
                         Surface(

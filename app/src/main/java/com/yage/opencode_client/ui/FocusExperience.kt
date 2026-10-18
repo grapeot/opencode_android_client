@@ -58,10 +58,21 @@ fun chatPreviewMatches(preview: OwnedFilePreview, hostId: String?, sessionId: St
 fun filesPreviewMatches(preview: OwnedFilePreview, hostId: String?): Boolean =
     preview.kind == FilePreviewKind.FILES && preview.hostId == hostId
 
-fun retainColumn(column: OwnedFilePreview?, hostId: String?, sessionId: String?, workspace: String?): OwnedFilePreview? {
+fun retainColumn(
+    column: OwnedFilePreview?,
+    hostId: String?,
+    sessionId: String?,
+    workspace: String?,
+    hostOwned: Boolean = false,
+): OwnedFilePreview? {
     column ?: return null
     return when (column.kind) {
-        FilePreviewKind.CHAT -> column.takeIf { chatPreviewMatches(it, hostId, sessionId, workspace) }
+        FilePreviewKind.CHAT -> when {
+            column.hostId != hostId -> null
+            // Already visible in the regular column: session changes keep the frozen file.
+            hostOwned -> column
+            else -> column.takeIf { chatPreviewMatches(it, hostId, sessionId, workspace) }
+        }
         FilePreviewKind.FILES -> column.takeIf { filesPreviewMatches(it, hostId) }
     }
 }
@@ -76,7 +87,13 @@ fun migrateVisiblePreview(
     workspace: String?,
 ): PreviewMigration {
     val keptInline = inline?.takeIf { it.belongsTo(hostId, sessionId, workspace) }
-    val keptColumn = retainColumn(column, hostId, sessionId, workspace)
+    val keptColumn = retainColumn(
+        column,
+        hostId,
+        sessionId,
+        workspace,
+        hostOwned = from == EffectiveLayout.REGULAR && to == EffectiveLayout.REGULAR,
+    )
     if (from == to) return PreviewMigration(keptInline, keptColumn)
     return when (from) {
         EffectiveLayout.COMPACT -> {

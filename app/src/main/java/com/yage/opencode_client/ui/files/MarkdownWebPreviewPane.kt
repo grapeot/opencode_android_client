@@ -108,7 +108,7 @@ private fun ResolvedMarkdownWebPreview(
                 text = content,
                 markdownFilePath = resolverMarkdownPath,
                 workspaceDirectory = sessionDirectory,
-                fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
+                fetchContent = { path -> repository.getFileContent(path, sessionDirectory).getOrThrow() }
             )
         } catch (e: Exception) {
             error = e.message ?: "Failed to resolve Markdown images"

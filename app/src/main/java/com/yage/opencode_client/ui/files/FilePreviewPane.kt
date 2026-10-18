@@ -185,7 +185,7 @@ private fun PreviewMarkdown(
             text = normalizedContent,
             markdownFilePath = resolverMarkdownPath,
             workspaceDirectory = sessionDirectory,
-            fetchContent = { path -> repository.getFileContent(path).getOrThrow() }
+            fetchContent = { path -> repository.getFileContent(path, sessionDirectory).getOrThrow() }
         )
         val finalText = resolvedContent ?: normalizedContent
         val httpsUrls = """!\[[^\]]*\]\((https?://[^)]+)\)""".toRegex().findAll(finalText).map { it.groupValues[1] }.toList().distinct()
