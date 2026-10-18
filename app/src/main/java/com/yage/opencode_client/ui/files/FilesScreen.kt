@@ -35,7 +35,8 @@ fun FilesScreen(
     pathToShow: String? = null,
     sessionDirectory: String? = null,
     onCloseFile: () -> Unit = {},
-    onFileClick: (String) -> Unit = {}
+    onFileClick: (String) -> Unit = {},
+    onPreviewPathChange: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -92,7 +93,10 @@ fun FilesScreen(
                                 runCatching { context.startActivity(intent) }
                                     .onFailure { viewModel.showError(it.message ?: "Could not open link") }
                             }
-                            is WorkspaceMarkdownLinkResolver.Resolution.Preview -> viewModel.openPreviewPath(resolution.path, sessionDirectory)
+                            is WorkspaceMarkdownLinkResolver.Resolution.Preview -> {
+                                viewModel.openPreviewPath(resolution.path, sessionDirectory)
+                                onPreviewPathChange(resolution.path)
+                            }
                             WorkspaceMarkdownLinkResolver.Resolution.Ignored -> Unit
                             is WorkspaceMarkdownLinkResolver.Resolution.Rejected -> viewModel.showError(resolution.message)
                         }

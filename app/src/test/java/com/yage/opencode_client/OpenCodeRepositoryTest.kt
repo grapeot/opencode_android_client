@@ -639,6 +639,29 @@ class OpenCodeRepositoryTest {
     }
 
     @Test
+    fun `getFileContent sends frozen directory and omits a blank directory`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setBody(json.encodeToString(FileContent(type = "text", content = "from workspace")))
+                .setHeader("Content-Type", "application/json")
+        )
+        server.enqueue(
+            MockResponse()
+                .setBody(json.encodeToString(FileContent(type = "text", content = "default project")))
+                .setHeader("Content-Type", "application/json")
+        )
+
+        val scoped = repository.getFileContent("docs/README.md", "/work/app")
+        val unscoped = repository.getFileContent("docs/README.md", "  ")
+
+        assertTrue(scoped.isSuccess)
+        assertEquals("from workspace", scoped.getOrThrow().content)
+        assertEquals("/file/content?path=docs%2FREADME.md&directory=%2Fwork%2Fapp", server.takeRequest().path)
+        assertTrue(unscoped.isSuccess)
+        assertEquals("/file/content?path=docs%2FREADME.md", server.takeRequest().path)
+    }
+
+    @Test
     fun `getSessionDiff returns file diff list`() = runBlocking {
         val diffs = listOf(
             FileDiff(filePath = "app/src/Main.kt", additions = 10, deletions = 2, status = "modified")
@@ -705,6 +728,16 @@ class OpenCodeRepositoryTest {
         assertEquals(2, tree.size)
         assertEquals("app/src/Main.kt", tree[1].path)
         assertEquals("/file?path=app%2Fsrc", server.takeRequest().path)
+    }
+
+    @Test
+    fun `getFileTree sends frozen directory`() = runBlocking {
+        server.enqueue(jsonResponse("[]"))
+
+        val result = repository.getFileTree("src", "/work/app")
+
+        assertTrue(result.isSuccess)
+        assertEquals("/file?path=src&directory=%2Fwork%2Fapp", server.takeRequest().path)
     }
 
     @Test
@@ -786,6 +819,21 @@ class OpenCodeRepositoryTest {
         assertTrue(result.isSuccess)
         assertEquals("openai", result.getOrThrow().default?.providerId)
         assertEquals("gpt-4", result.getOrThrow().default?.modelId)
+    }
+
+    @Test
+    fun `host epoch increments only when configure changes the host`() {
+        val fresh = OpenCodeRepository()
+        assertEquals(0L, fresh.currentHostEpoch())
+
+        fresh.configure("http://localhost:4096/")
+        fresh.configure(OpenCodeRepository.DEFAULT_SERVER, username = "user", password = "secret")
+        assertEquals(0L, fresh.currentHostEpoch())
+
+        fresh.configure("http://127.0.0.1:9", username = "user", password = "secret")
+        assertEquals(1L, fresh.currentHostEpoch())
+        fresh.configure("http://127.0.0.1:9/", username = "other", password = "other")
+        assertEquals(1L, fresh.currentHostEpoch())
     }
 
     @Test

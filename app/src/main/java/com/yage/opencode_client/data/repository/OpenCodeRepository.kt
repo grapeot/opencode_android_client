@@ -21,6 +21,7 @@ class OpenCodeRepository @Inject constructor() {
     private var username: String? = null
     private var password: String? = null
     private var ambientGate: AmbientDispatchGate? = null
+    private var hostEpoch = 0L
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -119,10 +120,16 @@ class OpenCodeRepository @Inject constructor() {
     @Synchronized
     fun retireAmbient(token: Long): Boolean = ambientGate?.retire(token) ?: false
 
+    /** Monotonic host generation. Increases only when [configure] points at a different host. */
+    @Synchronized
+    fun currentHostEpoch(): Long = hostEpoch
+
     @Synchronized
     fun configure(baseUrl: String, username: String? = null, password: String? = null) {
         ambientGate?.invalidate()
-        this.baseUrl = normalizedBaseUrl(baseUrl)
+        val normalized = normalizedBaseUrl(baseUrl)
+        if (this.baseUrl != normalized) hostEpoch += 1
+        this.baseUrl = normalized
         this.username = username
         this.password = password
         rebuildClients()
@@ -291,11 +298,19 @@ class OpenCodeRepository @Inject constructor() {
     }
 
     suspend fun getFileTree(path: String? = null): Result<List<FileNode>> = apiCall {
-        api.getFileTree(path ?: "")
+        api.getFileTree(path ?: "", null)
+    }
+
+    suspend fun getFileTree(path: String?, directory: String?): Result<List<FileNode>> = apiCall {
+        api.getFileTree(path ?: "", directory.asDirectoryQuery())
     }
 
     suspend fun getFileContent(path: String): Result<FileContent> = apiCall {
-        api.getFileContent(path)
+        api.getFileContent(path, null)
+    }
+
+    suspend fun getFileContent(path: String, directory: String?): Result<FileContent> = apiCall {
+        api.getFileContent(path, directory.asDirectoryQuery())
     }
 
     suspend fun getFileStatus(): Result<List<FileStatusEntry>> = apiCall {
@@ -322,3 +337,5 @@ class OpenCodeRepository @Inject constructor() {
         private const val SSE_READ_TIMEOUT_SECONDS = 0L
     }
 }
+
+private fun String?.asDirectoryQuery(): String? = this?.takeIf { it.isNotBlank() }

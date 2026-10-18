@@ -131,6 +131,64 @@ class FocusExperienceTest {
     }
 
     @Test
+    fun `regular column keeps chat and files previews across sessions`() {
+        val chat = migrateVisiblePreview(
+            from = EffectiveLayout.REGULAR,
+            to = EffectiveLayout.REGULAR,
+            inline = null,
+            column = OwnedFilePreview("notes.md", "host", "session-a", "/work-a", FilePreviewKind.CHAT),
+            hostId = "host",
+            sessionId = "session-b",
+            workspace = "/work-b",
+        )
+        assertNull(chat.inline)
+        assertEquals("notes.md", chat.column?.path)
+        assertEquals("session-a", chat.column?.sessionId)
+        assertEquals("/work-a", chat.column?.workspace)
+        assertEquals(FilePreviewKind.CHAT, chat.column?.kind)
+
+        val files = migrateVisiblePreview(
+            from = EffectiveLayout.REGULAR,
+            to = EffectiveLayout.REGULAR,
+            inline = null,
+            column = OwnedFilePreview("tree.kt", "host", null, null, FilePreviewKind.FILES),
+            hostId = "host",
+            sessionId = "session-b",
+            workspace = "/work-b",
+        )
+        assertEquals("tree.kt", files.column?.path)
+        assertEquals(FilePreviewKind.FILES, files.column?.kind)
+        assertNull(files.column?.workspace)
+    }
+
+    @Test
+    fun `compact inline closes on session switch and host switch drops the column`() {
+        val inline = migrateVisiblePreview(
+            from = EffectiveLayout.COMPACT,
+            to = EffectiveLayout.COMPACT,
+            inline = request("notes.md"),
+            column = null,
+            hostId = "host",
+            sessionId = "other-session",
+            workspace = "/work",
+        )
+        assertNull(inline.inline)
+        assertNull(inline.column)
+
+        val otherHost = migrateVisiblePreview(
+            from = EffectiveLayout.REGULAR,
+            to = EffectiveLayout.REGULAR,
+            inline = null,
+            column = owned("notes.md"),
+            hostId = "other-host",
+            sessionId = "session",
+            workspace = "/work",
+        )
+        assertNull(otherHost.column)
+        assertNull(otherHost.inline)
+    }
+
+    @Test
     fun `paste inserts at selection only after focus and defers while composing`() {
         assertEquals(PastePlacement.APPEND, pastePlacement(false, 1, 1, false, null))
         assertEquals(PastePlacement.INSERT, pastePlacement(true, 2, 4, false, null))

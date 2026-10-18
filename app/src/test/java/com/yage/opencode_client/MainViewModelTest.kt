@@ -1033,7 +1033,14 @@ class MainViewModelTest {
                 streamingReasoningPart = Part(id = "p2", type = "reasoning", text = "old"),
                 sessionTodos = mapOf(source.id to emptyList()),
                 sendingSessionIds = setOf(source.id),
-                filePathToShowInFiles = "old.md"
+                filePathToShowInFiles = "old.md",
+                columnPreview = com.yage.opencode_client.ui.OwnedFilePreview(
+                    path = "old.md",
+                    hostId = "host-1",
+                    sessionId = source.id,
+                    workspace = "/source",
+                    kind = com.yage.opencode_client.ui.FilePreviewKind.CHAT,
+                ),
             )
         }
         viewModel.receiveDeepLink("opencode://session/ses_target")
@@ -1051,6 +1058,7 @@ class MainViewModelTest {
         assertTrue(viewModel.state.value.sessionTodos.isEmpty())
         assertTrue(viewModel.state.value.sendingSessionIds.isEmpty())
         assertNull(viewModel.state.value.filePathToShowInFiles)
+        assertNull(viewModel.state.value.columnPreview)
         assertEquals("ses_target", viewModel.state.value.pendingDeepLinkSessionId)
         assertFalse(viewModel.state.value.isResolvingDeepLink)
         verify(exactly = 1) { tunnelManager.disconnect() }
@@ -1456,6 +1464,148 @@ class MainViewModelTest {
         viewModel.reconcilePreviewLayout(com.yage.opencode_client.ui.EffectiveLayout.REGULAR, null)
         assertEquals("tree.kt", viewModel.state.value.columnPreview?.path)
         assertEquals(com.yage.opencode_client.ui.FilePreviewKind.FILES, viewModel.state.value.columnPreview?.kind)
+        assertNull(viewModel.state.value.columnPreview?.workspace)
+    }
+
+    @Test
+    fun `session change keeps the adopted chat column and its frozen workspace`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host",
+                currentSessionId = "session-a",
+                sessions = listOf(
+                    Session(id = "session-a", directory = "/work-a"),
+                    Session(id = "session-b", directory = "/work-b"),
+                ),
+                appliedLayout = com.yage.opencode_client.ui.EffectiveLayout.REGULAR,
+            )
+        }
+        viewModel.showFileInFiles("notes.md")
+        val inline = com.yage.opencode_client.ui.chat.ChatFilePreviewRequest(
+            path = "notes.md",
+            hostProfileId = "host",
+            sessionId = "session-a",
+            workspaceDirectory = "/work-a",
+        )
+        viewModel.selectSession("session-b")
+        advanceUntilIdle()
+        val returned = viewModel.reconcilePreviewLayout(com.yage.opencode_client.ui.EffectiveLayout.REGULAR, inline)
+
+        assertNull(returned)
+        val column = viewModel.state.value.columnPreview
+        assertEquals("notes.md", column?.path)
+        assertEquals("session-a", column?.sessionId)
+        assertEquals("/work-a", column?.workspace)
+        assertEquals(com.yage.opencode_client.ui.FilePreviewKind.CHAT, column?.kind)
+        assertEquals("notes.md", viewModel.state.value.filePathToShowInFiles)
+    }
+
+    @Test
+    fun `files browser preview does not adopt the chat session directory`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host",
+                currentSessionId = "session-a",
+                sessions = listOf(Session(id = "session-a", directory = "/work-a")),
+            )
+        }
+        viewModel.showFilesBrowserFile("tree.kt")
+        val column = viewModel.state.value.columnPreview
+        assertEquals("tree.kt", column?.path)
+        assertNull(column?.workspace)
+        assertNull(column?.sessionId)
+        assertEquals(com.yage.opencode_client.ui.FilePreviewKind.FILES, column?.kind)
+    }
+
+    @Test
+    fun `markdown retarget keeps the frozen workspace`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host",
+                currentSessionId = "session-a",
+                sessions = listOf(Session(id = "session-a", directory = "/work-a")),
+            )
+        }
+        viewModel.showFileInFiles("notes.md")
+        viewModel.retargetColumnPreview("other.md")
+        val column = viewModel.state.value.columnPreview
+        assertEquals("other.md", column?.path)
+        assertEquals("/work-a", column?.workspace)
+        assertEquals("session-a", column?.sessionId)
+        assertEquals("other.md", viewModel.state.value.filePathToShowInFiles)
+    }
+
+    @Test
+    fun `explicit close clears the column preview`() = runTest {
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host",
+                currentSessionId = "session-a",
+                sessions = listOf(Session(id = "session-a", directory = "/work-a")),
+            )
+        }
+        viewModel.showFileInFiles("notes.md")
+        viewModel.clearFileToShow()
+        assertNull(viewModel.state.value.columnPreview)
+        assertNull(viewModel.state.value.filePathToShowInFiles)
+    }
+
+    @Test
+    fun `deleting the preview source session clears the column`() = runTest {
+        coEvery { repository.deleteSession("session-a") } returns Result.success(Unit)
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host",
+                currentSessionId = "session-a",
+                sessions = listOf(
+                    Session(id = "session-a", directory = "/work-a"),
+                    Session(id = "session-b", directory = "/work-b"),
+                ),
+                appliedLayout = com.yage.opencode_client.ui.EffectiveLayout.REGULAR,
+            )
+        }
+        viewModel.showFileInFiles("notes.md")
+        viewModel.deleteSession("session-a")
+        advanceUntilIdle()
+        viewModel.reconcilePreviewLayout(com.yage.opencode_client.ui.EffectiveLayout.REGULAR, null)
+        assertNull(viewModel.state.value.columnPreview)
+        assertNull(viewModel.state.value.filePathToShowInFiles)
+    }
+
+    @Test
+    fun `deleting a different session keeps the adopted column`() = runTest {
+        coEvery { repository.deleteSession("session-c") } returns Result.success(Unit)
+        val viewModel = createViewModel()
+        updateState(viewModel) {
+            it.copy(
+                currentHostProfileId = "host",
+                currentSessionId = "session-b",
+                sessions = listOf(
+                    Session(id = "session-a", directory = "/work-a"),
+                    Session(id = "session-b", directory = "/work-b"),
+                    Session(id = "session-c", directory = "/work-c"),
+                ),
+                appliedLayout = com.yage.opencode_client.ui.EffectiveLayout.REGULAR,
+                columnPreview = com.yage.opencode_client.ui.OwnedFilePreview(
+                    path = "notes.md",
+                    hostId = "host",
+                    sessionId = "session-a",
+                    workspace = "/work-a",
+                    kind = com.yage.opencode_client.ui.FilePreviewKind.CHAT,
+                ),
+                filePathToShowInFiles = "notes.md",
+            )
+        }
+        viewModel.deleteSession("session-c")
+        advanceUntilIdle()
+        viewModel.reconcilePreviewLayout(com.yage.opencode_client.ui.EffectiveLayout.REGULAR, null)
+        assertEquals("notes.md", viewModel.state.value.columnPreview?.path)
+        assertEquals("/work-a", viewModel.state.value.columnPreview?.workspace)
     }
 
     @Test

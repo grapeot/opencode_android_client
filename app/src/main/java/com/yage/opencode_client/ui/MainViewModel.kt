@@ -2217,6 +2217,9 @@ class MainViewModel @Inject constructor(
         launchDeleteSession(hostRuntimeScope, repository, _state, sessionId, ::navigateToSession) {
             readStateStore.remove(sessionId)
             _state.update { it.copy(pendingSessionErrorAt = it.pendingSessionErrorAt - sessionId) }
+            if (_state.value.columnPreview?.sessionId == sessionId) {
+                clearFileToShow()
+            }
             publishReadStates()
         }
     }
@@ -2799,7 +2802,7 @@ class MainViewModel @Inject constructor(
             path = path,
             hostId = current.currentHostProfileId,
             sessionId = null,
-            workspace = current.currentSession?.directory,
+            workspace = null,
             kind = FilePreviewKind.FILES,
         )
         _state.update {
@@ -2807,6 +2810,17 @@ class MainViewModel @Inject constructor(
                 filePathToShowInFiles = path,
                 filePreviewOriginRoute = null,
                 columnPreview = target,
+            )
+        }
+    }
+
+    fun retargetColumnPreview(path: String) {
+        _state.update { state ->
+            val column = state.columnPreview ?: return@update state
+            if (column.path == path) return@update state
+            state.copy(
+                columnPreview = column.copy(path = path),
+                filePathToShowInFiles = path,
             )
         }
     }

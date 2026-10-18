@@ -32,6 +32,10 @@ class FilesViewModel @Inject constructor(
     private val _state = MutableStateFlow(FilesUiState())
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
     private var hostGeneration = 0L
+    private var previewToken = 0L
+    private var settledToken = -1L
+    private var settledPath: String? = null
+    private var settledDirectory: String? = null
 
     init {
         refresh()
@@ -44,6 +48,7 @@ class FilesViewModel @Inject constructor(
 
     fun resetForHost() {
         hostGeneration++
+        invalidatePreview()
         _state.value = FilesUiState()
         refresh()
     }
@@ -65,6 +70,7 @@ class FilesViewModel @Inject constructor(
     }
 
     fun closePreview() {
+        invalidatePreview()
         _state.update {
             it.copy(
                 selectedFilePath = null,
@@ -83,7 +89,7 @@ class FilesViewModel @Inject constructor(
     }
 
     fun openPreviewPath(pathToShow: String, sessionDirectory: String?) {
-        loadPreview(pathToShow, sessionDirectory, isRefresh = false)
+        syncPathToShow(pathToShow, sessionDirectory)
     }
 
     fun syncPathToShow(pathToShow: String?, sessionDirectory: String?) {
@@ -91,7 +97,7 @@ class FilesViewModel @Inject constructor(
             closePreview()
             return
         }
-
+        if (sameSettledPreview(pathToShow, sessionDirectory)) return
         loadPreview(pathToShow, sessionDirectory, isRefresh = false)
     }
 
@@ -102,15 +108,18 @@ class FilesViewModel @Inject constructor(
 
     private fun loadPreview(pathToShow: String, sessionDirectory: String?, isRefresh: Boolean) {
         val relPath = resolveRelativePreviewPath(pathToShow, sessionDirectory)
-        val generation = hostGeneration
+        val token = beginPreview(pathToShow, sessionDirectory)
+        val hostToken = hostGeneration
+        val epoch = repository.currentHostEpoch()
         viewModelScope.launch {
-            if (generation != hostGeneration) return@launch
+            if (!previewStillCurrent(token, hostToken, epoch)) return@launch
             if (isRefresh) {
                 _state.update { it.copy(isPreviewRefreshing = true, error = null) }
             }
-            repository.getFileContent(relPath)
+            if (!previewStillCurrent(token, hostToken, epoch)) return@launch
+            fetchFileContent(relPath, sessionDirectory)
                 .onSuccess { content ->
-                    if (generation != hostGeneration) return@onSuccess
+                    if (!previewStillCurrent(token, hostToken, epoch)) return@onSuccess
                     if (!content.content.isNullOrBlank()) {
                         _state.update {
                             it.copy(
@@ -120,13 +129,13 @@ class FilesViewModel @Inject constructor(
                                 error = null
                             )
                         }
-                    } else {
-                        loadDirectoryPreview(pathToShow, relPath, isRefresh, generation)
+                    } else if (previewStillCurrent(token, hostToken, epoch)) {
+                        loadDirectoryPreview(pathToShow, relPath, sessionDirectory, isRefresh, token, hostToken, epoch)
                     }
                 }
                 .onFailure {
-                    if (generation == hostGeneration) {
-                        loadDirectoryPreview(pathToShow, relPath, isRefresh, generation)
+                    if (previewStillCurrent(token, hostToken, epoch)) {
+                        loadDirectoryPreview(pathToShow, relPath, sessionDirectory, isRefresh, token, hostToken, epoch)
                     }
                 }
         }
@@ -149,15 +158,20 @@ class FilesViewModel @Inject constructor(
     private suspend fun loadDirectoryPreview(
         path: String,
         relPath: String,
-        isRefresh: Boolean = false,
-        generation: Long = hostGeneration
+        sessionDirectory: String?,
+        isRefresh: Boolean,
+        token: Long,
+        hostToken: Long,
+        epoch: Long,
     ) {
-        repository.getFileTree(relPath)
+        if (!previewStillCurrent(token, hostToken, epoch)) return
+        fetchFileTree(relPath, sessionDirectory)
             .onSuccess { tree ->
-                if (generation == hostGeneration) setDirectoryPreview(path, relPath, tree)
+                if (previewStillCurrent(token, hostToken, epoch)) setDirectoryPreview(path, relPath, tree)
             }
             .onFailure { throwable ->
-                if (generation == hostGeneration) {
+                if (previewStillCurrent(token, hostToken, epoch)) {
+                    forgetSettledPreview(token)
                     _state.update {
                         it.copy(
                             isPreviewRefreshing = if (isRefresh) false else it.isPreviewRefreshing,
@@ -216,25 +230,70 @@ class FilesViewModel @Inject constructor(
     }
 
     private fun loadFileContent(path: String) {
-        val generation = hostGeneration
+        val token = beginPreview(path, null)
+        val hostToken = hostGeneration
+        val epoch = repository.currentHostEpoch()
         viewModelScope.launch {
-            repository.getFileContent(path)
+            if (!previewStillCurrent(token, hostToken, epoch)) return@launch
+            fetchFileContent(path, null)
                 .onSuccess { content ->
-                    if (generation == hostGeneration) {
-                        _state.update {
-                            it.copy(
-                                selectedFileContent = content,
-                                selectedFilePath = path,
-                                error = null
-                            )
-                        }
+                    if (!previewStillCurrent(token, hostToken, epoch)) return@onSuccess
+                    _state.update {
+                        it.copy(
+                            selectedFileContent = content,
+                            selectedFilePath = path,
+                            error = null
+                        )
                     }
                 }
                 .onFailure { throwable ->
-                    if (generation == hostGeneration) {
+                    if (previewStillCurrent(token, hostToken, epoch)) {
+                        forgetSettledPreview(token)
                         _state.update { it.copy(error = throwable.message) }
                     }
                 }
         }
     }
+
+    private fun beginPreview(path: String, directory: String?): Long {
+        previewToken += 1
+        settledPath = path
+        settledDirectory = directory
+        settledToken = previewToken
+        return previewToken
+    }
+
+    private fun invalidatePreview() {
+        previewToken += 1
+        settledPath = null
+        settledDirectory = null
+        settledToken = -1
+    }
+
+    private fun forgetSettledPreview(token: Long) {
+        if (settledToken == token) {
+            settledPath = null
+            settledDirectory = null
+            settledToken = -1
+        }
+    }
+
+    private fun sameSettledPreview(path: String, directory: String?): Boolean =
+        settledToken == previewToken && settledPath == path && settledDirectory == directory
+
+    private fun previewCurrent(token: Long, hostToken: Long): Boolean =
+        token == previewToken && hostToken == hostGeneration
+
+    private fun previewStillCurrent(token: Long, hostToken: Long, epoch: Long): Boolean =
+        previewCurrent(token, hostToken) && epoch == repository.currentHostEpoch()
+
+    private suspend fun fetchFileContent(path: String, directory: String?) =
+        directory.asContentDirectory()?.let { repository.getFileContent(path, it) }
+            ?: repository.getFileContent(path)
+
+    private suspend fun fetchFileTree(path: String, directory: String?) =
+        directory.asContentDirectory()?.let { repository.getFileTree(path, it) }
+            ?: repository.getFileTree(path)
 }
+
+private fun String?.asContentDirectory(): String? = this?.takeIf { it.isNotBlank() }

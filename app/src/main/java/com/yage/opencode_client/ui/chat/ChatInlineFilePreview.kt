@@ -94,12 +94,13 @@ internal suspend fun loadChatPreviewContent(
     request: ChatFilePreviewRequest
 ): Result<FileContent> {
     val relPath = resolveRelativePreviewPath(request.path, request.workspaceDirectory)
-    val contentResult = repository.getFileContent(relPath)
+    val directory = request.workspaceDirectory
+    val contentResult = repository.getFileContent(relPath, directory)
     val content = contentResult.getOrNull()
     if (content != null && !content.content.isNullOrBlank()) {
         return Result.success(content)
     }
-    val treeResult = repository.getFileTree(relPath)
+    val treeResult = repository.getFileTree(relPath, directory)
     val tree = treeResult.getOrNull()
     if (tree != null) {
         return Result.success(
