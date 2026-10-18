@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioManager
-import android.os.Build
 import androidx.core.content.ContextCompat
 import com.yage.opencode_client.ambient.audio.AmbientNativeAudioEngine
 import com.yage.opencode_client.ambient.gateway.AmbientLiveGateway
@@ -61,11 +59,9 @@ class AmbientCoordinator @Inject constructor(
     private val bindingBook = AmbientBindingBook()
     private val published = MutableStateFlow(idleSnapshot())
     private val reservedFlow = MutableStateFlow(false)
-    private val volumeFlow = MutableStateFlow(AmbientStreamVolume(0, 0, 0))
 
     val snapshot: StateFlow<AmbientSnapshot> = published.asStateFlow()
     val microphoneReserved: StateFlow<Boolean> = reservedFlow.asStateFlow()
-    val outputVolume: StateFlow<AmbientStreamVolume> = volumeFlow.asStateFlow()
 
     private var engineRef: AmbientNativeAudioEngine? = null
     private var gatewayRef: AmbientLiveGateway? = null
@@ -94,7 +90,6 @@ class AmbientCoordinator @Inject constructor(
     /** Returns the caller token MainActivity must pass back to [onActivityStop]. */
     fun onActivityStart(): Long {
         val token = synchronized(lock) { callerGate.onStart() }
-        refreshOutputVolume()
         return token
     }
 
@@ -181,33 +176,6 @@ class AmbientCoordinator @Inject constructor(
     suspend fun end() {
         val id = synchronized(lock) { runId } ?: return
         endMatching(id)
-    }
-
-    fun refreshOutputVolume() {
-        val manager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        val stream = engine().volumeStream
-        val min = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            manager.getStreamMinVolume(stream)
-        } else {
-            0
-        }
-        val max = manager.getStreamMaxVolume(stream).coerceAtLeast(min)
-        val current = manager.getStreamVolume(stream).coerceIn(min, max)
-        volumeFlow.value = AmbientStreamVolume(min, max, current)
-    }
-
-    fun setOutputVolume(index: Int) {
-        val manager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        val stream = engine().volumeStream
-        refreshOutputVolume()
-        val span = volumeFlow.value
-        val clamped = index.coerceIn(span.min, span.max)
-        try {
-            manager.setStreamVolume(stream, clamped, 0)
-        } catch (_: SecurityException) {
-            return
-        }
-        refreshOutputVolume()
     }
 
     suspend fun start(context: AmbientStartContext, composerMicBusy: Boolean): AmbientStartResult {

@@ -286,7 +286,6 @@
     <string name="ambient_mute">静音</string>
     <string name="ambient_unmute">取消静音</string>
     <string name="ambient_stop_playback">停止播放</string>
-    <string name="ambient_output_volume">输出音量</string>
     <string name="ambient_details">详情</string>
     <string name="ambient_input_level">输入电平</string>
     <string name="ambient_output_level">输出电平</string>

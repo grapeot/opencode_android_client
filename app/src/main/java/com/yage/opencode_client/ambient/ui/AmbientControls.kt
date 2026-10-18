@@ -18,7 +18,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -27,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,7 +59,6 @@ import com.yage.opencode_client.ui.theme.StopRed
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.floor
-import kotlin.math.roundToInt
 
 internal val AmbientControlHeight = AmbientMeter.CONTROL_ROW_DP.dp
 
@@ -516,49 +513,6 @@ private fun DetailMetricCell(metric: DetailMetric, modifier: Modifier) {
                 },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-@Composable
-internal fun AmbientVolumeSlider(
-    volume: AmbientOutputVolume,
-    onChange: (Int) -> Unit,
-) {
-    val max = volume.max.coerceAtLeast(0)
-    var drag by remember { mutableStateOf<Int?>(null) }
-    val external = volume.value.coerceIn(0, max)
-    val shown = (drag ?: external).coerceIn(0, max)
-    val volumeName = stringResource(R.string.ambient_output_volume)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(24.dp),
-        )
-        Slider(
-            value = if (max == 0) 0f else shown.toFloat(),
-            onValueChange = { raw ->
-                if (max <= 0) return@Slider
-                val next = raw.roundToInt().coerceIn(0, max)
-                drag = next
-                if (next != shown) onChange(next)
-            },
-            onValueChangeFinished = { drag = null },
-            valueRange = 0f..(if (max == 0) 1f else max.toFloat()),
-            steps = if (max <= 1) 0 else max - 1,
-            enabled = max > 0,
-            modifier = Modifier
-                .weight(1f)
-                .testTag(AmbientTags.VOLUME)
-                .semantics { contentDescription = volumeName },
         )
     }
 }

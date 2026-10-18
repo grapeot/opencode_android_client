@@ -29,12 +29,6 @@ data class AmbientAdmission(
     val accepted: Boolean get() = code == null && reserve
 }
 
-data class AmbientStreamVolume(
-    val min: Int,
-    val max: Int,
-    val current: Int,
-)
-
 enum class AmbientRevokeReason {
     HOST,
     RUNTIME,

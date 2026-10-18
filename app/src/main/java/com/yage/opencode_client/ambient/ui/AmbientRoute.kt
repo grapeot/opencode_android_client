@@ -40,7 +40,7 @@ private class AmbientConnectPermit {
 }
 
 /**
- * Collects the ambient snapshot and output volume, and wires [AmbientScreen].
+ * Collects the ambient snapshot and wires [AmbientScreen].
  * Composition does not open a microphone, audio device, or network connection.
  * [onConnect] is the only start path, and only after the user taps connect.
  */
@@ -52,7 +52,6 @@ fun AmbientRoute(
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val snapshot by viewModel.ambientSnapshot.collectAsStateWithLifecycle()
-    val streamVolume by viewModel.ambientOutputVolume.collectAsStateWithLifecycle()
     val permit = remember { AmbientConnectPermit() }
 
     fun permitStillValid(): Boolean {
@@ -111,15 +110,10 @@ fun AmbientRoute(
 
     AmbientScreen(
         snapshot = snapshot,
-        outputVolume = AmbientOutputVolume(
-            value = streamVolume.current,
-            max = streamVolume.max,
-        ),
         onConnect = ::onConnect,
         onSetMuted = viewModel::setAmbientMuted,
         onInterruptPlayback = viewModel::interruptAmbientPlayback,
         onEnd = viewModel::endAmbient,
-        onOutputVolumeChange = viewModel::setAmbientOutputVolume,
         modifier = modifier.testTag(AmbientNavigationTags.ROUTE),
     )
 }

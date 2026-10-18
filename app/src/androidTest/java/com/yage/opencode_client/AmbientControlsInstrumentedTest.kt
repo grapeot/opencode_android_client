@@ -34,7 +34,6 @@ import com.yage.opencode_client.ambient.protocol.AmbientCaption
 import com.yage.opencode_client.ambient.protocol.AmbientMeter
 import com.yage.opencode_client.ambient.protocol.AmbientPhase
 import com.yage.opencode_client.ambient.protocol.AmbientSnapshot
-import com.yage.opencode_client.ambient.ui.AmbientOutputVolume
 import com.yage.opencode_client.ambient.ui.AmbientScreen
 import com.yage.opencode_client.ambient.ui.AmbientTags
 import com.yage.opencode_client.ui.theme.OpenCodeTheme
@@ -99,12 +98,10 @@ class AmbientControlsInstrumentedTest {
             OpenCodeTheme {
                 AmbientScreen(
                     snapshot = snapshotState.value,
-                    outputVolume = AmbientOutputVolume(value = 4, max = 15),
                     onConnect = { connects++ },
                     onSetMuted = {},
                     onInterruptPlayback = {},
                     onEnd = { ends++ },
-                    onOutputVolumeChange = {},
                 )
             }
         }
@@ -219,12 +216,10 @@ class AmbientControlsInstrumentedTest {
                                 portalSettled = true,
                                 elapsedSeconds = 90_061L,
                             ),
-                            outputVolume = AmbientOutputVolume(value = 4, max = 15),
                             onConnect = {},
                             onSetMuted = {},
                             onInterruptPlayback = {},
                             onEnd = {},
-                            onOutputVolumeChange = {},
                         )
                     }
                 }
@@ -301,12 +296,10 @@ class AmbientControlsInstrumentedTest {
                             ),
                         ),
                     ),
-                    outputVolume = AmbientOutputVolume(value = 4, max = 15),
                     onConnect = {},
                     onSetMuted = {},
                     onInterruptPlayback = {},
                     onEnd = {},
-                    onOutputVolumeChange = {},
                 )
             }
         }
@@ -336,12 +329,10 @@ class AmbientControlsInstrumentedTest {
             OpenCodeTheme {
                 AmbientScreen(
                     snapshot = snapshotState.value,
-                    outputVolume = AmbientOutputVolume(value = 4, max = 15),
                     onConnect = {},
                     onSetMuted = {},
                     onInterruptPlayback = {},
                     onEnd = {},
-                    onOutputVolumeChange = {},
                 )
             }
         }
@@ -386,12 +377,10 @@ class AmbientControlsInstrumentedTest {
             OpenCodeTheme {
                 AmbientScreen(
                     snapshot = snapshot,
-                    outputVolume = AmbientOutputVolume(value = 4, max = 15),
                     onConnect = onConnect,
                     onSetMuted = onSetMuted,
                     onInterruptPlayback = onInterruptPlayback,
                     onEnd = onEnd,
-                    onOutputVolumeChange = {},
                 )
             }
         }
@@ -493,11 +482,10 @@ class AmbientControlsInstrumentedTest {
     }
 
     private fun assertDetailsLeaveControlsVisible() {
-        composeRule.onNodeWithTag(AmbientTags.VOLUME).assertIsDisplayed()
         composeRule.onNodeWithTag(AmbientTags.CONTROLS).assertIsDisplayed()
         val body = bounds(AmbientTags.DETAILS_BODY)
-        val volume = bounds(AmbientTags.VOLUME)
-        assertTrue("details stay above the volume control", body.bottom <= volume.top + 1f)
+        val controls = bounds(AmbientTags.CONTROLS)
+        assertTrue("details stay above the controls", body.bottom <= controls.top + 1f)
         assertTrue("details keep the height cap", heightDp(body.height) <= 280.5f)
     }
 

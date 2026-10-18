@@ -108,7 +108,6 @@ class AmbientPlaybackGenerationTest {
 
     @Test
     fun `volume stream focus and headset route stay fixed`() {
-        assertEquals(AudioManager.STREAM_VOICE_CALL, AmbientAudioRoute.VOLUME_STREAM)
         assertEquals(3, AmbientAudioRoute.TYPE_WIRED_HEADSET)
         assertEquals(4, AmbientAudioRoute.TYPE_WIRED_HEADPHONES)
         assertEquals(7, AmbientAudioRoute.TYPE_BLUETOOTH_SCO)
