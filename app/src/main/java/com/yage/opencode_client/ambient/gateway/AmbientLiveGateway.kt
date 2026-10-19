@@ -54,7 +54,7 @@ object AmbientOpenCodeClients {
 object AmbientLivePaths {
     private const val ID = "[A-Za-z0-9._:~+-]{1,200}"
 
-    private val queryKeys = setOf("directory", "limit", "cursor", "roots", "archived")
+    private val queryKeys = setOf("directory", "limit", "cursor", "before", "roots", "archived")
 
     private val routes = listOf(
         Route("GET", Regex("^config/providers$")),

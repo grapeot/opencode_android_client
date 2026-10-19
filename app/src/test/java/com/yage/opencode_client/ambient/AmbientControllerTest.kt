@@ -232,6 +232,39 @@ class AmbientControllerTest {
         }
         }
     }
+
+    @Test fun identifiedCommentaryUsesLiveOwnerAndRoutesAckWithoutRestartingMic() = runTest {
+        val fixture = Fixture(this)
+        try {
+            val link = fixture.listen(config(), lease(), 7L)
+            val owner = lease().ownerToken
+            assertEquals(com.yage.opencode_client.ambient.protocol.AmbientReplySend.REJECTED,
+                fixture.controller.appendCommentary("body", "wrong", "other"))
+            assertEquals(com.yage.opencode_client.ambient.protocol.AmbientReplySend.SUBMITTED,
+                fixture.controller.appendCommentary("body", "known", owner))
+            val sent = link.sent.filterIsInstance<AmbientClientEvent.Commentary>().single()
+            assertEquals("known", sent.eventId)
+            link.emit(AmbientServerEvent.CommentaryAppended("known")); runCurrent()
+            assertEquals(listOf("known"), fixture.acknowledged)
+            assertEquals(1, fixture.audio.captureStarts.get())
+            fixture.controller.end()
+            assertEquals(com.yage.opencode_client.ambient.protocol.AmbientReplySend.REJECTED,
+                fixture.controller.appendCommentary("late", "late", owner))
+        } finally { fixture.close() }
+    }
+
+    @Test fun commentaryDistinguishesPreDispatchRejectionFromUnknownSocketFailure() = runTest {
+        val fixture = Fixture(this)
+        try {
+            val link = fixture.listen(config(), lease(), 7L)
+            link.rejectCommentary = com.yage.opencode_client.ambient.transport.AmbientLinkFailure.BUFFER
+            assertEquals(com.yage.opencode_client.ambient.protocol.AmbientReplySend.REJECTED,
+                fixture.controller.appendCommentary("body", "rejected", lease().ownerToken))
+            link.rejectCommentary = com.yage.opencode_client.ambient.transport.AmbientLinkFailure.SOCKET
+            assertEquals(com.yage.opencode_client.ambient.protocol.AmbientReplySend.UNKNOWN,
+                fixture.controller.appendCommentary("body", "uncertain", lease().ownerToken))
+        } finally { fixture.close() }
+    }
 }
 
 private class Fixture(
@@ -247,6 +280,7 @@ private class Fixture(
     val tools = FakeTools()
     val applied = CopyOnWriteArrayList<AmbientToolEffect>()
     val retired = CopyOnWriteArrayList<Long>()
+    val acknowledged = CopyOnWriteArrayList<String>()
     val controller = AmbientController(
         transport = transport,
         audio = audio,
@@ -262,6 +296,7 @@ private class Fixture(
         beforeCapture = AmbientCaptureGate { allowCapture },
         clock = clock,
         scope = scope,
+        onCommentaryAppended = { acknowledged += it },
     )
 
     fun link(): FakeLink = transport.link
@@ -310,10 +345,14 @@ private class FakeLink : AmbientLink {
     val sent = CopyOnWriteArrayList<AmbientClientEvent>()
     val closes = AtomicInteger()
     var rejectFunctionOutput = false
+    var rejectCommentary: com.yage.opencode_client.ambient.transport.AmbientLinkFailure? = null
     var closedSeconds: Double? = 4.0
 
     override suspend fun send(event: AmbientClientEvent) {
         sent += event
+        if (event is AmbientClientEvent.Commentary) rejectCommentary?.let {
+            throw com.yage.opencode_client.ambient.transport.AmbientLinkException(it)
+        }
         if (rejectFunctionOutput && event is AmbientClientEvent.FunctionOutput) {
             throw IllegalStateException("https://secret?ticket=abc")
         }

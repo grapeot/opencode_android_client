@@ -15,6 +15,8 @@ import com.yage.opencode_client.ambient.protocol.AmbientPhase
 import com.yage.opencode_client.ambient.protocol.AmbientSnapshot
 import com.yage.opencode_client.ambient.protocol.AmbientStartPolicy
 import com.yage.opencode_client.ambient.protocol.AmbientToolEffect
+import com.yage.opencode_client.ambient.protocol.AmbientReplyReader
+import com.yage.opencode_client.ambient.protocol.AmbientReplySend
 import com.yage.opencode_client.ambient.service.AmbientVoiceBridge
 import com.yage.opencode_client.ambient.service.AmbientVoiceHost
 import com.yage.opencode_client.ambient.service.AmbientVoiceService
@@ -82,6 +84,8 @@ class AmbientCoordinator @Inject constructor(
     private var startJob: Job? = null
     private var collector: Job? = null
     private var pendingAck: CompletableDeferred<String>? = null
+    private var replies: AmbientReplyBridge? = null
+    private var replyEvents: Job? = null
 
     init {
         AmbientVoiceBridge.attach(this)
@@ -217,21 +221,42 @@ class AmbientCoordinator @Inject constructor(
                 releaseIfCurrent(run.id)
                 return reject(AmbientRunStatus.FAILED)
             }
-            val created = newController(run)
+            val reader = AmbientReplyReader(gateway().authorizing, token)
+            val bridge = AmbientReplyBridge(
+                scope = scope,
+                allows = { ownerValid(activeLease) },
+                page = reader::page,
+                idle = reader::idle,
+                submit = { text, eventId ->
+                    val current = synchronized(lock) { if (runId == run.id && !revoked) controllerRef else null }
+                    current?.appendCommentary(text, eventId, run.id) ?: AmbientReplySend.REJECTED
+                },
+            )
+            val created = newController(run, bridge)
             controller = created
             val owned = synchronized(lock) {
                 if (runId != run.id || revoked) {
                     false
                 } else {
                     controllerRef = created
+                    replies = bridge
                     true
                 }
             }
             if (!owned) {
+                bridge.close()
                 releaseIfCurrent(run.id)
                 return reject(AmbientRunStatus.FAILED)
             }
             watch(run.id, created)
+            val eventJob = scope.launch {
+                repository.connectSSE(onConnected = bridge::onConnected).collect { result ->
+                    result.onSuccess(bridge::onEvent)
+                }
+            }
+            synchronized(lock) {
+                if (runId == run.id && !revoked) replyEvents = eventJob else eventJob.cancel()
+            }
             created.start(
                 AmbientConfiguration(
                     portalBaseUrl = run.portalBaseUrl,
@@ -386,7 +411,7 @@ class AmbientCoordinator @Inject constructor(
         }
     }
 
-    private fun newController(run: StartedRun): AmbientController {
+    private fun newController(run: StartedRun, bridge: AmbientReplyBridge): AmbientController {
         val tools = AmbientToolRunner(
             gateway = gateway().authorizing,
             currentLease = {
@@ -394,6 +419,7 @@ class AmbientCoordinator @Inject constructor(
             },
             currentBinding = { synchronized(lock) { if (runId != run.id) null else bindingBook.active() } },
             currentAgent = { synchronized(lock) { if (runId != run.id) null else agent } },
+            replies = bridge,
         )
         return AmbientController(
             transport = transport(),
@@ -406,6 +432,7 @@ class AmbientCoordinator @Inject constructor(
             ),
             beforeCapture = { allowCapture(run.id) },
             clock = AndroidAmbientClock(),
+            onCommentaryAppended = bridge::onAppended,
         )
     }
 
@@ -493,6 +520,17 @@ class AmbientCoordinator @Inject constructor(
     }
 
     private fun releaseIfCurrent(id: String) {
+        // Detach while holding the coordinator lock; close outside it because
+        // bridge liveness checks can acquire the coordinator lock in turn.
+        val replyOwned = synchronized(lock) {
+            if (runId != id) return
+            val owned = replies to replyEvents
+            replies = null
+            replyEvents = null
+            owned
+        }
+        replyOwned.first?.close()
+        replyOwned.second?.cancel()
         val stopService = synchronized(lock) {
             if (runId != id) return
             val token = dispatchToken

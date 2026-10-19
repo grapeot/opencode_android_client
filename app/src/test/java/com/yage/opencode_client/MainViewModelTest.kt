@@ -1092,7 +1092,16 @@ class MainViewModelTest {
 
         assertEquals(seedShortlistFromPresets().size, viewModel.state.value.modelShortlist.size)
         assertTrue(viewModel.state.value.selectedModelIndex in viewModel.state.value.modelShortlist.indices)
-        verify { repository.configure("http://server.test", null, null) }
+        verify { repository.configureForHealth("http://server.test", null, null) }
+    }
+
+    @Test
+    fun `recreated UI does not replace active Ambient transport with saved profile`() = runTest {
+        every { repository.hasActiveAmbientTransport() } returns true
+        val viewModel = createViewModel()
+        assertTrue(viewModel.state.value.modelShortlist.isNotEmpty())
+        verify(exactly = 0) { repository.configure(any(), any(), any()) }
+        verify(exactly = 0) { repository.configureForHealth(any(), any(), any()) }
     }
 
     @Test

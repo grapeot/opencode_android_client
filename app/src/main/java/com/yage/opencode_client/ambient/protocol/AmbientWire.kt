@@ -13,7 +13,7 @@ sealed interface AmbientClientEvent {
     data object Close : AmbientClientEvent
     data object Mute : AmbientClientEvent
     data object Unmute : AmbientClientEvent
-    data class Commentary(val text: String) : AmbientClientEvent
+    data class Commentary(val text: String, val eventId: String? = null) : AmbientClientEvent
     data class Thinking(val text: String) : AmbientClientEvent
     data class FunctionOutput(val callId: String, val output: String) : AmbientClientEvent
     data object ContinueResponse : AmbientClientEvent
@@ -51,9 +51,10 @@ object AmbientWire {
             AmbientClientEvent.Unmute -> pair("session.input_audio.unmute", eventId)
             is AmbientClientEvent.Commentary -> {
                 val clipped = clip(event.text) ?: return null
+                if (event.eventId != null && event.eventId.isBlank()) return null
                 buildJsonObject {
                     put("type", "session.commentary.append")
-                    put("event_id", eventId)
+                    put("event_id", event.eventId ?: eventId)
                     put("delegation_id", JsonNull)
                     put("content", clipped)
                 }
@@ -131,6 +132,7 @@ data class AmbientTranscriptFragment(
 )
 
 sealed interface AmbientServerEvent {
+    data class CommentaryAppended(val clientEventId: String) : AmbientServerEvent
     data class Started(val sessionId: String) : AmbientServerEvent
     class OutputAudio(val pcm: ByteArray) : AmbientServerEvent {
         override fun equals(other: Any?): Boolean = other is OutputAudio && pcm.contentEquals(other.pcm)
@@ -184,6 +186,10 @@ object AmbientEventDecoder {
         val json = jsonObject(text) ?: return AmbientServerEvent.Ignored("bad")
         val type = jsonString(json["type"]).orEmpty()
         return when (type) {
+            "session.commentary.appended" -> {
+                val id = jsonString(json["client_event_id"])?.takeIf { it.isNotBlank() }
+                if (id == null) AmbientServerEvent.Ignored(type) else AmbientServerEvent.CommentaryAppended(id)
+            }
             "usage" -> portal(json)
             "error", "session.error" -> error(json)
             "session.started" -> {

@@ -20,7 +20,9 @@ internal fun applySavedSettings(
     migrateModelSelectionToIds(settingsManager)
     val currentProfile = hostProfileStore.currentProfile()
     val password = currentProfile.basicAuth?.passwordId?.let { settingsManager.basicAuthPassword(it) }
-    repository.configure(
+    // A recreated UI must not replace the background voice run's live transport
+    // (which can be an SSH loopback URL rather than the saved profile URL).
+    if (!repository.hasActiveAmbientTransport()) repository.configureForHealth(
         baseUrl = currentProfile.serverUrl,
         username = currentProfile.basicAuth?.username,
         password = password
