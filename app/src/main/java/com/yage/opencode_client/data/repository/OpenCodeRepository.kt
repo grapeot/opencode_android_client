@@ -5,6 +5,9 @@ import com.yage.opencode_client.ambient.protocol.AmbientDispatchGate
 import com.yage.opencode_client.data.api.*
 import com.yage.opencode_client.data.model.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -22,6 +25,8 @@ class OpenCodeRepository @Inject constructor() {
     private var password: String? = null
     private var ambientGate: AmbientDispatchGate? = null
     private var hostEpoch = 0L
+    private var ambientToken = 0L
+    private val eventScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -36,16 +41,29 @@ class OpenCodeRepository @Inject constructor() {
     private var retrofit: Retrofit = buildRetrofit(restHttpClient)
     private var api: OpenCodeApi = retrofit.create(OpenCodeApi::class.java)
     private var sseClient: SSEClient = SSEClient(sseHttpClient)
+    private var sharedEvents = newSharedEvents()
+
+    private fun newSharedEvents(predecessor: kotlinx.coroutines.Job? = null): SharedSSEStream {
+        val client = sseClient
+        val url = baseUrl
+        val user = username
+        val secret = password
+        return SharedSSEStream(eventScope, predecessor) { connected, disconnected ->
+            client.connect(url, user, secret, connected, disconnected)
+        }
+    }
 
     private fun buildHttpClient(readTimeoutSeconds: Long): OkHttpClient {
+        val user = username
+        val secret = password
         return OkHttpClient.Builder()
             // Do not log request URLs: directory queries and path segments may
             // contain private workspace data, including in debug builds.
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .apply {
-                        val u = username
-                        val p = password
+                        val u = user
+                        val p = secret
                         if (u != null && p != null) {
                             val credential = "$u:$p"
                             val encoded = Base64.getEncoder().encodeToString(credential.toByteArray())
@@ -113,12 +131,15 @@ class OpenCodeRepository @Inject constructor() {
                 username = username.orEmpty(),
                 password = password.orEmpty(),
             ),
-        )
+        ).also { ambientToken = it }
     }
 
     /** Retires [token] only when it is still the active live run. */
     @Synchronized
     fun retireAmbient(token: Long): Boolean = ambientGate?.retire(token) ?: false
+
+    @Synchronized
+    fun hasActiveAmbientTransport(): Boolean = ambientGate?.authorize(ambientToken) != null
 
     /** Monotonic host generation. Increases only when [configure] points at a different host. */
     @Synchronized
@@ -127,12 +148,15 @@ class OpenCodeRepository @Inject constructor() {
     @Synchronized
     fun configure(baseUrl: String, username: String? = null, password: String? = null) {
         ambientGate?.invalidate()
+        ambientToken = 0L
+        val previousEvents = sharedEvents.close()
         val normalized = normalizedBaseUrl(baseUrl)
         if (this.baseUrl != normalized) hostEpoch += 1
         this.baseUrl = normalized
         this.username = username
         this.password = password
         rebuildClients()
+        sharedEvents = newSharedEvents(previousEvents)
     }
 
     /**
@@ -321,8 +345,9 @@ class OpenCodeRepository @Inject constructor() {
         api.findFile(query, limit)
     }
 
+    @Synchronized
     fun connectSSE(onConnected: (() -> Unit)? = null, onDisconnected: (() -> Unit)? = null): Flow<Result<SSEEvent>> =
-        sseClient.connect(baseUrl, username, password, onConnected, onDisconnected)
+        sharedEvents.connect(onConnected, onDisconnected)
 
     companion object {
         const val DEFAULT_SERVER = "http://localhost:4096"

@@ -84,7 +84,9 @@ class SSEClient(
                 if (data.isNotBlank() && data != "[DONE]") {
                     try {
                         val event = json.decodeFromString<SSEEvent>(data)
-                        trySend(Result.success(event))
+                        if (trySend(Result.success(event)).isFailure) {
+                            close(java.io.IOException("SSE buffer needs reconciliation"))
+                        }
                     } catch (_: Exception) {
                         // Skip malformed events silently
                     }

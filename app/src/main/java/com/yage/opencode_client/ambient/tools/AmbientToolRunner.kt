@@ -79,6 +79,7 @@ class AmbientToolRunner(
         "msg_" + UUID.randomUUID().toString().replace("-", "")
     },
     private val trace: AmbientToolTrace = AmbientToolTrace.DEVICE,
+    private val replies: com.yage.opencode_client.ambient.protocol.AmbientReplyObserver? = null,
 ) : AmbientToolExecutor {
 
     override suspend fun execute(
@@ -273,14 +274,7 @@ class AmbientToolRunner(
         val messageId = nextMessageId()
         if (messageId.isBlank()) return badEffect()
         val body = AmbientPromptWire.startData(messageId, text, agent, ref.providerId, ref.modelId)
-        return when (val prompted = fetch(lease, token, post(sessionPath(created.id, "/prompt_async"), body))) {
-            Fetched.Stale -> staleEffect()
-            Fetched.Transport -> failed("请求没有完成")
-            is Fetched.Ok -> {
-                if (!accepted(prompted.http.code)) return failed("请求没有完成", prompted.http.code)
-                acceptedEffect(created.id, messageId, created.directory, canonical)
-            }
-        }
+        return dispatchPrompt(lease, token, created.id, created.directory, created.title, messageId, body, canonical, null, true)
     }
 
     private suspend fun continueJob(arguments: String, lease: AmbientLease, token: Long): AmbientToolEffect {
@@ -313,13 +307,30 @@ class AmbientToolRunner(
         val inherited = inheritAgent(sessionElement, messages)
         val messageId = nextMessageId()
         val body = AmbientPromptWire.continueData(messageId, text, inherited.agent, inherited.variant)
-        return when (val prompted = fetch(lease, token, post(sessionPath(id, "/prompt_async"), body))) {
-            Fetched.Stale -> staleEffect()
-            Fetched.Transport -> failed("请求没有完成")
-            is Fetched.Ok -> {
-                if (!accepted(prompted.http.code)) return failed("请求没有完成", prompted.http.code)
-                acceptedEffect(session.id, messageId, session.directory, model = null)
+        return dispatchPrompt(lease, token, session.id, session.directory, session.title, messageId, body, null, messages, false)
+    }
+
+    private suspend fun dispatchPrompt(
+        lease: AmbientLease, token: Long, id: String, directory: String, title: String,
+        messageId: String, body: String, model: String?, history: JsonArray?, isNew: Boolean,
+    ): AmbientToolEffect {
+        val reservation = replies?.reserve(com.yage.opencode_client.ambient.protocol.AmbientReplyReservation(
+            id, directory, messageId, title, isNew,
+        ), history)
+        try {
+            return when (val prompted = fetch(lease, token, post(sessionPath(id, "/prompt_async"), body))) {
+                Fetched.Stale -> staleEffect()
+                Fetched.Transport -> failed("请求没有完成")
+                is Fetched.Ok -> {
+                    if (!accepted(prompted.http.code)) return failed("请求没有完成", prompted.http.code)
+                    // HTTP admission is the fact being tracked; a later function-output
+                    // frame failing must not erase this real delegated task.
+                    if (reservation != null) replies?.accept(reservation)
+                    acceptedEffect(id, messageId, directory, model)
+                }
             }
+        } finally {
+            if (reservation != null) replies?.rollback(reservation)
         }
     }
 

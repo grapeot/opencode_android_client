@@ -23,6 +23,9 @@ import com.yage.opencode_client.ambient.protocol.AmbientPcm
 import com.yage.opencode_client.ambient.protocol.AmbientPhase
 import com.yage.opencode_client.ambient.protocol.AmbientPortalLedger
 import com.yage.opencode_client.ambient.protocol.AmbientProtocol
+import com.yage.opencode_client.ambient.protocol.AmbientReplySend
+import com.yage.opencode_client.ambient.transport.AmbientLinkException
+import com.yage.opencode_client.ambient.transport.AmbientLinkFailure
 import com.yage.opencode_client.ambient.protocol.AmbientServerEvent
 import com.yage.opencode_client.ambient.protocol.AmbientSnapshot
 import com.yage.opencode_client.ambient.protocol.AmbientTimeline
@@ -91,6 +94,7 @@ class AmbientController(
     private val beforeCapture: AmbientCaptureGate,
     private val clock: AmbientMonotonicClock = AndroidAmbientClock(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val onCommentaryAppended: (String) -> Unit = {},
 ) {
     private val stateLock = Any()
     private val startMutex = Mutex()
@@ -98,6 +102,31 @@ class AmbientController(
     private val snapshotFlow = MutableStateFlow(idleSnapshot())
 
     val snapshot: StateFlow<AmbientSnapshot> = snapshotFlow.asStateFlow()
+
+    suspend fun appendCommentary(text: String, eventId: String, expectedOwner: String): AmbientReplySend {
+        val owned = synchronized(stateLock) {
+            val current = lease
+            if (closing || current == null || current.ownerToken != expectedOwner ||
+                !authority.ownerValid(current) || (phase != AmbientPhase.LISTENING && phase != AmbientPhase.SPEAKING)) null
+            else link?.let { runToken to it }
+        } ?: return AmbientReplySend.REJECTED
+        val result = try {
+            owned.second.send(AmbientClientEvent.Commentary(text, eventId))
+            AmbientReplySend.SUBMITTED
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: AmbientLinkException) {
+            when (error.failure) {
+                AmbientLinkFailure.ENCODE, AmbientLinkFailure.BUFFER, AmbientLinkFailure.REJECTED -> AmbientReplySend.REJECTED
+                else -> AmbientReplySend.UNKNOWN
+            }
+        } catch (_: Exception) {
+            AmbientReplySend.UNKNOWN
+        }
+        return synchronized(stateLock) {
+            if (runToken != owned.first || closing || lease?.ownerToken != expectedOwner) AmbientReplySend.UNKNOWN else result
+        }
+    }
 
     private var runToken = 0L
     private var phase = AmbientPhase.IDLE
@@ -306,6 +335,10 @@ class AmbientController(
         signal: CompletableDeferred<Boolean>,
     ) {
         when (event) {
+            is AmbientServerEvent.CommentaryAppended -> {
+                val current = synchronized(stateLock) { runToken == token && !closing }
+                if (current) onCommentaryAppended(event.clientEventId)
+            }
             is AmbientServerEvent.Started -> {
                 if (!same(token)) signal.complete(false) else signal.complete(true)
             }

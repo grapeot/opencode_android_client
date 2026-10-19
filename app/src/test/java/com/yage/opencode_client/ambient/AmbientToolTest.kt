@@ -590,6 +590,7 @@ internal class AmbientToolScript(
     agentName: String? = "plan",
     bindingSession: AmbientBinding? = null,
     private val trace: AmbientToolTrace = AmbientToolTrace.DEVICE,
+    private val replies: com.yage.opencode_client.ambient.protocol.AmbientReplyObserver? = null,
 ) {
     var lease: AmbientLease? = AmbientLease("host", 3L, directory, 4L, "owner")
     var binding: AmbientBinding? = bindingSession
@@ -628,6 +629,7 @@ internal class AmbientToolScript(
             nowEpochMillis = { 1_700_000_000_000L },
             nextMessageId = { "msg_fixed" },
             trace = trace,
+            replies = replies,
         )
     }
 
