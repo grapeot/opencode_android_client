@@ -205,10 +205,14 @@ internal class AmbientReplyBridge(
                 if (!current(id, sub)) return
                 // User-only / empty accepted history may precede the persisted assistant body.
                 val unhandled = suffix.any { !handled(id, it.id, sub) }
-                val awaiting = waiting || (!sent && (unhandled || (suffix.isEmpty() && sub.idleOpen)))
-                if (sent) sub.idleOpen = waiting else if (awaiting) sub.idleOpen = true else sub.idleOpen = false
+                val lastReply = suffix.indexOfLast { it.role == "assistant" && !it.toolCall && handled(id, it.id, sub) }
+                val trailingUser = suffix.indexOfLast { it.role == "user" } > lastReply
+                // An old milestone and a newer user can share one snapshot. Sending
+                // that milestone does not satisfy the newer user's idle window.
+                val awaiting = waiting || trailingUser || (!sent && (unhandled || (suffix.isEmpty() && sub.idleOpen)))
+                sub.idleOpen = awaiting
                 advance(id, sub, rows, start)
-                awaiting && !sent
+                awaiting
             }
             if (!needsBody || retry == 2) return
             pause(if (retry == 0) 250 else 750)

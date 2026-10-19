@@ -91,6 +91,27 @@ class AmbientReplyBridgeTest {
         assertEquals(1, h.sent.size)
     }
 
+    @Test fun sendingOldReplyDoesNotCloseNewUsersLateBodyWindow() = runTest {
+        val h = ReplyHarness(this)
+        var lateBody = false
+        h.pages = { _, _, _ -> replyPage(
+            replyRow("a1", "旧里程碑"),
+            replyRow("u2", "新请求", role = "user"),
+            *if (lateBody) arrayOf(replyRow("a2", "新回复")) else emptyArray(),
+        ) }
+        h.accept("A"); runCurrent()
+        assertEquals(1, h.sent.size)
+        assertEquals(3, h.reads) // Old reply sent, bounded visibility retries exhausted.
+        lateBody = true
+        h.bridge.onEvent(terminalEvent("A")); runCurrent()
+        assertEquals(2, h.sent.size)
+        assertTrue(h.sent.last().second.contains("新回复"))
+        assertEquals(1, h.sent.count { it.second.contains("旧里程碑") })
+        val settledReads = h.reads
+        h.bridge.onEvent(terminalEvent("A")); runCurrent()
+        assertEquals(settledReads, h.reads)
+    }
+
     @Test fun dirtyEventsBeyondThreeReadsAreNotDropped() = runTest {
         val h = ReplyHarness(this)
         val gates = List(5) { CompletableDeferred<Unit>() }
