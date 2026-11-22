@@ -224,6 +224,8 @@ fun SettingsScreen(
                 voiceFirst = state.voiceFirstInput,
                 onLayoutSelected = viewModel::setLayoutPreference,
                 onVoiceFirstChange = viewModel::setVoiceFirstInput,
+                composerActionSide = state.composerActionSide,
+                onComposerActionSideChange = viewModel::setComposerActionSide,
             )
 
             SettingsSectionDivider()

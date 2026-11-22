@@ -13,6 +13,8 @@ enum class LayoutPreference {
     }
 }
 
+enum class ComposerActionSide { LEFT, RIGHT }
+
 enum class AppWidthClass {
     COMPACT,
     MEDIUM,

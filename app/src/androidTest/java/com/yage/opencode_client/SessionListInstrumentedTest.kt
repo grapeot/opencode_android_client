@@ -41,6 +41,7 @@ class SessionListInstrumentedTest {
             MaterialTheme {
                 SessionList(
                     sessions = rows.value, currentSessionId = null,
+                    sessionStatuses = mapOf("parent" to SessionStatus("busy")),
                     onSelectSession = { error("Selection must not open chat") },
                     onCreateSession = {}, onDeleteSession = {},
                     archiveControls = SessionArchiveControls(1L, true, false, outcome.value) { selected, approved ->
@@ -50,6 +51,7 @@ class SessionListInstrumentedTest {
             }
         }
         composeRule.onNodeWithTag("session-archive-select").performClick()
+        composeRule.onNodeWithTag("session-indicator-parent", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("Batch parent").performClick()
         composeRule.onNodeWithText("Batch other").performClick()
         composeRule.onNodeWithText("Includes 1 additional child sessions").assertIsDisplayed()
@@ -203,7 +205,7 @@ class SessionListInstrumentedTest {
     }
 
     @Test
-    fun sessionListRequestsMoreFromGlobalLoadOlderAction() {
+    fun sessionListRequestsMoreFromLoadOlderFooter() {
         val sessions = (1..40).map { index ->
             Session(
                 id = "session-$index",
@@ -227,7 +229,9 @@ class SessionListInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText("Load older").performClick()
+        composeRule.onNodeWithText("Load older").assertDoesNotExist()
+        composeRule.onNodeWithTag("session_list").performScrollToNode(hasText("Load older"))
+        composeRule.onNodeWithText("Load older").assertIsDisplayed().performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) { loadMoreCalls.get() > 0 }
     }
 

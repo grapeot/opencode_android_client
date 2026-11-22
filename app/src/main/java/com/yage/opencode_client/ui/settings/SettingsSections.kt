@@ -382,6 +382,8 @@ internal fun FocusVoiceSection(
     voiceFirst: Boolean,
     onLayoutSelected: (com.yage.opencode_client.ui.LayoutPreference) -> Unit,
     onVoiceFirstChange: (Boolean) -> Unit,
+    composerActionSide: com.yage.opencode_client.ui.ComposerActionSide,
+    onComposerActionSideChange: (com.yage.opencode_client.ui.ComposerActionSide) -> Unit,
 ) {
     SectionHeader(title = stringResource(R.string.settings_layout))
     val modes = com.yage.opencode_client.ui.LayoutPreference.entries
@@ -424,6 +426,21 @@ internal fun FocusVoiceSection(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Spacer(modifier = Modifier.height(12.dp))
+    Text(stringResource(R.string.settings_voice_controls), style = MaterialTheme.typography.bodyLarge)
+    val sides = com.yage.opencode_client.ui.ComposerActionSide.entries
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        sides.forEachIndexed { index, side ->
+            SegmentedButton(
+                selected = composerActionSide == side,
+                onClick = { onComposerActionSideChange(side) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = sides.size),
+            ) {
+                Text(stringResource(if (side == com.yage.opencode_client.ui.ComposerActionSide.LEFT)
+                    R.string.settings_voice_controls_left else R.string.settings_voice_controls_right))
+            }
+        }
+    }
 }
 
 @Composable

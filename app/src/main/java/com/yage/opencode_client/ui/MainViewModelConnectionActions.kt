@@ -44,6 +44,8 @@ internal fun applySavedSettings(
             themeMode = settingsManager.themeMode,
             languageMode = settingsManager.languageMode,
             layoutPreference = LayoutPreference.fromRaw(settingsManager.layoutPreference),
+            keepFilesOpen = settingsManager.keepFilesOpen,
+            composerActionSide = if (settingsManager.composerControlsOnLeft) ComposerActionSide.LEFT else ComposerActionSide.RIGHT,
             voiceFirstInput = settingsManager.voiceFirstInput,
             ambientEnabled = settingsManager.ambientEnabled,
         )

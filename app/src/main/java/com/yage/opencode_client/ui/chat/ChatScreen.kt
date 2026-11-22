@@ -55,7 +55,8 @@ fun ChatScreen(
     onManageModels: () -> Unit = {},
     showSettingsButton: Boolean = true,
     showNewSessionInTopBar: Boolean = true,
-    showSessionListInTopBar: Boolean = true
+    showSessionListInTopBar: Boolean = true,
+    showLayoutMenu: Boolean = true,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(state.aiUsageDashboardUrl) {
@@ -260,6 +261,7 @@ fun ChatScreen(
                 showNewSessionInTopBar = showNewSessionInTopBar,
                 showSessionListInTopBar = showSessionListInTopBar,
                 layoutPreference = state.layoutPreference,
+                showLayoutMenu = showLayoutMenu,
             ),
             actions = ChatTopBarActions(
                 onSelectSession = viewModel::selectSession,
@@ -425,6 +427,7 @@ fun ChatScreen(
                     else viewModel.requestComposerKeyboard()
                 },
                 onKeyboardDismissed = viewModel::dismissComposerKeyboard,
+                composerActionSide = state.composerActionSide,
                 cursorRevision = state.composerCursorRevision,
                 cursor = state.composerCursor,
                 onCaret = viewModel::reportComposerCaret,

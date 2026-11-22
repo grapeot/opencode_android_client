@@ -125,6 +125,8 @@ data class AppState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val languageMode: LanguageMode = LanguageMode.SYSTEM,
     val layoutPreference: LayoutPreference = LayoutPreference.AUTOMATIC,
+    val keepFilesOpen: Boolean = false,
+    val composerActionSide: ComposerActionSide = ComposerActionSide.RIGHT,
     val voiceFirstInput: Boolean = false,
     val keyboardRequested: Boolean = false,
     val filePathToShowInFiles: String? = null,
@@ -2397,6 +2399,16 @@ class MainViewModel @Inject constructor(
     fun setLayoutPreference(preference: LayoutPreference) {
         settingsManager.layoutPreference = preference.name
         _state.update { it.copy(layoutPreference = preference) }
+    }
+
+    fun setKeepFilesOpen(open: Boolean) {
+        settingsManager.keepFilesOpen = open
+        _state.update { it.copy(keepFilesOpen = open) }
+    }
+
+    fun setComposerActionSide(side: ComposerActionSide) {
+        settingsManager.composerControlsOnLeft = side == ComposerActionSide.LEFT
+        _state.update { it.copy(composerActionSide = side) }
     }
 
     fun setVoiceFirstInput(enabled: Boolean) {

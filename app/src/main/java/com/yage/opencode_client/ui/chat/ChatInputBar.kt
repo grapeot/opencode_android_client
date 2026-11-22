@@ -45,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -64,6 +65,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -71,11 +73,13 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import com.yage.opencode_client.R
 import com.yage.opencode_client.data.model.ComposerImageAttachment
 import com.yage.opencode_client.data.model.PermissionRequest
 import com.yage.opencode_client.data.model.PermissionResponse
 import com.yage.opencode_client.ui.theme.StopRed
+import com.yage.opencode_client.ui.ComposerActionSide
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.sin
@@ -108,6 +112,7 @@ internal fun ChatInputBar(
     cursorRevision: Long = 0,
     cursor: Int = -1,
     onCaret: (Boolean, Int, Int, Boolean) -> Unit = { _, _, _, _ -> },
+    composerActionSide: ComposerActionSide = ComposerActionSide.RIGHT,
 ) {
     val canSend = (text.isNotBlank() || imageAttachments.isNotEmpty()) &&
         !isRecording && !isTranscribing && !isRetryingSpeech
@@ -136,6 +141,7 @@ internal fun ChatInputBar(
                 keyboardRequested = keyboardRequested,
                 onPaste = onPaste,
                 onKeyboard = onKeyboard,
+                composerActionSide = composerActionSide,
             )
 
             if (imageAttachments.isNotEmpty()) {
@@ -302,6 +308,7 @@ private fun VoiceRail(
     keyboardRequested: Boolean = false,
     onPaste: () -> Unit = {},
     onKeyboard: () -> Unit = {},
+    composerActionSide: ComposerActionSide,
 ) {
     val railTitle = when {
         isRecording -> stringResource(R.string.chat_listening)
@@ -323,43 +330,14 @@ private fun VoiceRail(
         accent
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        VoiceTransportButton(
-            onClick = if (hasPreservedSpeechAudio) onRetrySpeech else onToggleRecording,
-            enabled = !isTranscribing && !isRetryingSpeech,
-            containerColor = if (isRecording) StopRed else accent,
-            icon = when {
-                isRecording -> Icons.Default.Stop
-                hasPreservedSpeechAudio -> Icons.Default.Refresh
-                else -> Icons.Default.Mic
-            },
-            contentDescription = if (hasPreservedSpeechAudio) stringResource(R.string.chat_retry_segment) else railTitle,
-        )
-
-        VoiceRailWaveform(
-            mode = mode,
-            color = railColor,
-            level = speechLevelForMode(mode, audioLevel),
-            modifier = Modifier
-                .weight(1f)
-                .height(24.dp)
-                .semantics { contentDescription = waveformDescription }
-        )
-
+    val textDirection = LocalLayoutDirection.current
+    val controlsDirection = if (composerActionSide == ComposerActionSide.LEFT) LayoutDirection.Rtl else LayoutDirection.Ltr
+    val status: @Composable () -> Unit = {
         when {
             isTranscribing -> TextButton(onClick = onAbortSpeech) {
                 Text(stringResource(R.string.chat_stop_transcription_wait), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            hasPreservedSpeechAudio -> TextButton(
-                onClick = onDiscardSpeech,
-                enabled = !isRetryingSpeech,
-            ) {
+            hasPreservedSpeechAudio -> TextButton(onClick = onDiscardSpeech, enabled = !isRetryingSpeech) {
                 Text(stringResource(R.string.chat_discard_audio), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             !isSpeechConfigured -> Text(
@@ -369,29 +347,51 @@ private fun VoiceRail(
                 maxLines = 1,
             )
         }
-        if (voiceFirst) {
-            IconButton(
-                onClick = onPaste,
-                modifier = Modifier.size(48.dp).testTag("chat-paste"),
-            ) {
-                Icon(
-                    Icons.Default.ContentPaste,
-                    contentDescription = stringResource(R.string.chat_paste),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+    }
+    val separateStatus = voiceFirst && (isTranscribing || hasPreservedSpeechAudio || !isSpeechConfigured)
+    if (separateStatus) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = if (composerActionSide == ComposerActionSide.LEFT)
+            Arrangement.Absolute.Left else Arrangement.Absolute.Right) { status() }
+    }
+    CompositionLocalProvider(LocalLayoutDirection provides controlsDirection) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            VoiceRailWaveform(
+                mode = mode,
+                color = railColor,
+                level = speechLevelForMode(mode, audioLevel),
+                modifier = Modifier.weight(1f).height(24.dp)
+                    .semantics { contentDescription = waveformDescription },
+            )
+            CompositionLocalProvider(LocalLayoutDirection provides textDirection) {
+                if (!separateStatus) status()
+                if (voiceFirst) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onPaste, modifier = Modifier.size(48.dp).testTag("chat-paste")) {
+                            Icon(Icons.Default.ContentPaste, stringResource(R.string.chat_paste), tint = accent)
+                        }
+                        IconButton(onClick = onKeyboard, modifier = Modifier.size(48.dp).testTag("chat-keyboard")) {
+                            Icon(Icons.Default.Keyboard, stringResource(
+                                if (keyboardRequested) R.string.chat_keyboard_hide else R.string.chat_keyboard
+                            ), tint = accent)
+                        }
+                    }
+                }
             }
-            IconButton(
-                onClick = onKeyboard,
-                modifier = Modifier.size(48.dp).testTag("chat-keyboard"),
-            ) {
-                Icon(
-                    Icons.Default.Keyboard,
-                    contentDescription = stringResource(
-                        if (keyboardRequested) R.string.chat_keyboard_hide else R.string.chat_keyboard
-                    ),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
+            VoiceTransportButton(
+                onClick = if (hasPreservedSpeechAudio) onRetrySpeech else onToggleRecording,
+                enabled = !isTranscribing && !isRetryingSpeech,
+                containerColor = if (isRecording) StopRed else accent,
+                icon = when {
+                    isRecording -> Icons.Default.Stop
+                    hasPreservedSpeechAudio -> Icons.Default.Refresh
+                    else -> Icons.Default.Mic
+                },
+                contentDescription = if (hasPreservedSpeechAudio) stringResource(R.string.chat_retry_segment) else railTitle,
+            )
         }
     }
 }

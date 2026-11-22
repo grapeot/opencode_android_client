@@ -59,6 +59,7 @@ import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequest
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequestSaver
 import com.yage.opencode_client.ui.chat.ChatScreen
+import com.yage.opencode_client.ui.chat.ChatLayoutMenu
 import com.yage.opencode_client.ui.chat.belongsTo
 import com.yage.opencode_client.ui.files.FilesScreen
 import com.yage.opencode_client.ui.files.FilesViewModel
@@ -193,7 +194,6 @@ class MainActivity : AppCompatActivity() {
             val presentation = resolveWorkspacePresentation(state.layoutPreference, widthClass,
                 shortWindow = windowSizeClass.heightSizeClass == WindowHeightSizeClass.Compact)
             val effectiveLayout = presentation.previewLayout
-            var filesPinned by rememberSaveable { mutableStateOf(false) }
             var dockedPreviewRequest by rememberSaveable(stateSaver = ChatFilePreviewRequestSaver) {
                 mutableStateOf<ChatFilePreviewRequest?>(null)
             }
@@ -226,8 +226,6 @@ class MainActivity : AppCompatActivity() {
                         TabletLayout(
                             viewModel = mainViewModel,
                             presentation = presentation,
-                            filesPinned = filesPinned,
-                            onFilesPinnedChange = { filesPinned = it },
                             dockedPreviewRequest = dockedPreviewRequest,
                             onDockedPreviewRequestChange = { dockedPreviewRequest = it },
                             ambientDestinationVisible = ambientDestinationVisible,
@@ -537,8 +535,6 @@ private fun BoxScope.DeepLinkFeedback(
 private fun TabletLayout(
     viewModel: MainViewModel,
     presentation: WorkspacePresentation,
-    filesPinned: Boolean,
-    onFilesPinnedChange: (Boolean) -> Unit,
     dockedPreviewRequest: ChatFilePreviewRequest?,
     onDockedPreviewRequestChange: (ChatFilePreviewRequest?) -> Unit,
     ambientDestinationVisible: Boolean,
@@ -555,14 +551,10 @@ private fun TabletLayout(
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val wide = presentation == WorkspacePresentation.WIDE
-    val showsFiles = presentation.showsFilesColumn(filesPinned, state.columnPreview != null)
+    val showsFiles = presentation.showsFilesColumn(state.keepFilesOpen, state.columnPreview != null)
     var showFileBrowser by rememberSaveable(state.runtimeGeneration) { mutableStateOf(false) }
-    LaunchedEffect(wide, state.columnPreview) {
-        if (wide && showFileBrowser) {
-            if (state.columnPreview == null) onFilesPinnedChange(true)
-            showFileBrowser = false
-        }
-        else if (state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) showFileBrowser = true
+    LaunchedEffect(wide) {
+        if (state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) showFileBrowser = !wide
     }
 
     Row(
@@ -639,17 +631,13 @@ private fun TabletLayout(
                             }
                             Spacer(Modifier.weight(1f))
                         }
-                        IconButton(onClick = {
-                            if (wide) {
-                                onFilesPinnedChange(!showsFiles)
-                                if (showsFiles) viewModel.clearFileToShow()
-                            } else {
-                                showFileBrowser = true
-                            }
-                        }, modifier = Modifier.testTag("workspace-files-toggle")) {
-                            Icon(if (showsFiles) Icons.Default.Close else Icons.Default.Folder,
-                                stringResource(if (showsFiles) R.string.workspace_hide_files else R.string.nav_files))
-                        }
+                        ChatLayoutMenu(
+                            preference = state.layoutPreference,
+                            onSelectLayout = viewModel::setLayoutPreference,
+                            onShowFiles = { showFileBrowser = true },
+                            keepFilesOpen = state.keepFilesOpen.takeIf { wide },
+                            onKeepFilesOpenChange = viewModel::setKeepFilesOpen,
+                        )
                     }
                     if (state.ambientEnabled) {
                         AmbientContentSwitch(
@@ -681,7 +669,8 @@ private fun TabletLayout(
                                 onManageModels = onOpenSettings,
                                 showSettingsButton = false,
                                 showNewSessionInTopBar = false,
-                                showSessionListInTopBar = false
+                                showSessionListInTopBar = false,
+                                showLayoutMenu = false,
                             )
                         }
                     }
@@ -690,34 +679,34 @@ private fun TabletLayout(
         }
     }
 
-    if (!wide && showFileBrowser) {
+    if (showFileBrowser) {
         fun closeBrowser() {
             showFileBrowser = false
-            if (state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) viewModel.clearFileToShow()
+            if (!wide && state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) viewModel.clearFileToShow()
         }
         ModalBottomSheet(onDismissRequest = ::closeBrowser) {
             Column(Modifier.fillMaxHeight(0.9f).testTag("workspace-files-browser")) {
                 IconButton(onClick = ::closeBrowser, modifier = Modifier.align(Alignment.End)) {
                     Icon(Icons.Default.Close, stringResource(R.string.common_dismiss))
                 }
-                WorkspaceFiles(viewModel)
+                WorkspaceFiles(viewModel, inBrowser = true, browserOnly = wide, onOpenFile = { if (wide) showFileBrowser = false })
             }
         }
     }
 }
 
 @Composable
-private fun WorkspaceFiles(viewModel: MainViewModel) {
+private fun WorkspaceFiles(viewModel: MainViewModel, inBrowser: Boolean = false, browserOnly: Boolean = false, onOpenFile: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val filesViewModel: FilesViewModel = hiltViewModel(key = "files-${state.currentHostProfileId ?: "none"}")
-    val column = state.columnPreview
+    val filesViewModel: FilesViewModel = hiltViewModel(key = "${if (inBrowser) "workspace-browser" else "files"}-${state.currentHostProfileId ?: "none"}")
+    val column = state.columnPreview.takeUnless { browserOnly }
     val directory = if (column != null) column.workspace else state.currentSession?.directory
     FilesScreen(
         viewModel = filesViewModel,
-        pathToShow = state.filePathToShowInFiles,
+        pathToShow = column?.path,
         sessionDirectory = directory,
         onCloseFile = viewModel::clearFileToShow,
-        onFileClick = { viewModel.showFilesBrowserFile(it, directory) },
+        onFileClick = { viewModel.showFilesBrowserFile(it, directory); onOpenFile() },
         onPreviewPathChange = viewModel::retargetColumnPreview,
         browserRuntimeGeneration = state.runtimeGeneration,
     )
