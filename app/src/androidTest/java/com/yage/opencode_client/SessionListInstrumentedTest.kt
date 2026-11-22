@@ -20,6 +20,8 @@ import androidx.compose.ui.test.performScrollToNode
 import com.yage.opencode_client.data.model.Session
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.session.SessionList
+import com.yage.opencode_client.ui.session.SessionArchiveControls
+import com.yage.opencode_client.ui.session.SessionArchiveOutcome
 import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
@@ -27,6 +29,41 @@ import java.util.concurrent.atomic.AtomicInteger
 class SessionListInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test fun bulkArchiveShowsDescendantCountAndKeepsFailedSelection() {
+        val parent = Session("parent", directory = "/fixture", title = "Batch parent")
+        val child = Session("child", directory = "/fixture", parentId = "parent", title = "Batch child")
+        val other = Session("other", directory = "/fixture", title = "Batch other")
+        val rows = mutableStateOf(listOf(parent, child, other))
+        val outcome = mutableStateOf<SessionArchiveOutcome?>(null)
+        val requests = mutableListOf<Pair<Set<String>, List<String>>>()
+        composeRule.setContent {
+            MaterialTheme {
+                SessionList(
+                    sessions = rows.value, currentSessionId = null,
+                    onSelectSession = { error("Selection must not open chat") },
+                    onCreateSession = {}, onDeleteSession = {},
+                    archiveControls = SessionArchiveControls(1L, true, false, outcome.value) { selected, approved ->
+                        requests += selected to approved
+                    },
+                )
+            }
+        }
+        composeRule.onNodeWithTag("session-archive-select").performClick()
+        composeRule.onNodeWithText("Batch parent").performClick()
+        composeRule.onNodeWithText("Batch other").performClick()
+        composeRule.onNodeWithText("Includes 1 additional child sessions").assertIsDisplayed()
+        composeRule.onNodeWithText("Archive (3)").performClick()
+        composeRule.runOnIdle {
+            org.junit.Assert.assertEquals(setOf("parent", "other") to listOf("child", "parent", "other"), requests.single())
+            rows.value = listOf(parent, child, other.copy(time = Session.TimeInfo(archived = 1L)))
+            outcome.value = SessionArchiveOutcome(setOf("other"), emptySet(), 2, false)
+        }
+        composeRule.onNodeWithText("Archive (2)").performClick()
+        composeRule.runOnIdle {
+            org.junit.Assert.assertEquals(setOf("parent") to listOf("child", "parent"), requests.last())
+        }
+    }
 
     @Test fun mixedIndicatorsLight() = mixedIndicators(false)
     @Test fun mixedIndicatorsDark() = mixedIndicators(true)

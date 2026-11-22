@@ -24,6 +24,23 @@ enum class EffectiveLayout {
     REGULAR,
 }
 
+internal enum class WorkspacePresentation(val previewLayout: EffectiveLayout) {
+    COMPACT(EffectiveLayout.COMPACT), SIDEBAR(EffectiveLayout.COMPACT), WIDE(EffectiveLayout.REGULAR);
+
+    fun showsFilesColumn(pinned: Boolean, previewOpen: Boolean): Boolean = this == WIDE && (pinned || previewOpen)
+}
+
+internal fun resolveWorkspacePresentation(
+    preference: LayoutPreference,
+    width: AppWidthClass,
+    shortWindow: Boolean,
+): WorkspacePresentation = when {
+    preference == LayoutPreference.FOCUS -> WorkspacePresentation.COMPACT
+    width == AppWidthClass.EXPANDED -> WorkspacePresentation.WIDE
+    width == AppWidthClass.MEDIUM && !shortWindow -> WorkspacePresentation.SIDEBAR
+    else -> WorkspacePresentation.COMPACT
+}
+
 fun resolveEffectiveLayout(preference: LayoutPreference, width: AppWidthClass): EffectiveLayout {
     if (preference == LayoutPreference.FOCUS) return EffectiveLayout.COMPACT
     return if (width == AppWidthClass.EXPANDED) EffectiveLayout.REGULAR else EffectiveLayout.COMPACT
@@ -97,6 +114,7 @@ fun migrateVisiblePreview(
     if (from == to) return PreviewMigration(keptInline, keptColumn)
     return when (from) {
         EffectiveLayout.COMPACT -> {
+            if (keptColumn?.kind == FilePreviewKind.FILES) return PreviewMigration(null, keptColumn)
             val active = keptInline ?: return PreviewMigration(null, null)
             PreviewMigration(
                 inline = null,

@@ -65,6 +65,28 @@ class FilesViewModelTest {
     }
 
     @Test
+    fun `workspace browser scopes tree and preview and keeps path when remounted`() = runTest {
+        val folder = FileNode(name = "docs", path = "docs", type = "directory")
+        val file = FileNode(name = "note.md", path = "docs/note.md", type = "file")
+        coEvery { repository.getFileTree(null, "/workspace") } returns Result.success(listOf(folder))
+        coEvery { repository.getFileTree("docs", "/workspace") } returns Result.success(listOf(file))
+        coEvery { repository.getFileStatus("/workspace") } returns Result.success(emptyList())
+        coEvery { repository.getFileContent(file.path, "/workspace") } returns Result.success(FileContent(type = "text", content = "workspace note"))
+        val viewModel = FilesViewModel(repository)
+        viewModel.configureBrowser("/workspace", 1)
+        advanceUntilIdle()
+        viewModel.selectFile(folder)
+        advanceUntilIdle()
+        viewModel.configureBrowser("/workspace", 1)
+        assertEquals("docs", viewModel.state.value.currentPath)
+        assertEquals(listOf(file), viewModel.state.value.files)
+        viewModel.selectFile(file)
+        advanceUntilIdle()
+        assertEquals("workspace note", viewModel.state.value.selectedFileContent?.content)
+        coVerify(exactly = 1) { repository.getFileTree(null, "/workspace") }
+    }
+
+    @Test
     fun `resetForHost ignores a file response from the previous host`() = runTest {
         val oldResponse = CompletableDeferred<Result<List<FileNode>>>()
         val oldFiles = listOf(FileNode(name = "old.txt", path = "old.txt", type = "file"))

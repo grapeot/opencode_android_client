@@ -30,6 +30,15 @@ class OpenCodeDeepLinkParserTest {
     }
 
     @Test
+    fun ignoresQueryWithoutChangingSessionRouting() {
+        assertEquals(
+            OpenCodeDeepLinkParseResult.Success(OpenCodeDeepLink.Session("ses_example")),
+            OpenCodeDeepLinkParser.parse("opencode://session/ses_example?message=msg_1&session=ses_other")
+        )
+        assertInvalid("opencode://session/ses_example?message=msg_1#fragment")
+    }
+
+    @Test
     fun rejectsMalformedOrExpandedSessionActions() {
         listOf(
             "opencode://other/ses_example",
@@ -40,7 +49,6 @@ class OpenCodeDeepLinkParserTest {
             "opencode://session/ses_one/extra",
             "opencode://user@session/ses_example",
             "opencode://session:4096/ses_example",
-            "opencode://session/ses_example?message=msg_1",
             "opencode://session/ses_example#fragment",
             "opencode://session/ses_%2Fextra",
             "opencode://session/ses_你好"

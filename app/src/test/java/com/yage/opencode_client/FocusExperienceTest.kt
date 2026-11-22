@@ -85,6 +85,18 @@ class FocusExperienceTest {
         assertNull(filesStay.inline)
         assertEquals("tree.kt", filesStay.column?.path)
         assertEquals(FilePreviewKind.FILES, filesStay.column?.kind)
+
+        val expandedAgain = migrateVisiblePreview(
+            from = EffectiveLayout.COMPACT,
+            to = EffectiveLayout.REGULAR,
+            inline = request("behind-browser.md"),
+            column = filesStay.column,
+            hostId = "host",
+            sessionId = "session",
+            workspace = "/work",
+        )
+        assertNull(expandedAgain.inline)
+        assertEquals(filesStay.column, expandedAgain.column)
     }
 
     @Test

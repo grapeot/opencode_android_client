@@ -194,6 +194,8 @@ class OpenCodeRepository @Inject constructor() {
 
     suspend fun getSession(sessionId: String): Result<Session> = apiCall { api.getSession(sessionId) }
 
+    suspend fun getSessionChildren(sessionId: String): Result<List<Session>> = apiCall { api.getSessionChildren(sessionId) }
+
     suspend fun createSession(title: String? = null): Result<Session> = apiCall {
         api.createSession(CreateSessionRequest(title = title))
     }
@@ -339,6 +341,10 @@ class OpenCodeRepository @Inject constructor() {
 
     suspend fun getFileStatus(): Result<List<FileStatusEntry>> = apiCall {
         api.getFileStatus()
+    }
+
+    suspend fun getFileStatus(directory: String): Result<List<FileStatusEntry>> = apiCall {
+        api.getFileStatus(directory.asDirectoryQuery())
     }
 
     suspend fun findFile(query: String, limit: Int = 50): Result<List<String>> = apiCall {
