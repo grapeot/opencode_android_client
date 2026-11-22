@@ -178,6 +178,14 @@ class SettingsManager @Inject constructor(
         get() = encryptedPrefs.getString(KEY_LAYOUT_PREFERENCE, "AUTOMATIC") ?: "AUTOMATIC"
         set(value) = encryptedPrefs.edit().putString(KEY_LAYOUT_PREFERENCE, value).apply()
 
+    var keepFilesOpen: Boolean
+        get() = encryptedPrefs.getBoolean("keep_files_open", false)
+        set(value) = encryptedPrefs.edit().putBoolean("keep_files_open", value).apply()
+
+    var composerControlsOnLeft: Boolean
+        get() = encryptedPrefs.getBoolean("composer_controls_on_left", false)
+        set(value) = encryptedPrefs.edit().putBoolean("composer_controls_on_left", value).apply()
+
     var voiceFirstInput: Boolean
         get() = encryptedPrefs.getBoolean(KEY_VOICE_FIRST_INPUT, false)
         set(value) = encryptedPrefs.edit().putBoolean(KEY_VOICE_FIRST_INPUT, value).apply()

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Checklist
@@ -32,6 +33,11 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -66,6 +72,7 @@ import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
 import com.yage.opencode_client.ui.session.SessionArchiveControls
+import com.yage.opencode_client.ui.LayoutPreference
 import com.yage.opencode_client.ui.theme.BrandGold
 import com.yage.opencode_client.ui.theme.BrandPrimary
 import kotlinx.coroutines.delay
@@ -102,6 +109,7 @@ internal data class ChatTopBarState(
     val showNewSessionInTopBar: Boolean = true,
     val showSessionListInTopBar: Boolean = true,
     val layoutPreference: com.yage.opencode_client.ui.LayoutPreference = com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC,
+    val keepFilesOpen: Boolean? = null,
 )
 
 internal data class ChatTopBarActions(
@@ -121,7 +129,57 @@ internal data class ChatTopBarActions(
     val onRenameSession: (String) -> Unit = {},
     val onSetLayoutPreference: (com.yage.opencode_client.ui.LayoutPreference) -> Unit = {},
     val archiveControls: SessionArchiveControls? = null,
+    val onShowFiles: (() -> Unit)? = null,
+    val onKeepFilesOpenChange: (Boolean) -> Unit = {},
+    val onRestoreSessions: (() -> Unit)? = null,
 )
+
+@Composable
+private fun ChatLayoutMenu(
+    preference: LayoutPreference,
+    onSelectLayout: (LayoutPreference) -> Unit,
+    onShowFiles: (() -> Unit)? = null,
+    keepFilesOpen: Boolean? = null,
+    onKeepFilesOpenChange: (Boolean) -> Unit = {},
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp).testTag("chat-layout")) {
+            Icon(
+                if (preference == LayoutPreference.FOCUS) Icons.Default.FilterCenterFocus else Icons.Default.ViewColumn,
+                contentDescription = stringResource(R.string.settings_layout),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            LayoutPreference.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (mode == LayoutPreference.FOCUS) R.string.settings_layout_focus
+                        else R.string.settings_layout_automatic)) },
+                    leadingIcon = { RadioButton(selected = preference == mode, onClick = null) },
+                    onClick = { expanded = false; onSelectLayout(mode) },
+                )
+            }
+            if (onShowFiles != null) {
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.workspace_show_files)) },
+                    onClick = { expanded = false; onShowFiles() },
+                    modifier = Modifier.testTag("workspace-show-files"),
+                )
+            }
+            if (keepFilesOpen != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.workspace_keep_files_open)) },
+                    trailingIcon = { Switch(checked = keepFilesOpen, onCheckedChange = null) },
+                    onClick = { expanded = false; onKeepFilesOpenChange(!keepFilesOpen) },
+                    modifier = Modifier.testTag("workspace-keep-files-open")
+                        .semantics { toggleableState = if (keepFilesOpen) ToggleableState.On else ToggleableState.Off },
+                )
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -183,6 +241,11 @@ internal fun ChatTopBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    actions.onRestoreSessions?.let { restore ->
+                        IconButton(onClick = restore, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.sessions_show))
+                        }
+                    }
                     if (state.showSessionListInTopBar) {
                         IconButton(
                             onClick = { showSessionSheet = true },
@@ -229,40 +292,16 @@ internal fun ChatTopBar(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                ChatLayoutMenu(state.layoutPreference, actions.onSetLayoutPreference, actions.onShowFiles,
+                    state.keepFilesOpen, actions.onKeepFilesOpenChange)
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    IconButton(
-                        onClick = {
-                            actions.onSetLayoutPreference(
-                                if (state.layoutPreference == com.yage.opencode_client.ui.LayoutPreference.FOCUS) {
-                                    com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC
-                                } else {
-                                    com.yage.opencode_client.ui.LayoutPreference.FOCUS
-                                }
-                            )
-                        },
-                        modifier = Modifier.size(48.dp).testTag("chat-layout"),
-                    ) {
-                        Icon(
-                            if (state.layoutPreference == com.yage.opencode_client.ui.LayoutPreference.FOCUS) {
-                                Icons.Default.FilterCenterFocus
-                            } else {
-                                Icons.Default.ViewColumn
-                            },
-                            contentDescription = stringResource(
-                                if (state.layoutPreference == com.yage.opencode_client.ui.LayoutPreference.FOCUS) {
-                                    R.string.settings_layout_automatic
-                                } else {
-                                    R.string.settings_layout_focus
-                                }
-                            ),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
                     Box(modifier = Modifier.weight(1f, fill = false)) {
                         Surface(
+                            modifier = Modifier.testTag("chat-model-menu"),
                             onClick = { showModelMenu = true },
                             shape = RoundedCornerShape(50),
                             color = Color.Transparent,

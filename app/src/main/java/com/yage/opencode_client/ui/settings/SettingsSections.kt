@@ -2,6 +2,12 @@ package com.yage.opencode_client.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -98,18 +104,22 @@ internal fun ConnectionProfileSection(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onTestConnection, enabled = !isTesting) {
-                    if (isTesting) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
+            SettingsActionPair(
+                first = { modifier ->
+                    Button(onClick = onTestConnection, enabled = !isTesting, modifier = modifier) {
+                        if (isTesting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(stringResource(R.string.settings_test_connection))
                     }
-                    Text(stringResource(R.string.settings_test_connection))
-                }
-                OutlinedButton(onClick = onManageProfiles) {
-                    Text(stringResource(R.string.settings_manage_profiles))
-                }
-            }
+                },
+                second = { modifier ->
+                    OutlinedButton(onClick = onManageProfiles, modifier = modifier) {
+                        Text(stringResource(R.string.settings_manage_profiles))
+                    }
+                },
+            )
         }
     }
 
@@ -128,6 +138,27 @@ internal fun ConnectionProfileSection(
             Text(stringResource(R.string.settings_connected), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
             state.serverVersion?.let { version ->
                 Text(" (v$version)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SettingsActionPair(
+    first: @Composable (Modifier) -> Unit,
+    second: @Composable (Modifier) -> Unit,
+    minInlineWidth: androidx.compose.ui.unit.Dp = 300.dp,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < minInlineWidth * LocalDensity.current.fontScale.coerceAtLeast(1f)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                first(Modifier.fillMaxWidth())
+                second(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                first(Modifier)
+                second(Modifier)
             }
         }
     }
@@ -194,12 +225,10 @@ internal fun ServerConnectionSection(
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+    SettingsActionPair(first = { modifier ->
         Button(
             onClick = onTestConnection,
+            modifier = modifier,
             enabled = serverUrl.isNotBlank() && !isTesting
         ) {
             if (isTesting) {
@@ -212,13 +241,15 @@ internal fun ServerConnectionSection(
             Text(stringResource(R.string.settings_test_connection))
         }
 
+    }, second = { modifier ->
         OutlinedButton(
             onClick = onSave,
+            modifier = modifier,
             enabled = serverUrl.isNotBlank()
         ) {
             Text(stringResource(R.string.settings_save))
         }
-    }
+    })
 
     testResult?.let { ResultCard(result = it) }
 
@@ -250,6 +281,43 @@ internal fun ServerConnectionSection(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+internal fun <T> SettingsChoices(
+    options: List<T>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    label: @Composable (T) -> String,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val minWidth = (if (options.size > 2) 320.dp else 240.dp) * LocalDensity.current.fontScale.coerceAtLeast(1f)
+        if (maxWidth < minWidth) {
+            Column(Modifier.selectableGroup()) {
+                options.forEach { option ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().selectable(
+                            selected = option == selected, role = Role.RadioButton, onClick = { onSelect(option) },
+                        ).padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = option == selected, onClick = null)
+                        Text(label(option), modifier = Modifier.padding(start = 10.dp).weight(1f))
+                    }
+                }
+            }
+        } else {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, option ->
+                    SegmentedButton(
+                        selected = option == selected,
+                        onClick = { onSelect(option) },
+                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                    ) { Text(label(option)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun AppearanceSection(
     themeMode: ThemeMode,
     languageMode: LanguageMode,
@@ -258,68 +326,25 @@ internal fun AppearanceSection(
 ) {
     SectionHeader(title = stringResource(R.string.settings_appearance))
 
-    val modes = ThemeMode.values()
     Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.labelMedium)
     Spacer(modifier = Modifier.height(8.dp))
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        modes.forEachIndexed { index, mode ->
-            SegmentedButton(
-                selected = themeMode == mode,
-                onClick = { onThemeSelected(mode) },
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = modes.size
-                ),
-                colors = SegmentedButtonDefaults.colors(
-                    activeContainerColor = MaterialTheme.colorScheme.primary,
-                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
-                    activeBorderColor = MaterialTheme.colorScheme.primary,
-                    inactiveContainerColor = MaterialTheme.colorScheme.surface,
-                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    inactiveBorderColor = MaterialTheme.colorScheme.outline
-                )
-            ) {
-                Text(
-                    when (mode) {
-                        ThemeMode.LIGHT -> stringResource(R.string.settings_theme_light)
-                        ThemeMode.DARK -> stringResource(R.string.settings_theme_dark)
-                        ThemeMode.SYSTEM -> stringResource(R.string.settings_follow_system)
-                    }
-                )
-            }
-        }
+    SettingsChoices(ThemeMode.entries, themeMode, onThemeSelected) { mode ->
+        stringResource(when (mode) {
+            ThemeMode.LIGHT -> R.string.settings_theme_light
+            ThemeMode.DARK -> R.string.settings_theme_dark
+            ThemeMode.SYSTEM -> R.string.settings_follow_system
+        })
     }
 
     Spacer(modifier = Modifier.height(16.dp))
     Text(stringResource(R.string.settings_language), style = MaterialTheme.typography.labelMedium)
     Spacer(modifier = Modifier.height(8.dp))
-    val languages = LanguageMode.values()
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        languages.forEachIndexed { index, mode ->
-            SegmentedButton(
-                selected = languageMode == mode,
-                onClick = { onLanguageSelected(mode) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = languages.size),
-                colors = SegmentedButtonDefaults.colors(
-                    activeContainerColor = MaterialTheme.colorScheme.primary,
-                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
-                    activeBorderColor = MaterialTheme.colorScheme.primary,
-                    inactiveContainerColor = MaterialTheme.colorScheme.surface,
-                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    inactiveBorderColor = MaterialTheme.colorScheme.outline
-                )
-            ) {
-                Text(
-                    when (mode) {
-                        LanguageMode.SYSTEM -> stringResource(R.string.settings_follow_system)
-                        LanguageMode.ENGLISH -> stringResource(R.string.settings_language_english)
-                        LanguageMode.CHINESE -> stringResource(R.string.settings_language_chinese)
-                    }
-                )
-            }
-        }
+    SettingsChoices(LanguageMode.entries, languageMode, onLanguageSelected) { mode ->
+        stringResource(when (mode) {
+            LanguageMode.SYSTEM -> R.string.settings_follow_system
+            LanguageMode.ENGLISH -> R.string.settings_language_english
+            LanguageMode.CHINESE -> R.string.settings_language_chinese
+        })
     }
 }
 
@@ -348,9 +373,10 @@ internal fun AIUsageDashboardSection(
         leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) }
     )
     Spacer(modifier = Modifier.height(16.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    SettingsActionPair(first = { modifier ->
         Button(
             onClick = onTestConnection,
+            modifier = modifier,
             enabled = dashboardUrl.isNotBlank() && !state.isLoadingAIUsage
         ) {
             if (state.isLoadingAIUsage) {
@@ -359,10 +385,11 @@ internal fun AIUsageDashboardSection(
             }
             Text(stringResource(R.string.settings_test_connection))
         }
-        OutlinedButton(onClick = onSave) {
+    }, second = { modifier ->
+        OutlinedButton(onClick = onSave, modifier = modifier) {
             Text(stringResource(R.string.settings_save))
         }
-    }
+    })
     when {
         saveMessage != null -> ResultCard(TestResult(success = true, message = saveMessage))
         state.aiUsageError != null -> ResultCard(TestResult(success = false, message = state.aiUsageError))
@@ -382,24 +409,13 @@ internal fun FocusVoiceSection(
     voiceFirst: Boolean,
     onLayoutSelected: (com.yage.opencode_client.ui.LayoutPreference) -> Unit,
     onVoiceFirstChange: (Boolean) -> Unit,
+    composerActionSide: com.yage.opencode_client.ui.ComposerActionSide,
+    onComposerActionSideChange: (com.yage.opencode_client.ui.ComposerActionSide) -> Unit,
 ) {
     SectionHeader(title = stringResource(R.string.settings_layout))
-    val modes = com.yage.opencode_client.ui.LayoutPreference.entries
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        modes.forEachIndexed { index, mode ->
-            SegmentedButton(
-                selected = layoutPreference == mode,
-                onClick = { onLayoutSelected(mode) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-            ) {
-                Text(
-                    when (mode) {
-                        com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC -> stringResource(R.string.settings_layout_automatic)
-                        com.yage.opencode_client.ui.LayoutPreference.FOCUS -> stringResource(R.string.settings_layout_focus)
-                    }
-                )
-            }
-        }
+    SettingsChoices(com.yage.opencode_client.ui.LayoutPreference.entries, layoutPreference, onLayoutSelected) { mode ->
+        stringResource(if (mode == com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC)
+            R.string.settings_layout_automatic else R.string.settings_layout_focus)
     }
     Spacer(modifier = Modifier.height(4.dp))
     Text(
@@ -424,6 +440,12 @@ internal fun FocusVoiceSection(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Spacer(modifier = Modifier.height(12.dp))
+    Text(stringResource(R.string.settings_voice_controls), style = MaterialTheme.typography.bodyLarge)
+    SettingsChoices(com.yage.opencode_client.ui.ComposerActionSide.entries, composerActionSide, onComposerActionSideChange) { side ->
+        stringResource(if (side == com.yage.opencode_client.ui.ComposerActionSide.LEFT)
+            R.string.settings_voice_controls_left else R.string.settings_voice_controls_right)
+    }
 }
 
 @Composable
@@ -506,25 +528,15 @@ internal fun SpeechRecognitionSection(
         style = MaterialTheme.typography.labelLarge,
     )
     Spacer(modifier = Modifier.height(8.dp))
-    val strategies = listOf(
+    val strategies = mapOf(
         VoiceFlowRecordingStrategy.OPENAI_REALTIME to R.string.settings_recording_strategy_openai,
         VoiceFlowRecordingStrategy.GPT_LIVE_TRANSCRIBE to R.string.settings_recording_strategy_gpt_live,
         VoiceFlowRecordingStrategy.GROK_BATCH to R.string.settings_recording_strategy_grok,
     )
     val selected = VoiceFlowRecordingStrategy.fromRaw(aiBuilderRecordingStrategy)
     var showStrategyHelp by remember { mutableStateOf(false) }
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        strategies.forEachIndexed { index, (strategy, labelRes) ->
-            SegmentedButton(
-                selected = selected == strategy,
-                onClick = { onRecordingStrategyChange(strategy.name) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = strategies.size),
-            ) {
-                Text(stringResource(labelRes))
-            }
-        }
+    SettingsChoices(strategies.keys.toList(), selected, { onRecordingStrategyChange(it.name) }) { strategy ->
+        stringResource(strategies.getValue(strategy))
     }
     Row(
         modifier = Modifier.fillMaxWidth(),

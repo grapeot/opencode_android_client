@@ -162,7 +162,9 @@ private fun SwipeRevealRow(
     depth: Int = 0,
     hasChildren: Boolean = false,
     isCollapsed: Boolean = true,
-    onToggleCollapse: (() -> Unit)? = null
+    onToggleCollapse: (() -> Unit)? = null,
+    archiveChecked: Boolean? = null,
+    archiveSelectionEnabled: Boolean = true,
 ) {
     val swipeRevealBackgroundColor = lerp(
         MaterialTheme.colorScheme.surface,
@@ -186,7 +188,7 @@ private fun SwipeRevealRow(
     )
 
     Box(modifier = Modifier.fillMaxWidth().wrapContentHeight().clipToBounds()) {
-        SwipeActionBackground(
+        if (archiveChecked == null) SwipeActionBackground(
             isArchived = isArchived,
             backgroundColor = swipeRevealBackgroundColor,
             onArchive = onArchive,
@@ -196,13 +198,14 @@ private fun SwipeRevealRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(if (archiveChecked == null) Modifier
                 .offset { IntOffset(x = dragState.requireOffset().roundToInt(), y = 0) }
                 .anchoredDraggable(
                     state = dragState,
                     orientation = Orientation.Horizontal,
                     enabled = enabled,
                     flingBehavior = dragFlingBehavior
-                )
+                ) else Modifier)
                 .background(MaterialTheme.colorScheme.surface)
                 .then(
                     if (isSelected && !isArchived) {
@@ -219,12 +222,19 @@ private fun SwipeRevealRow(
                         Modifier
                     }
                 )
-                .clickable(onClick = onSelect)
+                .then(if (archiveChecked == null) Modifier.clickable(onClick = onSelect) else Modifier.toggleable(
+                    value = archiveChecked, enabled = archiveSelectionEnabled, role = Role.Checkbox,
+                    onValueChange = { onSelect() },
+                ))
                 .padding(start = (depth * 24).dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (archiveChecked != null) {
+                Checkbox(checked = archiveChecked, onCheckedChange = null, enabled = archiveSelectionEnabled,
+                    modifier = Modifier.padding(start = 8.dp))
+            }
             if (hasChildren && onToggleCollapse != null) {
-                IconButton(onClick = onToggleCollapse, modifier = Modifier.size(48.dp)) {
+                IconButton(onClick = onToggleCollapse, enabled = archiveSelectionEnabled, modifier = Modifier.size(48.dp)) {
                     Icon(
                         if (isCollapsed) Icons.Default.ChevronRight else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (isCollapsed) "Expand" else "Collapse",
@@ -437,17 +447,6 @@ fun SessionList(
                 }
             }
         }
-        if (hasMoreSessions || isLoadingMoreSessions) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (isLoadingMoreSessions) {
-                    CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    TextButton(onClick = onLoadMoreSessions, enabled = !archiveRunning) {
-                        Text(stringResource(R.string.sessions_load_older))
-                    }
-                }
-            }
-        }
         PullToRefreshBox(
             isRefreshing = isRefreshingSessions,
             onRefresh = { if (!archiveRunning) onRefreshSessions() },
@@ -468,30 +467,6 @@ fun SessionList(
                     item(key = "active_empty") { EmptySectionRow(stringResource(R.string.sessions_no_active)) }
                 }
                 itemsIndexed(activeRows, key = { _, (node, _) -> node.session.id }) { index, (node, depth) ->
-                    if (selecting) {
-                        val id = node.session.id
-                        Row(
-                            Modifier.fillMaxWidth().toggleable(
-                                value = id in selected,
-                                enabled = !archiveRunning,
-                                role = Role.Checkbox,
-                                onValueChange = { checked -> selected = if (checked) selected + id else selected - id },
-                            ).padding(start = (12 + 12 * depth.coerceAtMost(5)).dp, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(checked = id in selected, onCheckedChange = null, enabled = !archiveRunning,
-                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp))
-                            Text(node.session.displayName, modifier = Modifier.weight(1f), maxLines = 2)
-                            if (node.children.isNotEmpty()) {
-                                val expanded = id in expandedSessionIds
-                                IconButton(onClick = { onToggleSessionExpanded(id) }, enabled = !archiveRunning) {
-                                    Icon(if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
-                                        stringResource(if (expanded) R.string.sessions_collapse else R.string.sessions_expand, node.session.displayName))
-                                }
-                            }
-                        }
-                        return@itemsIndexed
-                    }
                     SessionRowItem(
                         node = node,
                         depth = depth,
@@ -506,12 +481,16 @@ fun SessionList(
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = false,
-                        onSelectSession = onSelectSession,
+                        onSelectSession = if (selecting) { id ->
+                            selected = if (id in selected) selected - id else selected + id
+                        } else onSelectSession,
                         onDeleteSession = onDeleteSession,
                         onArchiveSession = onArchiveSession,
                         onRestoreSession = onRestoreSession,
                         onToggleSessionExpanded = onToggleSessionExpanded,
                         showDivider = index < activeRows.size - 1,
+                        archiveChecked = (node.session.id in selected).takeIf { selecting },
+                        archiveSelectionEnabled = !archiveRunning || !selecting,
                     )
                 }
 
@@ -547,6 +526,19 @@ fun SessionList(
                         onToggleSessionExpanded = onToggleSessionExpanded,
                         showDivider = index < archivedRows.size - 1,
                     )
+                }
+                if (hasMoreSessions || isLoadingMoreSessions) {
+                    item(key = "load_older") {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            if (isLoadingMoreSessions) {
+                                CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                TextButton(onClick = onLoadMoreSessions, enabled = !archiveRunning) {
+                                    Text(stringResource(R.string.sessions_load_older))
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -639,6 +631,8 @@ private fun SessionRowItem(
     onRestoreSession: (String) -> Unit,
     onToggleSessionExpanded: (String) -> Unit,
     showDivider: Boolean,
+    archiveChecked: Boolean? = null,
+    archiveSelectionEnabled: Boolean = true,
 ) {
     val session = node.session
     val isSelected = session.id == currentSessionId
@@ -646,7 +640,7 @@ private fun SessionRowItem(
     val isExpanded = expandedSessionIds.contains(session.id)
     val density = LocalDensity.current
     val actionWidthPx = with(density) { 72.dp.toPx() }
-    val dragState = remember(actionWidthPx) {
+    val dragState = remember(actionWidthPx, archiveChecked != null) {
         AnchoredDraggableState(
             initialValue = SwipeAnchor.Center,
             anchors = DraggableAnchors {
@@ -681,7 +675,9 @@ private fun SessionRowItem(
             depth = depth,
             hasChildren = hasChildren,
             isCollapsed = !isExpanded,
-            onToggleCollapse = if (hasChildren) { { onToggleSessionExpanded(session.id) } } else null
+            onToggleCollapse = if (hasChildren) { { onToggleSessionExpanded(session.id) } } else null,
+            archiveChecked = archiveChecked,
+            archiveSelectionEnabled = archiveSelectionEnabled,
         )
         if (showDivider) {
             HorizontalDivider(

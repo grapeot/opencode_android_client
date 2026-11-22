@@ -110,7 +110,11 @@
     <string name="sessions_archive_review">Archived %1$d. More child sessions found; review the selection before trying again.</string>
     <string name="sessions_archive_missing">The selected sessions no longer exist.</string>
     <string name="sessions_archive_selection_changed">The session list changed. Review the selection and try again.</string>
-    <string name="workspace_hide_files">Hide files</string>
+    <string name="workspace_show_files">Show Files</string>
+    <string name="workspace_keep_files_open">Keep Files Open</string>
+    <string name="settings_voice_controls">Voice controls</string>
+    <string name="settings_voice_controls_left">Left-hand side</string>
+    <string name="settings_voice_controls_right">Right-hand side</string>
     <string name="sessions_load_older">Load older</string>
     <string name="sessions_new">+</string>
     <string name="sessions_show">Show sessions</string>

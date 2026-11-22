@@ -1,5 +1,10 @@
 package com.yage.opencode_client
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -15,6 +20,8 @@ import com.yage.opencode_client.data.model.HostTransport
 import com.yage.opencode_client.data.model.SshTunnelConfig
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.settings.ConnectionProfileSection
+import com.yage.opencode_client.ui.settings.AIUsageDashboardSection
+import com.yage.opencode_client.ui.settings.SettingsChoices
 import com.yage.opencode_client.ui.settings.DevicePublicKeySection
 import com.yage.opencode_client.ui.settings.HostProfileDetailDialog
 import com.yage.opencode_client.ui.settings.HostProfileEditorDialog
@@ -25,6 +32,56 @@ import org.junit.Test
 class SettingsSectionsInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test fun narrowSettingsStacksDashboardActionsAndKeepsModelChoicesSelectable() {
+        var saved = false
+        var strategy = "GPT Realtime"
+        composeRule.setContent {
+            MaterialTheme {
+                Column(Modifier.width(208.dp)) {
+                    AIUsageDashboardSection(
+                        state = AppState(), dashboardUrl = "https://example.test", onUrlChange = {},
+                        onTestConnection = {}, onSave = { saved = true },
+                    )
+                    SettingsChoices(listOf("GPT Realtime", "GPT Live", "Grok STT"), strategy, { strategy = it }) { it }
+                }
+            }
+        }
+        val test = composeRule.onNodeWithText("Test Connection").fetchSemanticsNode().boundsInRoot
+        val save = composeRule.onNodeWithText("Save")
+        org.junit.Assert.assertTrue(test.bottom < save.fetchSemanticsNode().boundsInRoot.top)
+        save.performClick()
+        val gpt = composeRule.onNodeWithText("GPT Live")
+        val grok = composeRule.onNodeWithText("Grok STT")
+        org.junit.Assert.assertTrue(gpt.fetchSemanticsNode().boundsInRoot.bottom <= grok.fetchSemanticsNode().boundsInRoot.top)
+        grok.performClick()
+        composeRule.runOnIdle { org.junit.Assert.assertTrue(saved && strategy == "Grok STT") }
+    }
+
+    @Test fun narrowProfilePaneKeepsBothActionsLegible() {
+        var tested = false
+        var managed = false
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(208.dp)) {
+                    ConnectionProfileSection(
+                        profile = HostProfile(id = "fixture", name = "Development", transport = HostTransport.DIRECT, serverUrl = "https://example.test"),
+                        isTesting = false, state = AppState(), testResult = null,
+                        onTestConnection = { tested = true }, onManageProfiles = { managed = true },
+                    )
+                }
+            }
+        }
+        val test = composeRule.onNodeWithText("Test Connection")
+        val manage = composeRule.onNodeWithText("Manage Profiles")
+        val testBounds = test.fetchSemanticsNode().boundsInRoot
+        val manageBounds = manage.fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue("$testBounds vs $manageBounds", testBounds.bottom < manageBounds.top)
+        org.junit.Assert.assertTrue("$testBounds vs $manageBounds", kotlin.math.abs(testBounds.width - manageBounds.width) < 2f)
+        test.performClick()
+        manage.performClick()
+        composeRule.runOnIdle { org.junit.Assert.assertTrue(tested && managed) }
+    }
 
     @Test
     fun speechSectionDisablesActionsWhenBaseUrlIsBlank() {

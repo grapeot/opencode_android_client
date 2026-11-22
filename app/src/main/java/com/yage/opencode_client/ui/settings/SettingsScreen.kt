@@ -224,6 +224,8 @@ fun SettingsScreen(
                 voiceFirst = state.voiceFirstInput,
                 onLayoutSelected = viewModel::setLayoutPreference,
                 onVoiceFirstChange = viewModel::setVoiceFirstInput,
+                composerActionSide = state.composerActionSide,
+                onComposerActionSideChange = viewModel::setComposerActionSide,
             )
 
             SettingsSectionDivider()
@@ -580,16 +582,19 @@ internal fun HostProfileDetailDialog(
                     Button(onClick = onUse) { Text(stringResource(R.string.host_profile_use_this_host)) }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onTest) { Text(stringResource(R.string.settings_test_connection)) }
-                    OutlinedButton(onClick = onEdit) { Text(stringResource(R.string.common_edit)) }
-                }
+                SettingsActionPair(
+                    first = { OutlinedButton(onClick = onTest, modifier = it) { Text(stringResource(R.string.settings_test_connection)) } },
+                    second = { OutlinedButton(onClick = onEdit, modifier = it) { Text(stringResource(R.string.common_edit)) } },
+                )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (profile.transport == HostTransport.SSH_TUNNEL) {
+                    SettingsActionPair(
+                        first = { OutlinedButton(onClick = onExport, modifier = it) { Text(stringResource(R.string.host_profile_copy_config_json)) } },
+                        second = { OutlinedButton(onClick = onCopyPublicKey, modifier = it) { Text(stringResource(R.string.host_profile_copy_device_key)) } },
+                        minInlineWidth = 420.dp,
+                    )
+                } else {
                     OutlinedButton(onClick = onExport) { Text(stringResource(R.string.host_profile_copy_config_json)) }
-                    if (profile.transport == HostTransport.SSH_TUNNEL) {
-                        OutlinedButton(onClick = onCopyPublicKey) { Text(stringResource(R.string.host_profile_copy_device_key)) }
-                    }
                 }
             }
         },

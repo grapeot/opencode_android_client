@@ -1,21 +1,47 @@
 package com.yage.opencode_client
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.yage.opencode_client.ui.chat.ChatInputBar
+import com.yage.opencode_client.ui.ComposerActionSide
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
 class ChatInputBarInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test fun voiceControlsStayTogetherAndMirrorTheMicrophoneSide() {
+        val side = mutableStateOf(ComposerActionSide.RIGHT)
+        composeRule.setContent {
+            MaterialTheme {
+                ChatInputBar(
+                    text = "", isRecording = false, isTranscribing = false, hasPreservedSpeechAudio = false,
+                    isRetryingSpeech = false, speechAudioLevel = 0f, isSpeechConfigured = true,
+                    imageAttachments = emptyList(), onTextChange = {}, onSend = {}, onAddImages = {},
+                    onRemoveImage = {}, onAbortSpeech = {}, onRetrySpeech = {}, onDiscardSpeech = {},
+                    onToggleRecording = {}, voiceFirst = true, composerActionSide = side.value,
+                )
+            }
+        }
+        fun x(tag: String) = composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.center.x
+        fun micX() = composeRule.onNodeWithContentDescription("Tap to speak").fetchSemanticsNode().boundsInRoot.center.x
+        fun waveformX() = composeRule.onNodeWithContentDescription("Speech waveform").fetchSemanticsNode().boundsInRoot.center.x
+        assertTrue(waveformX() < x("chat-paste") && x("chat-keyboard") < micX())
+        composeRule.runOnIdle { side.value = ComposerActionSide.LEFT }
+        assertTrue(micX() < x("chat-paste") && x("chat-keyboard") < waveformX())
+        assertTrue(x("chat-paste") < x("chat-keyboard"))
+    }
 
     @Test
     fun inputKeepsSendAndSpeakEnabledWhenIdle() {
