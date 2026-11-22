@@ -434,6 +434,17 @@ fun SessionList(
                 }
             }
         }
+        if (hasMoreSessions || isLoadingMoreSessions) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                if (isLoadingMoreSessions) {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    TextButton(onClick = onLoadMoreSessions, enabled = !archiveRunning) {
+                        Text(stringResource(R.string.sessions_load_older))
+                    }
+                }
+            }
+        }
         PullToRefreshBox(
             isRefreshing = isRefreshingSessions,
             onRefresh = { if (!archiveRunning) onRefreshSessions() },
@@ -499,17 +510,6 @@ fun SessionList(
                         onToggleSessionExpanded = onToggleSessionExpanded,
                         showDivider = index < activeRows.size - 1,
                     )
-                }
-                if (hasMoreSessions || isLoadingMoreSessions) item(key = "load_older") {
-                    Box(Modifier.fillMaxWidth().padding(4.dp), contentAlignment = Alignment.Center) {
-                        if (isLoadingMoreSessions) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            TextButton(onClick = onLoadMoreSessions, enabled = !archiveRunning) {
-                                Text(stringResource(R.string.sessions_load_older))
-                            }
-                        }
-                    }
                 }
 
                 if (!selecting) item(key = "archived_header") {
