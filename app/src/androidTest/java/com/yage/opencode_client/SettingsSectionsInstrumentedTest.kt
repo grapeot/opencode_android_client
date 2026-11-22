@@ -1,6 +1,7 @@
 package com.yage.opencode_client
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -19,6 +20,8 @@ import com.yage.opencode_client.data.model.HostTransport
 import com.yage.opencode_client.data.model.SshTunnelConfig
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.settings.ConnectionProfileSection
+import com.yage.opencode_client.ui.settings.AIUsageDashboardSection
+import com.yage.opencode_client.ui.settings.SettingsChoices
 import com.yage.opencode_client.ui.settings.DevicePublicKeySection
 import com.yage.opencode_client.ui.settings.HostProfileDetailDialog
 import com.yage.opencode_client.ui.settings.HostProfileEditorDialog
@@ -29,6 +32,31 @@ import org.junit.Test
 class SettingsSectionsInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test fun narrowSettingsStacksDashboardActionsAndKeepsModelChoicesSelectable() {
+        var saved = false
+        var strategy = "GPT Realtime"
+        composeRule.setContent {
+            MaterialTheme {
+                Column(Modifier.width(208.dp)) {
+                    AIUsageDashboardSection(
+                        state = AppState(), dashboardUrl = "https://example.test", onUrlChange = {},
+                        onTestConnection = {}, onSave = { saved = true },
+                    )
+                    SettingsChoices(listOf("GPT Realtime", "GPT Live", "Grok STT"), strategy, { strategy = it }) { it }
+                }
+            }
+        }
+        val test = composeRule.onNodeWithText("Test Connection").fetchSemanticsNode().boundsInRoot
+        val save = composeRule.onNodeWithText("Save")
+        org.junit.Assert.assertTrue(test.bottom < save.fetchSemanticsNode().boundsInRoot.top)
+        save.performClick()
+        val gpt = composeRule.onNodeWithText("GPT Live")
+        val grok = composeRule.onNodeWithText("Grok STT")
+        org.junit.Assert.assertTrue(gpt.fetchSemanticsNode().boundsInRoot.bottom <= grok.fetchSemanticsNode().boundsInRoot.top)
+        grok.performClick()
+        composeRule.runOnIdle { org.junit.Assert.assertTrue(saved && strategy == "Grok STT") }
+    }
 
     @Test fun narrowProfilePaneKeepsBothActionsLegible() {
         var tested = false

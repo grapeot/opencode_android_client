@@ -510,7 +510,7 @@ private fun ChatPrimaryActionButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(36.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(containerColor.copy(alpha = effectiveAlpha))
             .clickable(
