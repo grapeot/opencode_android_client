@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Checklist
@@ -108,7 +109,7 @@ internal data class ChatTopBarState(
     val showNewSessionInTopBar: Boolean = true,
     val showSessionListInTopBar: Boolean = true,
     val layoutPreference: com.yage.opencode_client.ui.LayoutPreference = com.yage.opencode_client.ui.LayoutPreference.AUTOMATIC,
-    val showLayoutMenu: Boolean = true,
+    val keepFilesOpen: Boolean? = null,
 )
 
 internal data class ChatTopBarActions(
@@ -128,10 +129,13 @@ internal data class ChatTopBarActions(
     val onRenameSession: (String) -> Unit = {},
     val onSetLayoutPreference: (com.yage.opencode_client.ui.LayoutPreference) -> Unit = {},
     val archiveControls: SessionArchiveControls? = null,
+    val onShowFiles: (() -> Unit)? = null,
+    val onKeepFilesOpenChange: (Boolean) -> Unit = {},
+    val onRestoreSessions: (() -> Unit)? = null,
 )
 
 @Composable
-internal fun ChatLayoutMenu(
+private fun ChatLayoutMenu(
     preference: LayoutPreference,
     onSelectLayout: (LayoutPreference) -> Unit,
     onShowFiles: (() -> Unit)? = null,
@@ -237,6 +241,11 @@ internal fun ChatTopBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    actions.onRestoreSessions?.let { restore ->
+                        IconButton(onClick = restore, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.sessions_show))
+                        }
+                    }
                     if (state.showSessionListInTopBar) {
                         IconButton(
                             onClick = { showSessionSheet = true },
@@ -283,13 +292,16 @@ internal fun ChatTopBar(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                ChatLayoutMenu(state.layoutPreference, actions.onSetLayoutPreference, actions.onShowFiles,
+                    state.keepFilesOpen, actions.onKeepFilesOpenChange)
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (state.showLayoutMenu) ChatLayoutMenu(state.layoutPreference, actions.onSetLayoutPreference)
                     Box(modifier = Modifier.weight(1f, fill = false)) {
                         Surface(
+                            modifier = Modifier.testTag("chat-model-menu"),
                             onClick = { showModelMenu = true },
                             shape = RoundedCornerShape(50),
                             color = Color.Transparent,

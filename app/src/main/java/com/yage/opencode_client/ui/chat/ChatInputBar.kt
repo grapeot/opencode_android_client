@@ -124,7 +124,7 @@ internal fun ChatInputBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 8.dp)
+                .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 12.dp)
         ) {
             VoiceRail(
                 isRecording = isRecording,
@@ -157,7 +157,7 @@ internal fun ChatInputBar(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
                 ChatPrimaryActionButton(
@@ -510,7 +510,7 @@ private fun ChatPrimaryActionButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(44.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(containerColor.copy(alpha = effectiveAlpha))
             .clickable(

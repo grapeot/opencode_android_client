@@ -1,5 +1,9 @@
 package com.yage.opencode_client
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -25,6 +29,31 @@ import org.junit.Test
 class SettingsSectionsInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test fun narrowProfilePaneKeepsBothActionsLegible() {
+        var tested = false
+        var managed = false
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(208.dp)) {
+                    ConnectionProfileSection(
+                        profile = HostProfile(id = "fixture", name = "Development", transport = HostTransport.DIRECT, serverUrl = "https://example.test"),
+                        isTesting = false, state = AppState(), testResult = null,
+                        onTestConnection = { tested = true }, onManageProfiles = { managed = true },
+                    )
+                }
+            }
+        }
+        val test = composeRule.onNodeWithText("Test Connection")
+        val manage = composeRule.onNodeWithText("Manage Profiles")
+        val testBounds = test.fetchSemanticsNode().boundsInRoot
+        val manageBounds = manage.fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue("$testBounds vs $manageBounds", testBounds.bottom < manageBounds.top)
+        org.junit.Assert.assertTrue("$testBounds vs $manageBounds", kotlin.math.abs(testBounds.width - manageBounds.width) < 2f)
+        test.performClick()
+        manage.performClick()
+        composeRule.runOnIdle { org.junit.Assert.assertTrue(tested && managed) }
+    }
 
     @Test
     fun speechSectionDisablesActionsWhenBaseUrlIsBlank() {

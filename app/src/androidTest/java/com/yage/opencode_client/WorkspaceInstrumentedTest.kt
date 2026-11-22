@@ -56,7 +56,11 @@ class WorkspaceInstrumentedTest {
     }
 
     private fun openLayoutMenu() {
-        compose.onNodeWithTag("chat-layout").assertIsDisplayed().performClick()
+        val layout = compose.onNodeWithTag("chat-layout").assertIsDisplayed()
+        val model = compose.onNodeWithTag("chat-model-menu").assertIsDisplayed()
+        org.junit.Assert.assertEquals(model.fetchSemanticsNode().boundsInRoot.center.y,
+            layout.fetchSemanticsNode().boundsInRoot.center.y, 2f)
+        layout.performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("workspace-show-files").fetchSemanticsNodes().isNotEmpty() }
     }
 

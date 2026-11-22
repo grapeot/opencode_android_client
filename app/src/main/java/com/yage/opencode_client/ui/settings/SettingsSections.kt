@@ -2,6 +2,8 @@ package com.yage.opencode_client.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -98,16 +100,32 @@ internal fun ConnectionProfileSection(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onTestConnection, enabled = !isTesting) {
-                    if (isTesting) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stack = maxWidth < 300.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+                val testButton: @Composable (Modifier) -> Unit = { modifier ->
+                    Button(onClick = onTestConnection, enabled = !isTesting, modifier = modifier) {
+                        if (isTesting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(stringResource(R.string.settings_test_connection))
                     }
-                    Text(stringResource(R.string.settings_test_connection))
                 }
-                OutlinedButton(onClick = onManageProfiles) {
-                    Text(stringResource(R.string.settings_manage_profiles))
+                val manageButton: @Composable (Modifier) -> Unit = { modifier ->
+                    OutlinedButton(onClick = onManageProfiles, modifier = modifier) {
+                        Text(stringResource(R.string.settings_manage_profiles))
+                    }
+                }
+                if (stack) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        testButton(Modifier.fillMaxWidth())
+                        manageButton(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        testButton(Modifier)
+                        manageButton(Modifier)
+                    }
                 }
             }
         }

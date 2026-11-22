@@ -12,7 +12,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
@@ -59,7 +58,6 @@ import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequest
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequestSaver
 import com.yage.opencode_client.ui.chat.ChatScreen
-import com.yage.opencode_client.ui.chat.ChatLayoutMenu
 import com.yage.opencode_client.ui.chat.belongsTo
 import com.yage.opencode_client.ui.files.FilesScreen
 import com.yage.opencode_client.ui.files.FilesViewModel
@@ -624,21 +622,6 @@ private fun TabletLayout(
                 typography = compactTypography(MaterialTheme.typography)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (sessionsPaneCollapsed) {
-                            IconButton(onClick = { sessionsPaneCollapsed = false }) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.sessions_show))
-                            }
-                            Spacer(Modifier.weight(1f))
-                        }
-                        ChatLayoutMenu(
-                            preference = state.layoutPreference,
-                            onSelectLayout = viewModel::setLayoutPreference,
-                            onShowFiles = { showFileBrowser = true },
-                            keepFilesOpen = state.keepFilesOpen.takeIf { wide },
-                            onKeepFilesOpenChange = viewModel::setKeepFilesOpen,
-                        )
-                    }
                     if (state.ambientEnabled) {
                         AmbientContentSwitch(
                             ambientSelected = ambientDestinationVisible,
@@ -670,7 +653,9 @@ private fun TabletLayout(
                                 showSettingsButton = false,
                                 showNewSessionInTopBar = false,
                                 showSessionListInTopBar = false,
-                                showLayoutMenu = false,
+                                onShowFiles = { showFileBrowser = true },
+                                showKeepFilesOpen = wide,
+                                onRestoreSessions = if (sessionsPaneCollapsed) ({ sessionsPaneCollapsed = false }) else null,
                             )
                         }
                     }
