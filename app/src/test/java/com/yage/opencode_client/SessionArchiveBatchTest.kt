@@ -46,12 +46,43 @@ class SessionArchiveBatchTest {
     @Test fun missingChildrenRouteDoesNotPretendSessionDisappeared() = runTest {
         val server = Fixture(parent)
         server.missingRoute = "parent"
-        assertEquals(1, server.run(listOf(parent), setOf("parent")).remaining)
+        assertEquals(setOf("parent"), server.run(listOf(parent), setOf("parent")).archived)
         assertTrue(server.removed.isEmpty())
-        assertTrue(server.writes.isEmpty())
+        assertEquals(listOf("parent"), server.writes)
         server.rows.clear()
         assertEquals(setOf("parent"), server.run(listOf(parent), setOf("parent")).missing)
         assertEquals(listOf("parent"), server.removed)
+    }
+
+    @Test fun malformedChildrenResponseNeverArchivesParent() = runTest {
+        val server = Fixture(parent)
+        server.overrideChildren = { id -> if (id == "parent") listOf(child.copy(parentId = null)) else null }
+        assertEquals(1, server.run(listOf(parent), setOf("parent")).remaining)
+        assertTrue(server.writes.isEmpty())
+    }
+
+    @Test fun activeBranchIsDiscoveredInOnePassAndLateBranchRequiresReview() = runTest {
+        val server = Fixture(parent, child, grandchild)
+        assertTrue(server.run(listOf(parent), setOf("parent")).foundChildren)
+        assertTrue(grandchild in server.published)
+        server.rows["child"] = child.archived()
+        server.rows.remove("grandchild")
+        var directReads = 0
+        server.overrideChildren = { id ->
+            if (id == "parent" && ++directReads == 2) listOf(child.archived(), other.copy(parentId = "parent")) else null
+        }
+        assertTrue(server.run(listOf(parent, child.archived()), setOf("parent")).foundChildren)
+        assertTrue(server.writes.isEmpty())
+    }
+
+    @Test fun confirmedWriteStillPublishesWhenConnectionDropsOnSameHost() = runTest {
+        val server = Fixture(parent, other)
+        server.afterWrite = { server.inScope = false }
+        val result = server.run(listOf(parent, other), setOf("parent", "other"))
+        assertEquals(listOf("parent"), server.writes)
+        assertEquals(setOf("parent"), result.archived)
+        assertEquals(1, result.remaining)
+        assertTrue(parent.archived() in server.published)
     }
 
     @Test fun scopeChangeDuringReadStopsWritesAndPublishing() = runTest {
@@ -69,6 +100,8 @@ class SessionArchiveBatchTest {
         val removed = mutableListOf<String>()
         var inScope = true
         var afterRead: () -> Unit = {}
+        var afterWrite: () -> Unit = {}
+        var overrideChildren: (String) -> List<Session>? = { null }
         var ignoredWrite: String? = null
         var missingRoute: String? = null
 
@@ -76,10 +109,11 @@ class SessionArchiveBatchTest {
             plan = planSessionArchive(visible, selected),
             timestamp = 10L,
             canContinue = { inScope },
+            ownsResult = { true },
             readChildren = { id ->
                 afterRead()
                 if (id == missingRoute) Result.failure(notFound())
-                else Result.success(rows.values.filter { it.parentId == id })
+                else Result.success(overrideChildren(id) ?: rows.values.filter { it.parentId == id })
             },
             readSession = { id -> rows[id]?.let { Result.success(it) } ?: Result.failure(notFound()) },
             archive = { id, _ ->
@@ -87,6 +121,7 @@ class SessionArchiveBatchTest {
                 val current = rows.getValue(id)
                 val updated = if (id == ignoredWrite) current else current.archived()
                 rows[id] = updated
+                afterWrite()
                 Result.success(updated)
             },
             publish = { published += it },

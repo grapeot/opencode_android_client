@@ -32,6 +32,8 @@ class FilesViewModel @Inject constructor(
     private val _state = MutableStateFlow(FilesUiState())
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
     private var hostGeneration = 0L
+    private var browserDirectory: String? = null
+    private var browserRuntimeGeneration: Long? = null
     private var previewToken = 0L
     private var settledToken = -1L
     private var settledPath: String? = null
@@ -47,6 +49,19 @@ class FilesViewModel @Inject constructor(
     }
 
     fun resetForHost() {
+        browserDirectory = null
+        browserRuntimeGeneration = null
+        resetBrowser()
+    }
+
+    fun configureBrowser(directory: String?, runtimeGeneration: Long) {
+        if (browserDirectory == directory && browserRuntimeGeneration == runtimeGeneration) return
+        browserDirectory = directory
+        browserRuntimeGeneration = runtimeGeneration
+        resetBrowser()
+    }
+
+    private fun resetBrowser() {
         hostGeneration++
         invalidatePreview()
         _state.value = FilesUiState()
@@ -184,10 +199,12 @@ class FilesViewModel @Inject constructor(
 
     private fun loadFiles(path: String) {
         val generation = hostGeneration
+        val directory = browserDirectory
         viewModelScope.launch {
             if (generation != hostGeneration) return@launch
             _state.update { it.copy(isLoading = true, error = null) }
-            repository.getFileTree(path.ifEmpty { null })
+            (if (directory == null) repository.getFileTree(path.ifEmpty { null })
+                else repository.getFileTree(path.ifEmpty { null }, directory))
                 .onSuccess { tree ->
                     if (generation == hostGeneration) {
                         _state.update {
@@ -213,8 +230,9 @@ class FilesViewModel @Inject constructor(
 
     private fun loadFileStatuses() {
         val generation = hostGeneration
+        val directory = browserDirectory
         viewModelScope.launch {
-            repository.getFileStatus()
+            (if (directory == null) repository.getFileStatus() else repository.getFileStatus(directory))
                 .onSuccess { statuses ->
                     if (generation == hostGeneration) {
                         _state.update {
@@ -230,12 +248,13 @@ class FilesViewModel @Inject constructor(
     }
 
     private fun loadFileContent(path: String) {
-        val token = beginPreview(path, null)
+        val directory = browserDirectory
+        val token = beginPreview(path, directory)
         val hostToken = hostGeneration
         val epoch = repository.currentHostEpoch()
         viewModelScope.launch {
             if (!previewStillCurrent(token, hostToken, epoch)) return@launch
-            fetchFileContent(path, null)
+            fetchFileContent(path, directory)
                 .onSuccess { content ->
                     if (!previewStillCurrent(token, hostToken, epoch)) return@onSuccess
                     _state.update {

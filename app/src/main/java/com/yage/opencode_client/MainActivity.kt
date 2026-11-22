@@ -558,7 +558,10 @@ private fun TabletLayout(
     val showsFiles = presentation.showsFilesColumn(filesPinned, state.columnPreview != null)
     var showFileBrowser by rememberSaveable(state.runtimeGeneration) { mutableStateOf(false) }
     LaunchedEffect(wide, state.columnPreview) {
-        if (wide) showFileBrowser = false
+        if (wide && showFileBrowser) {
+            if (state.columnPreview == null) onFilesPinnedChange(true)
+            showFileBrowser = false
+        }
         else if (state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) showFileBrowser = true
     }
 
@@ -707,14 +710,16 @@ private fun TabletLayout(
 private fun WorkspaceFiles(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val filesViewModel: FilesViewModel = hiltViewModel(key = "files-${state.currentHostProfileId ?: "none"}")
-    LaunchedEffect(state.runtimeGeneration) { filesViewModel.resetForHost() }
+    val column = state.columnPreview
+    val directory = if (column != null) column.workspace else state.currentSession?.directory
     FilesScreen(
         viewModel = filesViewModel,
         pathToShow = state.filePathToShowInFiles,
-        sessionDirectory = state.columnPreview?.workspace,
+        sessionDirectory = directory,
         onCloseFile = viewModel::clearFileToShow,
-        onFileClick = viewModel::showFilesBrowserFile,
+        onFileClick = { viewModel.showFilesBrowserFile(it, directory) },
         onPreviewPathChange = viewModel::retargetColumnPreview,
+        browserRuntimeGeneration = state.runtimeGeneration,
     )
 }
 

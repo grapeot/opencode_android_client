@@ -37,11 +37,13 @@ fun FilesScreen(
     onCloseFile: () -> Unit = {},
     onFileClick: (String) -> Unit = {},
     onPreviewPathChange: (String) -> Unit = {},
+    browserRuntimeGeneration: Long? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    LaunchedEffect(pathToShow, sessionDirectory) {
+    LaunchedEffect(pathToShow, sessionDirectory, browserRuntimeGeneration) {
+        if (browserRuntimeGeneration != null) viewModel.configureBrowser(sessionDirectory, browserRuntimeGeneration)
         viewModel.syncPathToShow(pathToShow, sessionDirectory)
     }
 

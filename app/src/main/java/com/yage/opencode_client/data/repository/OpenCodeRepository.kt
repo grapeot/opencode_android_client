@@ -343,6 +343,10 @@ class OpenCodeRepository @Inject constructor() {
         api.getFileStatus()
     }
 
+    suspend fun getFileStatus(directory: String): Result<List<FileStatusEntry>> = apiCall {
+        api.getFileStatus(directory.asDirectoryQuery())
+    }
+
     suspend fun findFile(query: String, limit: Int = 50): Result<List<String>> = apiCall {
         api.findFile(query, limit)
     }

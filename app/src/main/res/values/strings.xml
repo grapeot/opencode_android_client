@@ -109,6 +109,7 @@
     <string name="sessions_archive_partial">Archived %1$d; %2$d still pending. Review and try again.</string>
     <string name="sessions_archive_review">Archived %1$d. More child sessions found; review the selection before trying again.</string>
     <string name="sessions_archive_missing">The selected sessions no longer exist.</string>
+    <string name="sessions_archive_selection_changed">The session list changed. Review the selection and try again.</string>
     <string name="workspace_hide_files">Hide files</string>
     <string name="sessions_load_older">Load older</string>
     <string name="sessions_new">+</string>

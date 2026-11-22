@@ -25,6 +25,8 @@ data class SessionArchiveOutcome(
     val missing: Set<String>,
     val remaining: Int,
     val foundChildren: Boolean,
+    val reviewRoots: Set<String> = emptySet(),
+    val selectionChanged: Boolean = false,
 )
 
 private fun Throwable?.isNotFound() = this is HttpException && code() == 404
@@ -33,6 +35,7 @@ internal suspend fun executeSessionArchive(
     plan: SessionArchivePlan,
     timestamp: Long,
     canContinue: () -> Boolean,
+    ownsResult: () -> Boolean = canContinue,
     readChildren: suspend (String) -> Result<List<Session>>,
     readSession: suspend (String) -> Result<Session>,
     archive: suspend (String, Long) -> Result<Session>,
@@ -42,7 +45,7 @@ internal suspend fun executeSessionArchive(
     val archived = mutableSetOf<String>()
     val missing = mutableSetOf<String>()
     val blocked = mutableSetOf<String>()
-    var foundChildren = false
+    val reviewRoots = mutableSetOf<String>()
     suspend fun inScope(): Boolean {
         currentCoroutineContext().ensureActive()
         return canContinue()
@@ -69,36 +72,62 @@ internal suspend fun executeSessionArchive(
                     markMissing(id)
                     continue
                 }
+                // Older compatible servers have no children route. Preserve the
+                // existing local subtree behavior only after verifying this ID.
+                if (session.getOrNull()?.id != id) {
+                    blockAncestors(id)
+                    continue
+                }
+            } else {
+                blockAncestors(id)
+                continue
             }
-            blockAncestors(id)
-            continue
         }
-        val frontier = ArrayDeque(root.getOrThrow().filter { it.parentId == id })
+        val direct = root.getOrNull().orEmpty()
+        val frontier = ArrayDeque(direct.filter { it.parentId == id })
         val seen = mutableSetOf(id)
         var activeChild = false
-        var incompleteRead = false
+        var incompleteRead = direct.any { it.parentId != id }
         while (frontier.isNotEmpty()) {
             val child = frontier.removeFirst()
             if (!seen.add(child.id)) continue
-            publish(child)
-            if (!child.isArchived) {
-                activeChild = true
-            } else if (child.id !in archived) {
-                // An archived intermediary can have an active grandchild.
-                val nested = readChildren(child.id)
-                if (!inScope()) break@batch
-                if (nested.isFailure) incompleteRead = true
-                else frontier.addAll(nested.getOrThrow().filter { it.parentId == child.id })
+            // An older list payload must not undo a confirmed archive.
+            if (child.id !in archived && child.id !in missing) publish(child)
+            if (!child.isArchived && child.id !in archived && child.id !in missing) activeChild = true
+            if (child.id in missing) continue
+            val nested = readChildren(child.id)
+            if (!inScope()) break@batch
+            if (nested.isFailure) incompleteRead = true
+            else {
+                val rows = nested.getOrThrow()
+                if (rows.any { it.parentId != child.id }) incompleteRead = true
+                frontier.addAll(rows.filter { it.parentId == child.id })
+            }
+        }
+        // Traversal made network calls after reading direct children. Recheck
+        // them before writing so a newly added branch does not slip through.
+        if (!activeChild && !incompleteRead && direct.isNotEmpty()) {
+            val last = readChildren(id)
+            if (!inScope()) break
+            val rows = last.getOrNull()
+            if (rows == null || rows.any { it.parentId != id }) incompleteRead = true
+            else for (child in rows) {
+                if (child.id in archived || child.id in missing) continue
+                if (!child.isArchived || child.id !in seen) {
+                    publish(child)
+                    activeChild = true
+                }
             }
         }
         if (activeChild || incompleteRead) {
-            foundChildren = foundChildren || activeChild
+            if (activeChild) reviewRoots += id
             blockAncestors(id)
             continue
         }
         if (!inScope()) break
         val result = archive(id, timestamp)
-        if (!inScope()) break
+        currentCoroutineContext().ensureActive()
+        if (!ownsResult()) break
         val updated = result.getOrNull()
         when {
             updated?.id == id && updated.isArchived -> {
@@ -109,5 +138,6 @@ internal suspend fun executeSessionArchive(
             else -> blockAncestors(id)
         }
     }
-    return SessionArchiveOutcome(archived, missing, plan.ids.size - archived.size - missing.size, foundChildren)
+    return SessionArchiveOutcome(archived, missing, plan.ids.size - archived.size - missing.size,
+        reviewRoots.isNotEmpty(), reviewRoots)
 }

@@ -2212,24 +2212,35 @@ class MainViewModel @Inject constructor(
         val initial = _state.value
         if (!initial.isConnected || initial.isArchivingSessions || initial.isLoadingMoreSessions) return
         val plan = planSessionArchive(initial.sessions, selected)
-        if (plan.ids.isEmpty() || (approvedIds != null && plan.ids != approvedIds)) return
+        if (approvedIds != null && plan.ids.toSet() != approvedIds.toSet()) {
+            _state.update { it.copy(sessionArchiveOutcome = SessionArchiveOutcome(
+                emptySet(), emptySet(), plan.ids.size, false, selectionChanged = true)) }
+            return
+        }
+        if (plan.ids.isEmpty()) return
         val repositoryEpoch = repository.currentHostEpoch()
         fun sameHost() = _state.value.runtimeGeneration == initial.runtimeGeneration &&
             _state.value.currentHostProfileId == initial.currentHostProfileId
+        fun ownsResult() = sameHost() && repository.currentHostEpoch() == repositoryEpoch
         _state.update { it.copy(isArchivingSessions = true, sessionArchiveOutcome = null) }
         hostRuntimeScope.launch {
             try {
                 val outcome = executeSessionArchive(
                     plan = plan,
                     timestamp = System.currentTimeMillis(),
-                    canContinue = { sameHost() && _state.value.isConnected && repository.currentHostEpoch() == repositoryEpoch },
+                    canContinue = { ownsResult() && _state.value.isConnected },
+                    ownsResult = ::ownsResult,
                     readChildren = repository::getSessionChildren,
                     readSession = repository::getSession,
                     archive = repository::updateSessionArchived,
                     publish = { session -> _state.update { it.copy(sessions = upsertSession(it.sessions, session)) } },
                     remove = { id -> _state.update { it.copy(sessions = it.sessions.filterNot { row -> row.id == id }) } },
                 )
-                if (sameHost()) _state.update { it.copy(sessionArchiveOutcome = outcome) }
+                if (ownsResult()) _state.update {
+                    it.copy(sessionArchiveOutcome = if (outcome.foundChildren) outcome.copy(
+                        reviewRoots = selected - outcome.archived - outcome.missing,
+                    ) else outcome)
+                }
             } finally {
                 if (sameHost()) _state.update { it.copy(isArchivingSessions = false) }
             }
@@ -2829,13 +2840,13 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun showFilesBrowserFile(path: String) {
+    fun showFilesBrowserFile(path: String, directory: String? = null) {
         val current = _state.value
         val target = OwnedFilePreview(
             path = path,
             hostId = current.currentHostProfileId,
             sessionId = null,
-            workspace = null,
+            workspace = directory,
             kind = FilePreviewKind.FILES,
         )
         _state.update {

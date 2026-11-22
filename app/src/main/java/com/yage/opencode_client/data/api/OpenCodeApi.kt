@@ -110,7 +110,7 @@ interface OpenCodeApi {
     ): FileContent
 
     @GET("file/status")
-    suspend fun getFileStatus(): List<FileStatusEntry>
+    suspend fun getFileStatus(@Query("directory") directory: String? = null): List<FileStatusEntry>
 
     @GET("find/file")
     suspend fun findFile(

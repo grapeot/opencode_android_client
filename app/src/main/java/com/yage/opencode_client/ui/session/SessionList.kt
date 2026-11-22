@@ -384,7 +384,10 @@ fun SessionList(
     val archiveRunning = archiveControls?.running == true
     LaunchedEffect(archiveControls?.outcome) {
         val outcome = archiveControls?.outcome ?: return@LaunchedEffect
-        if (selecting) {
+        if (outcome.foundChildren && !selecting && outcome.reviewRoots.isNotEmpty()) {
+            selected = outcome.reviewRoots
+            selecting = true
+        } else if (selecting) {
             selected -= outcome.archived + outcome.missing
             if (selected.isEmpty()) selecting = false
         }
@@ -574,6 +577,7 @@ fun SessionList(
 
 @Composable
 internal fun archiveOutcomeMessage(outcome: SessionArchiveOutcome): String = when {
+    outcome.selectionChanged -> stringResource(R.string.sessions_archive_selection_changed)
     outcome.foundChildren -> stringResource(R.string.sessions_archive_review, outcome.archived.size)
     outcome.remaining > 0 -> stringResource(R.string.sessions_archive_partial, outcome.archived.size, outcome.remaining)
     outcome.archived.isEmpty() -> stringResource(R.string.sessions_archive_missing)
