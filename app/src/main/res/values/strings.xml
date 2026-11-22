@@ -100,6 +100,16 @@
     <string name="sessions_title">Sessions</string>
     <string name="sessions_active">Active</string>
     <string name="sessions_archived">Archived</string>
+    <string name="sessions_archive_select">Select sessions to archive</string>
+    <string name="sessions_archive_cancel">Cancel selection</string>
+    <string name="sessions_archive_children">Includes %1$d additional child sessions</string>
+    <string name="sessions_archive_submit">Archive (%1$d)</string>
+    <string name="sessions_archiving">Archiving…</string>
+    <string name="sessions_archive_success">Archived %1$d sessions</string>
+    <string name="sessions_archive_partial">Archived %1$d; %2$d still pending. Review and try again.</string>
+    <string name="sessions_archive_review">Archived %1$d. More child sessions found; review the selection before trying again.</string>
+    <string name="sessions_archive_missing">The selected sessions no longer exist.</string>
+    <string name="workspace_hide_files">Hide files</string>
     <string name="sessions_load_older">Load older</string>
     <string name="sessions_new">+</string>
     <string name="sessions_show">Show sessions</string>

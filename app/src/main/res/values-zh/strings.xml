@@ -99,6 +99,16 @@
     <string name="sessions_title">会话</string>
     <string name="sessions_active">活跃</string>
     <string name="sessions_archived">已归档</string>
+    <string name="sessions_archive_select">多选归档</string>
+    <string name="sessions_archive_cancel">取消选择</string>
+    <string name="sessions_archive_children">另含 %1$d 个子会话</string>
+    <string name="sessions_archive_submit">归档（%1$d）</string>
+    <string name="sessions_archiving">正在归档…</string>
+    <string name="sessions_archive_success">已归档 %1$d 个会话</string>
+    <string name="sessions_archive_partial">已归档 %1$d 个，还有 %2$d 个未完成。请检查后重试。</string>
+    <string name="sessions_archive_review">已归档 %1$d 个。发现额外子会话，请检查选择后重试。</string>
+    <string name="sessions_archive_missing">所选会话已不存在。</string>
+    <string name="workspace_hide_files">隐藏文件栏</string>
     <string name="sessions_load_older">加载更多会话</string>
     <string name="sessions_new">新建</string>
     <string name="sessions_show">显示会话</string>

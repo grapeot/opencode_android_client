@@ -31,7 +31,6 @@ object OpenCodeDeepLinkParser {
         if (!uri.host.equals(SESSION_HOST, ignoreCase = true) ||
             uri.userInfo != null ||
             uri.port != -1 ||
-            uri.rawQuery != null ||
             uri.rawFragment != null
         ) {
             return OpenCodeDeepLinkParseResult.InvalidSessionLink

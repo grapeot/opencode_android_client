@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.WindowHeightSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,9 +52,9 @@ import kotlinx.coroutines.flow.first
 import com.yage.opencode_client.ambient.ui.AmbientNavigationTags
 import com.yage.opencode_client.ambient.ui.AmbientRoute
 import com.yage.opencode_client.ui.AppWidthClass
-import com.yage.opencode_client.ui.EffectiveLayout
 import com.yage.opencode_client.ui.MainViewModel
-import com.yage.opencode_client.ui.resolveEffectiveLayout
+import com.yage.opencode_client.ui.resolveWorkspacePresentation
+import com.yage.opencode_client.ui.WorkspacePresentation
 import com.yage.opencode_client.ui.DeepLinkError
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequest
 import com.yage.opencode_client.ui.chat.ChatFilePreviewRequestSaver
@@ -61,6 +63,8 @@ import com.yage.opencode_client.ui.chat.belongsTo
 import com.yage.opencode_client.ui.files.FilesScreen
 import com.yage.opencode_client.ui.files.FilesViewModel
 import com.yage.opencode_client.ui.session.SessionList
+import com.yage.opencode_client.ui.session.SessionArchiveControls
+import com.yage.opencode_client.ui.session.archiveOutcomeMessage
 import com.yage.opencode_client.ui.settings.SettingsScreen
 import com.yage.opencode_client.ui.theme.OpenCodeTheme
 import com.yage.opencode_client.ui.theme.compactTypography
@@ -186,7 +190,10 @@ class MainActivity : AppCompatActivity() {
                 WindowWidthSizeClass.Expanded -> AppWidthClass.EXPANDED
                 else -> AppWidthClass.COMPACT
             }
-            val effectiveLayout = resolveEffectiveLayout(state.layoutPreference, widthClass)
+            val presentation = resolveWorkspacePresentation(state.layoutPreference, widthClass,
+                shortWindow = windowSizeClass.heightSizeClass == WindowHeightSizeClass.Compact)
+            val effectiveLayout = presentation.previewLayout
+            var filesPinned by rememberSaveable { mutableStateOf(false) }
             var dockedPreviewRequest by rememberSaveable(stateSaver = ChatFilePreviewRequestSaver) {
                 mutableStateOf<ChatFilePreviewRequest?>(null)
             }
@@ -215,9 +222,14 @@ class MainActivity : AppCompatActivity() {
 
             OpenCodeTheme(darkTheme = darkTheme) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (effectiveLayout == EffectiveLayout.REGULAR) {
+                    if (presentation != WorkspacePresentation.COMPACT) {
                         TabletLayout(
                             viewModel = mainViewModel,
+                            presentation = presentation,
+                            filesPinned = filesPinned,
+                            onFilesPinnedChange = { filesPinned = it },
+                            dockedPreviewRequest = dockedPreviewRequest,
+                            onDockedPreviewRequestChange = { dockedPreviewRequest = it },
                             ambientDestinationVisible = ambientDestinationVisible,
                             onAmbientDestinationVisible = { ambientDestinationVisible = it },
                         )
@@ -230,6 +242,16 @@ class MainActivity : AppCompatActivity() {
                             onAmbientDestinationVisible = { ambientDestinationVisible = it },
                         )
                     }
+                    val archiveHost = remember(state.runtimeGeneration) { SnackbarHostState() }
+                    val outcome = state.sessionArchiveOutcome
+                    val archiveMessage = if (outcome == null) null else archiveOutcomeMessage(outcome)
+                    LaunchedEffect(archiveHost, outcome, archiveMessage) {
+                        if (outcome != null && archiveMessage != null) {
+                            archiveHost.showSnackbar(archiveMessage, duration = if (outcome.remaining > 0) SnackbarDuration.Long else SnackbarDuration.Short)
+                            mainViewModel.clearSessionArchiveOutcome(outcome)
+                        }
+                    }
+                    SnackbarHost(archiveHost, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().testTag("session-archive-result"))
                     DeepLinkFeedback(
                         isResolving = state.isResolvingDeepLink,
                         error = state.deepLinkError,
@@ -514,10 +536,15 @@ private fun BoxScope.DeepLinkFeedback(
 @Composable
 private fun TabletLayout(
     viewModel: MainViewModel,
+    presentation: WorkspacePresentation,
+    filesPinned: Boolean,
+    onFilesPinnedChange: (Boolean) -> Unit,
+    dockedPreviewRequest: ChatFilePreviewRequest?,
+    onDockedPreviewRequestChange: (ChatFilePreviewRequest?) -> Unit,
     ambientDestinationVisible: Boolean,
     onAmbientDestinationVisible: (Boolean) -> Unit,
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var sessionsPaneCollapsed by rememberSaveable { mutableStateOf(false) }
     // Opening Settings (e.g. from the chat "Manage models" jump) must also expand
     // the left pane, otherwise the Settings screen isn't composed when the Sessions
@@ -527,20 +554,23 @@ private fun TabletLayout(
         selectedTab = 1
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val filesWeight = if (sessionsPaneCollapsed) 0.5f else 0.375f
-    val chatWeight = if (sessionsPaneCollapsed) 0.5f else 0.375f
+    val wide = presentation == WorkspacePresentation.WIDE
+    val showsFiles = presentation.showsFilesColumn(filesPinned, state.columnPreview != null)
+    var showFileBrowser by rememberSaveable(state.runtimeGeneration) { mutableStateOf(false) }
+    LaunchedEffect(wide, state.columnPreview) {
+        if (wide) showFileBrowser = false
+        else if (state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) showFileBrowser = true
+    }
 
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
-        ) {
-        // Left panel: Session list or Settings — 25% when expanded.
+    Row(
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)
+    ) {
         if (!sessionsPaneCollapsed) {
             Column(
                 modifier = Modifier
-                    .weight(0.25f)
+                    .width(240.dp)
                     .fillMaxHeight()
+                    .testTag("workspace-sessions")
             ) {
                 if (selectedTab == 1) {
                     SettingsScreen(
@@ -565,6 +595,8 @@ private fun TabletLayout(
                         onCreateSession = { viewModel.createSession() },
                         onDeleteSession = { viewModel.deleteSession(it) },
                         onArchiveSession = { viewModel.archiveSession(it) },
+                        archiveControls = SessionArchiveControls(state.runtimeGeneration, state.isConnected,
+                            state.isArchivingSessions, state.sessionArchiveOutcome, viewModel::archiveSessions),
                         onRestoreSession = { viewModel.restoreSession(it) },
                         onLoadMoreSessions = { viewModel.loadMoreSessions() },
                         onRefreshSessions = { viewModel.loadSessions() },
@@ -578,58 +610,18 @@ private fun TabletLayout(
             VerticalDivider()
         }
 
-        // Middle panel: FilesScreen (file preview) — 37.5%, or 50% when Sessions is collapsed.
-        Column(
-            modifier = Modifier
-                .weight(filesWeight)
-                .fillMaxHeight()
-        ) {
-            MaterialTheme(
-                colorScheme = MaterialTheme.colorScheme,
-                typography = compactTypography(MaterialTheme.typography)
-            ) {
-                val filesViewModel: FilesViewModel = hiltViewModel(
-                    key = "files-${state.currentHostProfileId ?: "none"}"
-                )
-                LaunchedEffect(state.currentHostProfileId) {
-                    filesViewModel.resetForHost()
-                }
-                Box(modifier = Modifier.fillMaxSize()) {
-                    FilesScreen(
-                        viewModel = filesViewModel,
-                        pathToShow = state.filePathToShowInFiles,
-                        sessionDirectory = state.columnPreview?.workspace,
-                        onCloseFile = { viewModel.clearFileToShow() },
-                        onFileClick = { path -> viewModel.showFilesBrowserFile(path) },
-                        onPreviewPathChange = viewModel::retargetColumnPreview,
-                    )
-                    if (sessionsPaneCollapsed) {
-                        Surface(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(4.dp),
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                            tonalElevation = 3.dp
-                        ) {
-                            IconButton(onClick = { sessionsPaneCollapsed = false }) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = stringResource(R.string.sessions_show)
-                                )
-            }
-        }
-    }
+        if (showsFiles) {
+            Box(Modifier.weight(1f).fillMaxHeight().testTag("workspace-files-column")) {
+                MaterialTheme(typography = compactTypography(MaterialTheme.typography)) {
+                    WorkspaceFiles(viewModel)
                 }
             }
+            VerticalDivider()
         }
 
-        VerticalDivider()
-
-        // Right panel: Chat — 37.5%, or 50% when Sessions is collapsed.
         Column(
             modifier = Modifier
-                .weight(chatWeight)
+                .weight(1f)
                 .fillMaxHeight()
         ) {
             MaterialTheme(
@@ -637,6 +629,25 @@ private fun TabletLayout(
                 typography = compactTypography(MaterialTheme.typography)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (sessionsPaneCollapsed) {
+                            IconButton(onClick = { sessionsPaneCollapsed = false }) {
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.sessions_show))
+                            }
+                            Spacer(Modifier.weight(1f))
+                        }
+                        IconButton(onClick = {
+                            if (wide) {
+                                onFilesPinnedChange(!showsFiles)
+                                if (showsFiles) viewModel.clearFileToShow()
+                            } else {
+                                showFileBrowser = true
+                            }
+                        }, modifier = Modifier.testTag("workspace-files-toggle")) {
+                            Icon(if (showsFiles) Icons.Default.Close else Icons.Default.Folder,
+                                stringResource(if (showsFiles) R.string.workspace_hide_files else R.string.nav_files))
+                        }
+                    }
                     if (state.ambientEnabled) {
                         AmbientContentSwitch(
                             ambientSelected = ambientDestinationVisible,
@@ -660,7 +671,9 @@ private fun TabletLayout(
                                 onNavigateToFiles = { path ->
                                     viewModel.showFileInFiles(path)
                                 },
-                                useInlineFilePreview = true,
+                                useInlineFilePreview = wide,
+                                dockedPreviewRequest = dockedPreviewRequest,
+                                onDockedPreviewRequestChange = onDockedPreviewRequestChange,
                                 onNavigateToSettings = onOpenSettings,
                                 onManageModels = onOpenSettings,
                                 showSettingsButton = false,
@@ -673,6 +686,36 @@ private fun TabletLayout(
             }
         }
     }
+
+    if (!wide && showFileBrowser) {
+        fun closeBrowser() {
+            showFileBrowser = false
+            if (state.columnPreview?.kind == com.yage.opencode_client.ui.FilePreviewKind.FILES) viewModel.clearFileToShow()
+        }
+        ModalBottomSheet(onDismissRequest = ::closeBrowser) {
+            Column(Modifier.fillMaxHeight(0.9f).testTag("workspace-files-browser")) {
+                IconButton(onClick = ::closeBrowser, modifier = Modifier.align(Alignment.End)) {
+                    Icon(Icons.Default.Close, stringResource(R.string.common_dismiss))
+                }
+                WorkspaceFiles(viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceFiles(viewModel: MainViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val filesViewModel: FilesViewModel = hiltViewModel(key = "files-${state.currentHostProfileId ?: "none"}")
+    LaunchedEffect(state.runtimeGeneration) { filesViewModel.resetForHost() }
+    FilesScreen(
+        viewModel = filesViewModel,
+        pathToShow = state.filePathToShowInFiles,
+        sessionDirectory = state.columnPreview?.workspace,
+        onCloseFile = viewModel::clearFileToShow,
+        onFileClick = viewModel::showFilesBrowserFile,
+        onPreviewPathChange = viewModel::retargetColumnPreview,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

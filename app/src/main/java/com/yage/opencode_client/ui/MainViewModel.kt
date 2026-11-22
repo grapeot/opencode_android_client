@@ -1,5 +1,9 @@
 package com.yage.opencode_client.ui
 
+import com.yage.opencode_client.ui.session.SessionArchiveOutcome
+import com.yage.opencode_client.ui.session.executeSessionArchive
+import com.yage.opencode_client.ui.session.planSessionArchive
+
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -69,6 +73,8 @@ enum class DeepLinkError {
 }
 
 data class AppState(
+    val isArchivingSessions: Boolean = false,
+    val sessionArchiveOutcome: SessionArchiveOutcome? = null,
     val isConnected: Boolean = false,
     val isConnecting: Boolean = false,
     val serverVersion: String? = null,
@@ -2074,6 +2080,8 @@ class MainViewModel @Inject constructor(
                 isConnecting = true,
                 serverVersion = null,
                 sessions = emptyList(),
+                isArchivingSessions = false,
+                sessionArchiveOutcome = null,
                 loadedSessionLimit = MainViewModelTimings.sessionPageSize,
                 hasMoreSessions = true,
                 isLoadingMoreSessions = false,
@@ -2197,7 +2205,39 @@ class MainViewModel @Inject constructor(
     }
 
     fun archiveSession(sessionId: String) {
-        launchSetSessionArchived(hostRuntimeScope, repository, _state, sessionId, archived = true)
+        archiveSessions(setOf(sessionId))
+    }
+
+    fun archiveSessions(selected: Set<String>, approvedIds: List<String>? = null) {
+        val initial = _state.value
+        if (!initial.isConnected || initial.isArchivingSessions || initial.isLoadingMoreSessions) return
+        val plan = planSessionArchive(initial.sessions, selected)
+        if (plan.ids.isEmpty() || (approvedIds != null && plan.ids != approvedIds)) return
+        val repositoryEpoch = repository.currentHostEpoch()
+        fun sameHost() = _state.value.runtimeGeneration == initial.runtimeGeneration &&
+            _state.value.currentHostProfileId == initial.currentHostProfileId
+        _state.update { it.copy(isArchivingSessions = true, sessionArchiveOutcome = null) }
+        hostRuntimeScope.launch {
+            try {
+                val outcome = executeSessionArchive(
+                    plan = plan,
+                    timestamp = System.currentTimeMillis(),
+                    canContinue = { sameHost() && _state.value.isConnected && repository.currentHostEpoch() == repositoryEpoch },
+                    readChildren = repository::getSessionChildren,
+                    readSession = repository::getSession,
+                    archive = repository::updateSessionArchived,
+                    publish = { session -> _state.update { it.copy(sessions = upsertSession(it.sessions, session)) } },
+                    remove = { id -> _state.update { it.copy(sessions = it.sessions.filterNot { row -> row.id == id }) } },
+                )
+                if (sameHost()) _state.update { it.copy(sessionArchiveOutcome = outcome) }
+            } finally {
+                if (sameHost()) _state.update { it.copy(isArchivingSessions = false) }
+            }
+        }
+    }
+
+    fun clearSessionArchiveOutcome(outcome: SessionArchiveOutcome) {
+        _state.update { if (it.sessionArchiveOutcome === outcome) it.copy(sessionArchiveOutcome = null) else it }
     }
 
     fun restoreSession(sessionId: String) {

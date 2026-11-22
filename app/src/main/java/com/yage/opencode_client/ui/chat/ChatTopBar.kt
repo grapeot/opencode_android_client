@@ -65,6 +65,7 @@ import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.data.model.TodoItem
 import com.yage.opencode_client.ui.AppState
 import com.yage.opencode_client.ui.session.SessionList
+import com.yage.opencode_client.ui.session.SessionArchiveControls
 import com.yage.opencode_client.ui.theme.BrandGold
 import com.yage.opencode_client.ui.theme.BrandPrimary
 import kotlinx.coroutines.delay
@@ -119,6 +120,7 @@ internal data class ChatTopBarActions(
     val onNavigateToSettings: () -> Unit = {},
     val onRenameSession: (String) -> Unit = {},
     val onSetLayoutPreference: (com.yage.opencode_client.ui.LayoutPreference) -> Unit = {},
+    val archiveControls: SessionArchiveControls? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -468,6 +470,8 @@ internal fun ChatTopBar(
                         showSessionSheet = false
                     },
                     onArchiveSession = actions.onArchiveSession,
+                    archiveControls = actions.archiveControls,
+                    showArchiveFeedback = true,
                     onRestoreSession = actions.onRestoreSession,
                     onLoadMoreSessions = actions.onLoadMoreSessions,
                     onRefreshSessions = actions.onRefreshSessions,

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -33,12 +34,15 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +70,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -78,6 +86,14 @@ import com.yage.opencode_client.ui.theme.BrandPrimary
 import kotlin.math.roundToInt
 
 private enum class SwipeAnchor { Leading, Center, Trailing }
+
+data class SessionArchiveControls(
+    val scopeKey: Long,
+    val enabled: Boolean,
+    val running: Boolean,
+    val outcome: SessionArchiveOutcome?,
+    val submit: (Set<String>, List<String>) -> Unit,
+)
 
 @Composable
 private fun formatRelativeTime(updatedMs: Long): String = DateUtils.getRelativeTimeSpanString(
@@ -341,7 +357,9 @@ fun SessionList(
     onLoadMoreSessions: () -> Unit = {},
     onRefreshSessions: () -> Unit = {},
     onOpenSettings: (() -> Unit)? = null,
-    onCollapseSessions: (() -> Unit)? = null
+    onCollapseSessions: (() -> Unit)? = null,
+    archiveControls: SessionArchiveControls? = null,
+    showArchiveFeedback: Boolean = false,
 ) {
     val attentionCounts = remember(sessions, attentionSessionIds) {
         attentionCountsBySession(sessions, attentionSessionIds)
@@ -360,6 +378,17 @@ fun SessionList(
         if (archivedExpanded) flattenVisibleTree(archivedTree, expandedSessionIds) else emptyList()
     }
     val listState = rememberLazyListState()
+    var selecting by remember(archiveControls?.scopeKey) { mutableStateOf(false) }
+    var selected by remember(archiveControls?.scopeKey) { mutableStateOf(emptySet<String>()) }
+    val archivePlan = remember(sessions, selected) { planSessionArchive(sessions, selected) }
+    val archiveRunning = archiveControls?.running == true
+    LaunchedEffect(archiveControls?.outcome) {
+        val outcome = archiveControls?.outcome ?: return@LaunchedEffect
+        if (selecting) {
+            selected -= outcome.archived + outcome.missing
+            if (selected.isEmpty()) selecting = false
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -373,14 +402,19 @@ fun SessionList(
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(stringResource(R.string.sessions_title), style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.weight(1f))
-                if (isLoadingMoreSessions) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else if (hasMoreSessions) {
-                    TextButton(onClick = onLoadMoreSessions) { Text(stringResource(R.string.sessions_load_older)) }
+                Text(stringResource(R.string.sessions_title), style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f), maxLines = 1)
+                if (archiveControls != null) {
+                    IconButton(
+                        onClick = { selecting = !selecting; selected = emptySet() },
+                        enabled = !archiveRunning && (selecting || (archiveControls.enabled && activeSessions.isNotEmpty())),
+                        modifier = Modifier.size(44.dp).testTag("session-archive-select"),
+                    ) {
+                        Icon(if (selecting) Icons.Default.Close else Icons.Default.CheckCircle,
+                            contentDescription = stringResource(if (selecting) R.string.sessions_archive_cancel else R.string.sessions_archive_select))
+                    }
                 }
-                IconButton(onClick = onCreateSession, modifier = Modifier.size(44.dp)) {
+                if (!selecting) IconButton(onClick = onCreateSession, modifier = Modifier.size(44.dp)) {
                     Icon(
                         Icons.Default.Add,
                         contentDescription = stringResource(R.string.sessions_new),
@@ -388,12 +422,12 @@ fun SessionList(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
-                if (onOpenSettings != null) {
+                if (!selecting && onOpenSettings != null) {
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.nav_settings))
                     }
                 }
-                if (onCollapseSessions != null) {
+                if (!selecting && onCollapseSessions != null) {
                     IconButton(onClick = onCollapseSessions) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.sessions_hide))
                     }
@@ -402,7 +436,7 @@ fun SessionList(
         }
         PullToRefreshBox(
             isRefreshing = isRefreshingSessions,
-            onRefresh = onRefreshSessions,
+            onRefresh = { if (!archiveRunning) onRefreshSessions() },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -420,6 +454,30 @@ fun SessionList(
                     item(key = "active_empty") { EmptySectionRow(stringResource(R.string.sessions_no_active)) }
                 }
                 itemsIndexed(activeRows, key = { _, (node, _) -> node.session.id }) { index, (node, depth) ->
+                    if (selecting) {
+                        val id = node.session.id
+                        Row(
+                            Modifier.fillMaxWidth().toggleable(
+                                value = id in selected,
+                                enabled = !archiveRunning,
+                                role = Role.Checkbox,
+                                onValueChange = { checked -> selected = if (checked) selected + id else selected - id },
+                            ).padding(start = (12 + 12 * depth.coerceAtMost(5)).dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = id in selected, onCheckedChange = null, enabled = !archiveRunning,
+                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp))
+                            Text(node.session.displayName, modifier = Modifier.weight(1f), maxLines = 2)
+                            if (node.children.isNotEmpty()) {
+                                val expanded = id in expandedSessionIds
+                                IconButton(onClick = { onToggleSessionExpanded(id) }, enabled = !archiveRunning) {
+                                    Icon(if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.ChevronRight,
+                                        stringResource(if (expanded) R.string.sessions_collapse else R.string.sessions_expand, node.session.displayName))
+                                }
+                            }
+                        }
+                        return@itemsIndexed
+                    }
                     SessionRowItem(
                         node = node,
                         depth = depth,
@@ -442,18 +500,29 @@ fun SessionList(
                         showDivider = index < activeRows.size - 1,
                     )
                 }
+                if (hasMoreSessions || isLoadingMoreSessions) item(key = "load_older") {
+                    Box(Modifier.fillMaxWidth().padding(4.dp), contentAlignment = Alignment.Center) {
+                        if (isLoadingMoreSessions) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            TextButton(onClick = onLoadMoreSessions, enabled = !archiveRunning) {
+                                Text(stringResource(R.string.sessions_load_older))
+                            }
+                        }
+                    }
+                }
 
-                item(key = "archived_header") {
+                if (!selecting) item(key = "archived_header") {
                     SessionSectionHeader(
                         title = stringResource(R.string.sessions_archived),
                         isExpanded = archivedExpanded,
                         onClick = { archivedExpanded = !archivedExpanded }
                     )
                 }
-                if (archivedExpanded && archivedRows.isEmpty()) {
+                if (!selecting && archivedExpanded && archivedRows.isEmpty()) {
                     item(key = "archived_empty") { EmptySectionRow(stringResource(R.string.sessions_no_archived)) }
                 }
-                itemsIndexed(archivedRows, key = { _, (node, _) -> node.session.id }) { index, (node, depth) ->
+                if (!selecting) itemsIndexed(archivedRows, key = { _, (node, _) -> node.session.id }) { index, (node, depth) ->
                     SessionRowItem(
                         node = node,
                         depth = depth,
@@ -478,7 +547,37 @@ fun SessionList(
                 }
             }
         }
+        if (showArchiveFeedback) archiveControls?.outcome?.let { outcome ->
+            Text(archiveOutcomeMessage(outcome),
+                modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("session-sheet-archive-result")
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                style = MaterialTheme.typography.bodySmall)
+        }
+        if (selecting && archiveControls != null) {
+            Column(Modifier.fillMaxWidth().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (archivePlan.additionalCount > 0) {
+                    Text(stringResource(R.string.sessions_archive_children, archivePlan.additionalCount),
+                        style = MaterialTheme.typography.labelMedium)
+                }
+                TextButton(
+                    onClick = { archiveControls.submit(selected, archivePlan.ids) },
+                    enabled = archiveControls.enabled && !archiveRunning && !isLoadingMoreSessions && archivePlan.ids.isNotEmpty(),
+                    modifier = Modifier.testTag("session-archive-submit"),
+                ) {
+                    Text(if (archiveRunning) stringResource(R.string.sessions_archiving)
+                        else stringResource(R.string.sessions_archive_submit, archivePlan.ids.size))
+                }
+            }
+        }
     }
+}
+
+@Composable
+internal fun archiveOutcomeMessage(outcome: SessionArchiveOutcome): String = when {
+    outcome.foundChildren -> stringResource(R.string.sessions_archive_review, outcome.archived.size)
+    outcome.remaining > 0 -> stringResource(R.string.sessions_archive_partial, outcome.archived.size, outcome.remaining)
+    outcome.archived.isEmpty() -> stringResource(R.string.sessions_archive_missing)
+    else -> stringResource(R.string.sessions_archive_success, outcome.archived.size)
 }
 
 @Composable

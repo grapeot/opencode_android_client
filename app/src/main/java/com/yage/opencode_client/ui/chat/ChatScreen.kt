@@ -41,6 +41,7 @@ import com.yage.opencode_client.ui.files.WorkspaceMarkdownLinkResolver
 import com.yage.opencode_client.util.OpenCodeDeepLinkParser
 import com.yage.opencode_client.ui.sanitizeBearerToken
 import kotlinx.coroutines.launch
+import com.yage.opencode_client.ui.session.SessionArchiveControls
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -265,6 +266,8 @@ fun ChatScreen(
                 onCreateSession = viewModel::createSession,
                 onDeleteSession = viewModel::deleteSession,
                 onArchiveSession = viewModel::archiveSession,
+                archiveControls = SessionArchiveControls(state.runtimeGeneration, state.isConnected,
+                    state.isArchivingSessions, state.sessionArchiveOutcome, viewModel::archiveSessions),
                 onRestoreSession = viewModel::restoreSession,
                 onLoadMoreSessions = viewModel::loadMoreSessions,
                 onRefreshSessions = viewModel::loadSessions,

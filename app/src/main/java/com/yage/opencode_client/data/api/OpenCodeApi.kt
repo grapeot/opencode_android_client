@@ -18,6 +18,9 @@ interface OpenCodeApi {
     @GET("session/{id}")
     suspend fun getSession(@Path("id") sessionId: String): Session
 
+    @GET("session/{id}/children")
+    suspend fun getSessionChildren(@Path("id") sessionId: String): List<Session>
+
     @PATCH("session/{id}")
     suspend fun updateSession(@Path("id") sessionId: String, @Body body: UpdateSessionRequest): Session
 

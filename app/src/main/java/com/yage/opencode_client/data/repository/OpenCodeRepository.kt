@@ -194,6 +194,8 @@ class OpenCodeRepository @Inject constructor() {
 
     suspend fun getSession(sessionId: String): Result<Session> = apiCall { api.getSession(sessionId) }
 
+    suspend fun getSessionChildren(sessionId: String): Result<List<Session>> = apiCall { api.getSessionChildren(sessionId) }
+
     suspend fun createSession(title: String? = null): Result<Session> = apiCall {
         api.createSession(CreateSessionRequest(title = title))
     }

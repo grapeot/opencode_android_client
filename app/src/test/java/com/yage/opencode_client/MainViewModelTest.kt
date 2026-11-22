@@ -2677,21 +2677,26 @@ class MainViewModelTest {
     fun `archiveSession archives subtree children before parent`() = runTest {
         val parent = Session(id = "parent", directory = "/tmp/project")
         val child = Session(id = "child", directory = "/tmp/project", parentId = "parent")
+        val archivedChild = child.copy(time = Session.TimeInfo(archived = 1_000))
+        coEvery { repository.getSessionChildren("child") } returns Result.success(emptyList())
+        coEvery { repository.getSessionChildren("parent") } returns Result.success(listOf(archivedChild))
         coEvery { repository.updateSessionArchived("child", any()) } returns Result.success(
-            child.copy(time = Session.TimeInfo(archived = 1_000))
+            archivedChild
         )
         coEvery { repository.updateSessionArchived("parent", any()) } returns Result.success(
             parent.copy(time = Session.TimeInfo(archived = 1_000))
         )
 
         val viewModel = createViewModel()
-        updateState(viewModel) { it.copy(sessions = listOf(parent, child)) }
+        updateState(viewModel) { it.copy(isConnected = true, sessions = listOf(parent, child)) }
 
         viewModel.archiveSession("parent")
         advanceUntilIdle()
 
         coVerifyOrder {
+            repository.getSessionChildren("child")
             repository.updateSessionArchived("child", any())
+            repository.getSessionChildren("parent")
             repository.updateSessionArchived("parent", any())
         }
         assertTrue(viewModel.state.value.sessions.all { it.isArchived })
