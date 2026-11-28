@@ -44,9 +44,12 @@ data class SessionListPaging(
     val canLoadMoreArchived: Boolean
         get() = usesFilteredList && hasLoadedArchived && hasMoreArchived && !isLoadingArchived
 
-    /** Archived rows are paged in as subtree tops; children arrive when a row expands. */
+    /**
+     * Archived rows page in as subtree tops and restored rows as roots; their
+     * children (archived or restored too) arrive when a row expands.
+     */
     fun mayHaveUnloadedChildren(session: Session): Boolean =
-        usesFilteredList && session.isArchived && session.id !in archivedChildrenLoadedIds
+        usesFilteredList && (session.isArchived || session.isRestored) && session.id !in archivedChildrenLoadedIds
 
     fun withArchivedPagesReset(): SessionListPaging = copy(
         loadedArchivedIds = emptySet(),
@@ -81,6 +84,9 @@ internal object SessionListPagingLimits {
     /** Restore walks a whole subtree; past this many rows it refuses instead of restoring part of it. */
     const val descendantRestoreCap = 3000
     const val descendantFetchConcurrency = 6
+    /** Restored roots are found by paging every root of the directory; see [fetchRestoredRoots]. */
+    const val restoredScanPageSize = 300
+    const val maxRestoredScanPages = 10
 }
 
 internal data class SessionListFetch(
@@ -92,6 +98,8 @@ internal data class SessionListFetch(
     val nextCursor: Long? = null,
     /** [AppState.sessionEventRevision] when the request started. */
     val startRevision: Long = 0,
+    /** Restored roots from a full scan; null when this load did not scan. */
+    val restoredRoots: List<Session>? = null,
 )
 
 private fun versionNumbers(version: String): List<Int>? {
@@ -228,6 +236,30 @@ internal suspend fun fetchActiveSessionPage(
     }
 
 /**
+ * Restore writes `archived = -1` and the server keeps it, so a restored row is
+ * neither in the unarchived list (which needs the field empty) nor archived.
+ * Restore always starts at a subtree top, and roots are a small share of all
+ * rows, so a full load pages every root with `archived=true&roots=true` and
+ * keeps the restored ones. Their restored children load on expand.
+ */
+internal suspend fun fetchRestoredRoots(repository: OpenCodeRepository, directory: String): Result<List<Session>> {
+    val restored = ArrayList<Session>()
+    var cursor: Long? = null
+    repeat(SessionListPagingLimits.maxRestoredScanPages) {
+        val from = cursor
+        val page = repository.getSessionPage(
+            directory, includeArchived = true, limit = SessionListPagingLimits.restoredScanPageSize,
+            cursor = from, rootsOnly = true,
+        ).getOrElse { return Result.failure(it) }
+        restored += page.rows.filter { it.isRestored }
+        val next = page.nextCursor
+        if (next == null || (from != null && next >= from)) return Result.success(restored)
+        cursor = next
+    }
+    return Result.success(restored)
+}
+
+/**
  * Unarchived rows when the host filters on the server, else the legacy recent-N
  * window. A null success keeps the list on screen: a filtering host whose
  * default directory cannot be resolved must not mix the legacy window in.
@@ -236,6 +268,7 @@ internal suspend fun fetchSessionList(
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
     legacyLimit: Int,
+    resetPaging: Boolean = false,
 ): Result<SessionListFetch?> {
     val generation = state.value.runtimeGeneration
     val version = state.value.serverVersion
@@ -256,7 +289,15 @@ internal suspend fun fetchSessionList(
             val page = result.getOrNull()
             if (page != null) {
                 setFilters(true)
-                return Result.success(SessionListFetch(page.rows, page.nextCursor != null, directory, page.nextCursor))
+                // A full load (a new list or pull to refresh) rescans restored roots;
+                // an incremental refresh keeps the ones already shown.
+                val fullLoad = resetPaging || state.value.sessionPaging.filteredDirectory != directory
+                val restored = if (!fullLoad) null else fetchRestoredRoots(repository, directory).getOrElse { error ->
+                    android.util.Log.w("SessionListPaging", "restored root scan failed: ${error.message}")
+                    null
+                }
+                return Result.success(SessionListFetch(page.rows, page.nextCursor != null, directory, page.nextCursor,
+                    restoredRoots = restored))
             }
             val error = result.exceptionOrNull()!!
             when {
@@ -317,13 +358,22 @@ internal fun applySessionListFetch(
     val boundary = fetched.nextCursor
     val deeper = if (!keepDeeper || boundary == null) emptyList() else current.sessions.filter { row ->
         val updated = row.time?.updated
-        !row.isArchived && row.id !in activeIds && updated != null && updated < boundary
+        !row.isArchived && !row.isRestored && row.id !in activeIds && updated != null && updated < boundary
     }
     val retained = current.sessions.filter {
         it.isArchived && it.id in next.loadedArchivedIds && it.id !in activeIds
     }
+    // The unarchived page never lists restored rows, so it cannot speak for
+    // them: keep the local ones, or take a fresh scan's roots plus local
+    // restored children (with their parent still listed) when this load scanned.
+    val localRestored = if (paging.filteredDirectory != directory) emptyList() else current.sessions.filter { it.isRestored }
+    val restored = fetched.restoredRoots?.let { roots ->
+        val rootIds = roots.mapTo(HashSet()) { it.id }
+        roots + localRestored.filter { it.parentId != null && it.id !in rootIds }
+    } ?: localRestored
+    val restoredRows = restored.filter { it.id !in activeIds && it.directory == directory }
     val sessions = mergeRefreshedSessionsPreservingLocalActivity(
-        pageRows + deeper + retained,
+        pageRows + restoredRows + deeper + retained,
         current.sessions,
         current.currentSessionId,
     )
@@ -371,7 +421,7 @@ internal fun applyArchivedSessionLoad(
         paging = paging.withArchivedPagesReset()
     }
     val tops = archivedSubtreeTops(collected, sessions)
-    sessions = addMissingSessions(sessions, tops)
+    sessions = addMissingSessions(sessions, tops + collected.filter { it.isRestored })
     paging = paging.copy(
         loadedArchivedIds = paging.loadedArchivedIds + tops.map { it.id },
         archivedCursor = if (exhausted) null else cursor,

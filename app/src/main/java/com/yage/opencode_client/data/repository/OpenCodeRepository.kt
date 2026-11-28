@@ -202,9 +202,11 @@ class OpenCodeRepository @Inject constructor() {
         includeArchived: Boolean,
         limit: Int,
         cursor: Long?,
+        rootsOnly: Boolean = false,
     ): Result<SessionPage> = apiCall {
         val query = linkedMapOf("limit" to maxOf(limit, 1).toString(), "directory" to directory)
         if (includeArchived) query["archived"] = "true"
+        if (rootsOnly) query["roots"] = "true"
         if (cursor != null) query["cursor"] = cursor.toString()
         val response = api.getSessionPage(query)
         if (!response.isSuccessful) throw retrofit2.HttpException(response)

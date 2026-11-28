@@ -1865,7 +1865,8 @@ class MainViewModel @Inject constructor(
             state = _state,
             onSelectSession = ::navigateToSession,
             onLoadSessionStatus = ::loadSessionStatus,
-            onLoadMessages = { sessionId -> loadMessages(sessionId) }
+            onLoadMessages = { sessionId -> loadMessages(sessionId) },
+            onLoadChildren = ::loadArchivedChildren,
         )
     }
 
@@ -1880,6 +1881,7 @@ class MainViewModel @Inject constructor(
             onLoadSessionStatus = ::loadSessionStatus,
             onLoadMessages = { sessionId -> loadMessages(sessionId) },
             resetPaging = true,
+            onLoadChildren = ::loadArchivedChildren,
             onLoaded = {
                 val paging = _state.value.sessionPaging
                 if (paging.hasLoadedArchived || paging.archivedLoadFailed) loadArchivedSessions(reset = true)

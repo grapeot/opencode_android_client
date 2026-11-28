@@ -56,6 +56,11 @@ class SessionListPagingTest {
         every { Log.w(any(), any<String>()) } returns 0
         repository = mockk(relaxed = true)
         coEvery { repository.getInstanceDirectory() } returns Result.success(dir)
+        restoredRoots(emptyList())
+    }
+
+    private fun restoredRoots(rows: List<Session>) {
+        coEvery { repository.getSessionPage(dir, true, 300, null, true) } returns Result.success(SessionPage(rows, null))
     }
 
     @After
@@ -482,6 +487,75 @@ class SessionListPagingTest {
 
         coVerify(exactly = 0) { repository.updateSessionArchived(any(), any()) }
         assertTrue(state.value.error.orEmpty().startsWith("Failed to restore session"))
+    }
+
+    // Restored rows (archived = -1)
+
+    @Test
+    fun `a full load lists restored roots as active and an incremental refresh keeps them`() = runTest {
+        activePage(null, listOf(row("a", 300)), next = 300)
+        restoredRoots(listOf(row("restored", 350, archived = -1), row("still-archived", 340, archived = 9)))
+        val state = state()
+        load(state)
+
+        assertEquals(listOf("a", "restored"), state.value.sessions.map { it.id })
+        val restored = state.value.sessions.single { it.id == "restored" }
+        assertTrue(restored.isRestored)
+        assertFalse(restored.isArchived)
+        assertTrue(state.value.sessionPaging.mayHaveUnloadedChildren(restored))
+
+        // An incremental refresh does not rescan and does not treat the row as vanished.
+        load(state)
+        assertTrue(state.value.sessions.any { it.id == "restored" })
+        coVerify(exactly = 1) { repository.getSessionPage(dir, true, 300, null, true) }
+
+        // Pull to refresh rescans; a row archived again elsewhere leaves.
+        restoredRoots(emptyList())
+        load(state, resetPaging = true)
+        assertEquals(listOf("a"), state.value.sessions.map { it.id })
+        coVerify(exactly = 2) { repository.getSessionPage(dir, true, 300, null, true) }
+    }
+
+    @Test
+    fun `restored rows keep their loaded children and are not duplicated as deeper rows`() = runTest {
+        activePage(null, listOf(row("a", 300)), next = 300)
+        restoredRoots(listOf(row("restored", 100, archived = -1)))
+        coEvery { repository.getSessionChildren("restored") } returns
+            Result.success(listOf(row("kid", 90, archived = -1, parent = "restored")))
+        val state = state()
+        load(state)
+        launchLoadArchivedChildren(this, repository, state, "restored")
+        advanceUntilIdle()
+        assertEquals(listOf("a", "restored", "kid"), state.value.sessions.map { it.id })
+
+        load(state)
+        assertEquals(listOf("a", "restored", "kid"), state.value.sessions.map { it.id })
+        restoredRoots(listOf(row("restored", 100, archived = -1)))
+        load(state, resetPaging = true)
+        assertEquals(listOf("a", "restored", "kid"), state.value.sessions.map { it.id })
+    }
+
+    @Test
+    fun `a failed restored scan still loads the active page`() = runTest {
+        activePage(null, listOf(row("a", 300)), next = null)
+        coEvery { repository.getSessionPage(dir, true, 300, null, true) } returns Result.failure(httpError(500))
+        val state = state()
+        load(state)
+        assertEquals(listOf("a"), state.value.sessions.map { it.id })
+        assertNull(state.value.error)
+    }
+
+    @Test
+    fun `the restored scan pages every root and stops at the cap`() = runTest {
+        var calls = 0
+        coEvery { repository.getSessionPage(dir, true, 300, any(), true) } answers {
+            calls += 1
+            val cursor = arg<Long?>(3) ?: 100_000L
+            Result.success(SessionPage(listOf(row("r$calls", cursor - 1, archived = -1)), cursor - 10))
+        }
+        val roots = com.yage.opencode_client.ui.fetchRestoredRoots(repository, dir).getOrThrow()
+        assertEquals(10, calls)
+        assertEquals(10, roots.size)
     }
 
     // SSE scope

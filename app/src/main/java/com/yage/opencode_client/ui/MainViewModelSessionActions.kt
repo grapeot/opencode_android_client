@@ -31,12 +31,14 @@ internal fun launchLoadSessions(
     onLoadMessages: (String) -> Unit,
     resetPaging: Boolean = false,
     onLoaded: () -> Unit = {},
+    onLoadChildren: (String) -> Unit = {},
 ) {
     scope.launch {
         val requestLimit = maxOf(state.value.loadedSessionLimit, MainViewModelTimings.sessionPageSize)
         val startRevision = state.value.sessionEventRevision
         state.update { it.copy(isRefreshingSessions = true) }
-        val result = fetchSessionList(repository, state, requestLimit).map { it?.copy(startRevision = startRevision) }
+        val result = fetchSessionList(repository, state, requestLimit, resetPaging)
+            .map { it?.copy(startRevision = startRevision) }
         ensureActive()
         result
             .onSuccess { fetched ->
@@ -57,6 +59,14 @@ internal fun launchLoadSessions(
                     }
                 }
                 if (!accepted) return@onSuccess
+                if (fetched.restoredRoots != null) {
+                    // Restored roots arrive without children; rows left expanded reload theirs.
+                    val loaded = state.value
+                    loaded.expandedSessionIds.forEach { id ->
+                        val session = loaded.sessions.firstOrNull { it.id == id } ?: return@forEach
+                        if (loaded.sessionPaging.mayHaveUnloadedChildren(session)) onLoadChildren(id)
+                    }
+                }
                 val currentId = state.value.currentSessionId
                 val refreshedSessions = state.value.sessions
                 val hasCurrentSession = currentId != null && refreshedSessions.any { it.id == currentId }

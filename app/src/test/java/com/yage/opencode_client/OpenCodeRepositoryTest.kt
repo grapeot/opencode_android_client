@@ -253,7 +253,7 @@ class OpenCodeRepositoryTest {
         val session = Session(id = "session-1", directory = "/project")
         server.enqueue(jsonResponse(json.encodeToString(listOf(session))).setHeader("x-next-cursor", "1700"))
 
-        val page = repository.getSessionPage("/project dir", includeArchived = true, limit = 300, cursor = 1800).getOrThrow()
+        val page = repository.getSessionPage("/project dir", includeArchived = true, limit = 300, cursor = 1800, rootsOnly = true).getOrThrow()
 
         assertEquals(listOf("session-1"), page.rows.map { it.id })
         assertEquals(1700L, page.nextCursor)
@@ -263,6 +263,7 @@ class OpenCodeRepositoryTest {
         assertEquals("/project dir", url.queryParameter("directory"))
         assertEquals("true", url.queryParameter("archived"))
         assertEquals("1800", url.queryParameter("cursor"))
+        assertEquals("true", url.queryParameter("roots"))
     }
 
     @Test
@@ -275,6 +276,7 @@ class OpenCodeRepositoryTest {
         val url = server.takeRequest().requestUrl!!
         assertNull(url.queryParameter("archived"))
         assertNull(url.queryParameter("cursor"))
+        assertNull(url.queryParameter("roots"))
 
         val error = repository.getSessionPage("/project", includeArchived = false, limit = 400, cursor = null).exceptionOrNull()
         assertEquals(404, (error as retrofit2.HttpException).code())

@@ -12,8 +12,9 @@
 - [ ] 已知限制（与 iOS 一致，未改）：活跃父会话在第一页、子会话在更深页时，展开只看到已加载的子会话；父会话在深页时子会话暂作孤儿根显示。
 - [x] Load more 位置：#145 起已在列表最底端（归档区之后），与 iOS 一致，本次未动。
 - [x] 独立 review 后修正：SSE 的 session 解析改用 `ignoreUnknownKeys`（server 行带 `permission`、`workspaceID`、`time.compacting` 等未建模字段，原严格解析会失败，以前靠消息事件的全量重拉掩盖）；`session.created` 读 server 实际的 `info` 字段；首页请求进行中 SSE 改过的行（新 sub-agent、外部归档、删除）以本地为准，不被旧响应覆盖；冷启动恢复的选中会话不在首页时单独 `GET /session/:id`，404 才改选第一个；没有解析出目录时 SSE 只更新已列出或选中的行（与 iOS 一致），legacy host 也解析一次目录用于过滤；归档区首次加载失败显示重试行，下拉刷新也会重试；归档区再次展开不再自动多翻一页（与 iOS 不同，iOS 每次展开都会再拉一批）。
-- [ ] **未修，待决定**：恢复归档写 `archived = -1`，server 原样存入 `time_archived`，而 `/experimental/session` 的未归档过滤是 `time_archived IS NULL`，所以恢复过的会话（含历史上恢复过的）在过滤路径下活跃区和归档区都看不到；PATCH 没有能清成 null 的值。iOS #233 同样受影响。
-- [x] 验证：新增 `SessionListPagingTest` 34 项、`OpenCodeRepositoryTest` 3 项、`MainViewModelTest` 2 项，改写 7 项 SSE 断言；`testDebugUnitTest` 835 项 0 失败。
+- [x] 恢复过的会话：恢复归档写 `archived = -1`，server 原样存入 `time_archived`（projector 用 `.set(sessionRow)`，undefined 字段跳过，PATCH 只接受数字，没有能清空的写法），而 `/experimental/session` 的未归档过滤是 `time_archived IS NULL`，恢复过的会话（含历史上恢复的）在过滤路径下两个区都看不到。客户端修法：`Session.isRestored`（`archived` 非空且 ≤ 0）；完整加载（新列表、下拉刷新）额外用 `archived=true&roots=true` 分页扫一遍该目录的根（每页 300、最多 10 页），恢复过的根放进活跃区，子会话展开时懒加载；增量刷新不重扫，也不把恢复行当成首页范围内消失的行删掉；扫描失败只记日志，不影响活跃列表。依据：恢复总是从子树顶端开始，根只占全部行的一小部分。
+- [ ] 已知限制：活跃父会话下单独归档又恢复的子会话不是根，扫不到；本设备恢复的会留在列表里，别处恢复的要等打开归档区翻到它。
+- [x] 验证：新增 `SessionListPagingTest` 38 项、`OpenCodeRepositoryTest` 3 项、`MainViewModelTest` 2 项，改写 7 项 SSE 断言；`testDebugUnitTest` 839 项 0 失败。
 
 ## 2026-10-17 — PR #138 真机反馈修复与双端共享 PM 提示词
 
