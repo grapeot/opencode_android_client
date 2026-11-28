@@ -1,5 +1,18 @@
 # OpenCode Android 客户端工作日志
 
+## 2026-11-27 — Session 列表按服务端分页，SSE 不再重拉列表（对齐 iOS #233/#234）
+
+- **起因**：Android 和 iOS 改之前一样，用 `GET /session?limit=N` 拉最近窗口，归档行混在里面，load more 加大 limit 后从头重拉。调研另外发现 `handleIncomingSseEvent` 在 `session.created`、`session.updated`、当前会话转 idle，以及任何非当前会话的 `message.created/updated` 上都调完整的 `loadSessions()`，没有防抖；后台 sub-agent 运行时每个消息事件都重拉整个窗口。
+- [x] 活跃列表改走 `GET /experimental/session`：首屏拉实例目录（`GET /path`，退而 `project/current` 的 worktree）最新 400 条未归档行；load more 跟随 `x-next-cursor`，不重下前面的页；游标不严格递减即视为到底。服务端在 `/` 启动时缓存为 `""`，走旧窗口。
+- [x] 非下拉的刷新只重拉第一页并合并：第一页边界之内消失的行即被归档或删除，移除；更早的深页原样保留；load more 过的保留更深的游标。下拉刷新（列表与弹出 sheet 的下拉）重置分页；打开 sheet 时的自动刷新仍是增量。
+- [x] 老 server：health 版本明确低于 1.2.11 不探测；404/405/501 或 HTML 200 解码失败按 host 记住并回退旧窗口；版本不可判定（nil、`local`、`0.0.0-…`）的探测错误只本次回退；已知版本的其它错误照常报出。健康检查成功后重置探测结论和目录。
+- [x] 归档区展开时才按页拉归档子树顶端（一次最多 4 页 × 300 行，凑够 50 个顶端为止），列表底部有归档区自己的 Load older；归档行展开时懒加载 `/children`；恢复归档先逐层（并发 6，上限 3000）拉齐后代再按父先子后 PATCH，任一层失败不 PATCH。只有分页或展开进来的归档行在刷新后保留；本设备批量归档的行落在已加载窗口内才保留。
+- [x] SSE：`session.created/updated` 只接受当前列表目录、已在列表或当前选中的行；所有事件都不再重拉列表（server 对标题、时间、摘要、归档变化都发 `session.updated`，消息事件不改 session 行）。新增 `session.deleted`：移除非当前行。SSE 重连（非首次打开）补一次第一页刷新，覆盖断流期间漏掉的变化。
+- [x] 顺带：列表收窄到一个目录后，`loadSessionStatus` 按目录逐个请求 `session/status` 也随之只剩一个目录。
+- [ ] 已知限制（与 iOS 一致，未改）：活跃父会话在第一页、子会话在更深页时，展开只看到已加载的子会话；父会话在深页时子会话暂作孤儿根显示。
+- [x] Load more 位置：#145 起已在列表最底端（归档区之后），与 iOS 一致，本次未动。
+- [x] 验证：新增 `SessionListPagingTest` 29 项、`OpenCodeRepositoryTest` 3 项、`MainViewModelTest` 2 项，改写 5 项 SSE 断言；`testDebugUnitTest` 831 项 0 失败。
+
 ## 2026-10-17 — PR #138 真机反馈修复与双端共享 PM 提示词
 
 - **版本与真机安装状态**：在 TriFold 首版基线（`970b716`）之上分两阶段完成原位安装与启动验证。两个包均含共享 PM 提示词，第二阶段另含 `16dp` 音量行右侧留白与两位小数展示。PR #138 保持未合并。

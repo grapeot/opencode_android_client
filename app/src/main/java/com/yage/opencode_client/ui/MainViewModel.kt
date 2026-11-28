@@ -2960,6 +2960,8 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(streamGeneration = it.streamGeneration + 1) }
         sseJob?.cancel()
         _state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
+        // The first open follows loadInitialData, which already loaded the list.
+        var reopened = false
         sseJob = launchSseCollection(
             hostRuntimeScope,
             repository,
@@ -2978,6 +2980,10 @@ class MainViewModel @Inject constructor(
                 if (sessionId != null && current.sessionStatuses[sessionId]?.isBusy != true) {
                     loadMessages(sessionId, false)
                 }
+                // SSE no longer re-fetches the list per event, so a reopen
+                // reconciles session rows changed while the stream was down.
+                if (reopened) loadSessions()
+                reopened = true
                 loadSessionStatus()
                 loadPendingPermissions()
                 loadPendingQuestions()
@@ -2991,7 +2997,6 @@ class MainViewModel @Inject constructor(
             state = _state,
             event = event,
             onRefreshMessages = ::loadMessagesWithRetry,
-            onRefreshSessions = ::loadSessions,
             onLoadPendingPermissions = ::loadPendingPermissions,
             onNonFatalIssue = { message -> reportNonFatalIssue(TAG, message) },
             onRecordUserMessage = { sessionId, messageId ->

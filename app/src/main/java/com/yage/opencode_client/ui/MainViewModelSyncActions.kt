@@ -124,7 +124,6 @@ internal fun handleIncomingSseEvent(
     state: MutableStateFlow<AppState>,
     event: SSEEvent,
     onRefreshMessages: (String, Boolean) -> Unit,
-    onRefreshSessions: () -> Unit,
     onLoadPendingPermissions: () -> Unit,
     onNonFatalIssue: (String) -> Unit,
     onRecordUserMessage: (String, String) -> Unit = { _, _ -> },
@@ -134,12 +133,14 @@ internal fun handleIncomingSseEvent(
         current.copy(inputText = mergeSendFailure(recovered, current.inputText))
     },
 ) {
+    // Session rows change in place: the server publishes session.updated for
+    // every title, time, summary and archive change, so no event here re-fetches
+    // the session list. Message events never change a session row.
     when (event.payload.type) {
         "session.created" -> {
             val created = parseSessionCreatedEvent(event)
             if (created != null) {
                 state.update { if (sessionEventApplies(it, created.session)) it.copy(sessions = upsertSession(it.sessions, created.session)) else it }
-                onRefreshSessions()
             } else {
                 onNonFatalIssue("Ignoring invalid session.created payload")
             }
@@ -148,9 +149,15 @@ internal fun handleIncomingSseEvent(
             val updated = parseSessionUpdatedEvent(event)
             if (updated != null) {
                 state.update { if (sessionEventApplies(it, updated)) it.copy(sessions = upsertSession(it.sessions, updated)) else it }
-                onRefreshSessions()
             } else {
                 onNonFatalIssue("Ignoring invalid session.updated payload")
+            }
+        }
+        "session.deleted" -> {
+            // The selected row stays so the open chat is not yanked away.
+            val sessionId = event.payload.getString("sessionID") ?: event.payload.getString("id")
+            if (sessionId != null && sessionId != state.value.currentSessionId) {
+                state.update { it.copy(sessions = it.sessions.filterNot { row -> row.id == sessionId }) }
             }
         }
         "session.status" -> {
@@ -178,7 +185,6 @@ internal fun handleIncomingSseEvent(
                             partTypeIndex = emptyMap()
                         )
                     }
-                    onRefreshSessions()
                     onRefreshMessages(statusEvent.sessionId, false)
                 }
             } else {
@@ -194,11 +200,8 @@ internal fun handleIncomingSseEvent(
                     if (info != null) {
                         upsertMessageInfo(state, info)
                     } else {
-                        onRefreshSessions()
                         onRefreshMessages(sessionId, true)
                     }
-                } else {
-                    onRefreshSessions()
                 }
             }
         }
@@ -211,11 +214,8 @@ internal fun handleIncomingSseEvent(
                     if (info != null) {
                         upsertMessageInfo(state, info)
                     } else {
-                        onRefreshSessions()
                         onRefreshMessages(sessionId, false)
                     }
-                } else {
-                    onRefreshSessions()
                 }
             }
         }
