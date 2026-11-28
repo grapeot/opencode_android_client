@@ -113,6 +113,9 @@ class MainViewModelTest {
         every { Log.e(any<String>(), any<String>(), any<Throwable>()) } returns 0
 
         repository = mockk(relaxed = true)
+        // No resolvable session list directory: the list keeps the legacy /session window.
+        coEvery { repository.getInstanceDirectory() } returns Result.success(null)
+        coEvery { repository.getCurrentProjectWorktree() } returns Result.success(null)
         settingsManager = mockk(relaxed = true)
         voiceFlowClient = mockk(relaxed = true)
         microphone = mockk(relaxed = true)

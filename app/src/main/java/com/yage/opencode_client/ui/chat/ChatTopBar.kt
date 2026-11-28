@@ -91,6 +91,8 @@ internal data class ChatTopBarState(
     val isLoadingMoreSessions: Boolean,
     val isRefreshingSessions: Boolean = false,
     val expandedSessionIds: Set<String> = emptySet(),
+    val archivedPaging: com.yage.opencode_client.ui.session.ArchivedSessionPagingUi =
+        com.yage.opencode_client.ui.session.ArchivedSessionPagingUi(),
     val availableModels: List<AppState.ModelOption>,
     val selectedModelIndex: Int,
     val contextUsage: AppState.ContextUsage?,
@@ -120,6 +122,8 @@ internal data class ChatTopBarActions(
     val onRestoreSession: (String) -> Unit = {},
     val onLoadMoreSessions: () -> Unit,
     val onRefreshSessions: () -> Unit = {},
+    /** Pull to refresh in the session sheet; resets paging, unlike the refresh on opening it. */
+    val onPullRefreshSessions: () -> Unit = {},
     val onToggleSessionExpanded: (String) -> Unit = {},
     val onSelectModel: (Int) -> Unit,
     val onManageModels: () -> Unit = {},
@@ -513,8 +517,9 @@ internal fun ChatTopBar(
                     showArchiveFeedback = true,
                     onRestoreSession = actions.onRestoreSession,
                     onLoadMoreSessions = actions.onLoadMoreSessions,
-                    onRefreshSessions = actions.onRefreshSessions,
+                    onRefreshSessions = actions.onPullRefreshSessions,
                     onToggleSessionExpanded = actions.onToggleSessionExpanded,
+                    archivedPaging = state.archivedPaging,
                     onOpenSettings = null
                 )
             }

@@ -52,6 +52,7 @@ import com.yage.opencode_client.ambient.ui.AmbientNavigationTags
 import com.yage.opencode_client.ambient.ui.AmbientRoute
 import com.yage.opencode_client.ui.AppWidthClass
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.archivedPagingUi
 import com.yage.opencode_client.ui.resolveWorkspacePresentation
 import com.yage.opencode_client.ui.WorkspacePresentation
 import com.yage.opencode_client.ui.DeepLinkError
@@ -592,8 +593,9 @@ private fun TabletLayout(
                             state.isArchivingSessions, state.sessionArchiveOutcome, viewModel::archiveSessions),
                         onRestoreSession = { viewModel.restoreSession(it) },
                         onLoadMoreSessions = { viewModel.loadMoreSessions() },
-                        onRefreshSessions = { viewModel.loadSessions() },
+                        onRefreshSessions = { viewModel.refreshSessions() },
                         onToggleSessionExpanded = { viewModel.toggleSessionExpanded(it) },
+                        archivedPaging = state.archivedPagingUi { viewModel.loadArchivedSessions() },
                         onOpenSettings = { selectedTab = 1 },
                         onCollapseSessions = { sessionsPaneCollapsed = true }
                     )

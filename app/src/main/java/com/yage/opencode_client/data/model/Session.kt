@@ -54,6 +54,8 @@ data class Session(
     )
 }
 
+data class SessionPage(val rows: List<Session>, val nextCursor: Long?)
+
 @Serializable
 data class SessionStatus(
     val type: String,

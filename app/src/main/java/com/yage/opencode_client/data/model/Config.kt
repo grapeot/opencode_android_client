@@ -6,6 +6,13 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonElement
 
+/** `GET /path`; `directory` is the instance directory sessions record. */
+@Serializable
+data class PathInfo(val directory: String? = null)
+
+@Serializable
+data class ProjectInfo(val worktree: String? = null)
+
 @Serializable
 data class HealthResponse(
     val healthy: Boolean,

@@ -343,6 +343,23 @@ private fun BoxScope.SwipeActionBackground(
     }
 }
 
+/**
+ * Archived rows page in from the server once the section opens. A legacy
+ * window carries archived rows itself, leaves [filteredDirectory] null, and
+ * shows no paging row.
+ */
+data class ArchivedSessionPagingUi(
+    val filteredDirectory: String? = null,
+    val isLoading: Boolean = false,
+    val hasLoaded: Boolean = false,
+    val canLoadMore: Boolean = false,
+    val childrenLoadedIds: Set<String> = emptySet(),
+    val onLoad: () -> Unit = {},
+) {
+    fun mayHaveUnloadedChildren(session: Session): Boolean =
+        filteredDirectory != null && session.isArchived && session.id !in childrenLoadedIds
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionList(
@@ -370,6 +387,7 @@ fun SessionList(
     onCollapseSessions: (() -> Unit)? = null,
     archiveControls: SessionArchiveControls? = null,
     showArchiveFeedback: Boolean = false,
+    archivedPaging: ArchivedSessionPagingUi = ArchivedSessionPagingUi(),
 ) {
     val attentionCounts = remember(sessions, attentionSessionIds) {
         attentionCountsBySession(sessions, attentionSessionIds)
@@ -386,6 +404,9 @@ fun SessionList(
     var archivedExpanded by remember { mutableStateOf(false) }
     val archivedRows = remember(archivedTree, expandedSessionIds, archivedExpanded) {
         if (archivedExpanded) flattenVisibleTree(archivedTree, expandedSessionIds) else emptyList()
+    }
+    LaunchedEffect(archivedExpanded, archivedPaging.filteredDirectory) {
+        if (archivedExpanded) archivedPaging.onLoad()
     }
     val listState = rememberLazyListState()
     var selecting by remember(archiveControls?.scopeKey) { mutableStateOf(false) }
@@ -501,7 +522,9 @@ fun SessionList(
                         onClick = { archivedExpanded = !archivedExpanded }
                     )
                 }
-                if (!selecting && archivedExpanded && archivedRows.isEmpty()) {
+                val archivedPending = archivedPaging.filteredDirectory != null &&
+                    (archivedPaging.isLoading || !archivedPaging.hasLoaded)
+                if (!selecting && archivedExpanded && archivedRows.isEmpty() && !archivedPending) {
                     item(key = "archived_empty") { EmptySectionRow(stringResource(R.string.sessions_no_archived)) }
                 }
                 if (!selecting) itemsIndexed(archivedRows, key = { _, (node, _) -> node.session.id }) { index, (node, depth) ->
@@ -519,6 +542,7 @@ fun SessionList(
                         listIsScrolling = listState.isScrollInProgress,
                         expandedSessionIds = expandedSessionIds,
                         isArchived = true,
+                        mayHaveUnloadedChildren = archivedPaging.mayHaveUnloadedChildren(node.session),
                         onSelectSession = onSelectSession,
                         onDeleteSession = onDeleteSession,
                         onArchiveSession = onArchiveSession,
@@ -527,17 +551,16 @@ fun SessionList(
                         showDivider = index < archivedRows.size - 1,
                     )
                 }
+                if (!selecting && archivedExpanded && archivedPaging.filteredDirectory != null &&
+                    (archivedPaging.isLoading || archivedPaging.canLoadMore)
+                ) {
+                    item(key = "archived_load_older") {
+                        LoadOlderRow(isLoading = archivedPaging.isLoading, enabled = !archiveRunning, onClick = archivedPaging.onLoad)
+                    }
+                }
                 if (hasMoreSessions || isLoadingMoreSessions) {
                     item(key = "load_older") {
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            if (isLoadingMoreSessions) {
-                                CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(18.dp), strokeWidth = 2.dp)
-                            } else {
-                                TextButton(onClick = onLoadMoreSessions, enabled = !archiveRunning) {
-                                    Text(stringResource(R.string.sessions_load_older))
-                                }
-                            }
-                        }
+                        LoadOlderRow(isLoading = isLoadingMoreSessions, enabled = !archiveRunning, onClick = onLoadMoreSessions)
                     }
                 }
             }
@@ -574,6 +597,19 @@ internal fun archiveOutcomeMessage(outcome: SessionArchiveOutcome): String = whe
     outcome.remaining > 0 -> stringResource(R.string.sessions_archive_partial, outcome.archived.size, outcome.remaining)
     outcome.archived.isEmpty() -> stringResource(R.string.sessions_archive_missing)
     else -> stringResource(R.string.sessions_archive_success, outcome.archived.size)
+}
+
+@Composable
+private fun LoadOlderRow(isLoading: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        if (isLoading) {
+            CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(18.dp), strokeWidth = 2.dp)
+        } else {
+            TextButton(onClick = onClick, enabled = enabled) {
+                Text(stringResource(R.string.sessions_load_older))
+            }
+        }
+    }
 }
 
 @Composable
@@ -633,10 +669,11 @@ private fun SessionRowItem(
     showDivider: Boolean,
     archiveChecked: Boolean? = null,
     archiveSelectionEnabled: Boolean = true,
+    mayHaveUnloadedChildren: Boolean = false,
 ) {
     val session = node.session
     val isSelected = session.id == currentSessionId
-    val hasChildren = node.children.isNotEmpty()
+    val hasChildren = node.children.isNotEmpty() || mayHaveUnloadedChildren
     val isExpanded = expandedSessionIds.contains(session.id)
     val density = LocalDensity.current
     val actionWidthPx = with(density) { 72.dp.toPx() }

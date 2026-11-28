@@ -12,6 +12,16 @@ interface OpenCodeApi {
     @GET("session")
     suspend fun getSessions(@Query("limit") limit: Int? = null): List<Session>
 
+    /** Filters archive state on the server; the next page cursor is the `x-next-cursor` header. */
+    @GET("experimental/session")
+    suspend fun getSessionPage(@QueryMap query: Map<String, String>): Response<List<Session>>
+
+    @GET("path")
+    suspend fun getPath(): PathInfo
+
+    @GET("project/current")
+    suspend fun getCurrentProject(): ProjectInfo
+
     @POST("session")
     suspend fun createSession(@Body body: CreateSessionRequest = CreateSessionRequest()): Session
 
