@@ -23,6 +23,7 @@ import com.yage.opencode_client.data.model.ProviderRegistryResponse
 import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
+import com.yage.opencode_client.ui.SessionListPaging
 import com.yage.opencode_client.ssh.SSHKeyManager
 import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ui.AppState
@@ -113,6 +114,9 @@ class MainViewModelTest {
         every { Log.e(any<String>(), any<String>(), any<Throwable>()) } returns 0
 
         repository = mockk(relaxed = true)
+        // No resolvable session list directory: the list keeps the legacy /session window.
+        coEvery { repository.getInstanceDirectory() } returns Result.success(null)
+        coEvery { repository.getCurrentProjectWorktree() } returns Result.success(null)
         settingsManager = mockk(relaxed = true)
         voiceFlowClient = mockk(relaxed = true)
         microphone = mockk(relaxed = true)
@@ -826,6 +830,31 @@ class MainViewModelTest {
         connected.captured!!.invoke(); runCurrent()
         coVerify { repository.getPendingPermissions() }
         coVerify { repository.getPendingQuestions() }
+    }
+
+    @Test fun `sse reopen reloads the session list but the first open does not`() = runTest {
+        val vm = createViewModel()
+        val connected = slot<(() -> Unit)?>()
+        every { repository.connectSSE(captureNullable(connected), any()) } returns emptyFlow()
+        invokePrivateNoArgs(vm, "startSSE"); runCurrent()
+        connected.captured!!.invoke(); advanceUntilIdle()
+        coVerify(exactly = 0) { repository.getSessions(any()) }
+        connected.captured!!.invoke(); advanceUntilIdle()
+        coVerify(exactly = 1) { repository.getSessions(any()) }
+    }
+
+    @Test fun `session deleted SSE removes other rows and keeps the selected one`() = runTest {
+        val vm = createViewModel()
+        updateState(vm) {
+            it.copy(currentSessionId = "current", sessions = listOf(Session("current", directory = "/p"), Session("gone", directory = "/p")))
+        }
+        for (id in listOf("gone", "current")) {
+            handleSse(vm, SSEEvent(payload = SSEPayload(type = "session.deleted",
+                properties = buildJsonObject { put("sessionID", JsonPrimitive(id)) })))
+        }
+        advanceUntilIdle()
+        assertEquals(listOf("current"), vm.state.value.sessions.map { it.id })
+        coVerify(exactly = 0) { repository.getSessions(any()) }
     }
 
     @Test fun `failed status snapshot does not confirm null and scoped snapshot does`() = runTest {
@@ -1964,7 +1993,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `session updated SSE refreshes session list from server`() = runTest {
+    fun `session updated SSE updates the row in place without a list refresh`() = runTest {
         val updatedSessions = listOf(
             com.yage.opencode_client.data.model.Session(
                 id = "session-1",
@@ -2002,14 +2031,14 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        coVerify { repository.getSessions(400) }
-        assertEquals("Server Refreshed", viewModel.state.value.sessions.single().title)
+        coVerify(exactly = 0) { repository.getSessions(any()) }
+        assertEquals("SSE Only", viewModel.state.value.sessions.single().title)
     }
 
     @Test
     fun `session updated SSE title survives a stale concurrent refresh`() = runTest {
         // The server's session.updated event carries the generated title with a fresh timestamp,
-        // but the full refresh it triggers returns a stale snapshot (placeholder title, older
+        // but a concurrent full refresh returns a stale snapshot (placeholder title, older
         // timestamp). The freshly received title must remain visible (Chat header reads it from
         // state.sessions) rather than being clobbered by the stale refresh.
         coEvery { repository.getSessions(400) } returns Result.success(
@@ -2060,6 +2089,7 @@ class MainViewModelTest {
                 )
             )
         )
+        viewModel.loadSessions()
         advanceUntilIdle()
 
         coVerify { repository.getSessions(400) }
@@ -2112,9 +2142,8 @@ class MainViewModelTest {
         advanceTimeBy(1000)
         advanceUntilIdle()
 
-        // Other-session message events refresh the session list; the chained
-        // current-session messages refresh is a loadSessions side effect.
-        coVerify { repository.getSessions(any()) }
+        // Message events never change a session row; session.updated covers that.
+        coVerify(exactly = 0) { repository.getSessions(any()) }
         coVerify(exactly = 0) { repository.getMessages("session-2", any()) }
         assertEquals(listOf("session-2", "session-1"), viewModel.state.value.sessions.map { it.id })
     }
@@ -2143,8 +2172,9 @@ class MainViewModelTest {
         advanceTimeBy(1000)
         advanceUntilIdle()
 
-        // No parseable info payload: fall back to both REST refreshes.
-        coVerify { repository.getSessions(any()) }
+        // No parseable info payload: refresh the messages, not the session list.
+        coVerify { repository.getMessages("session-1", any()) }
+        coVerify(exactly = 0) { repository.getSessions(any()) }
         assertEquals(messages, viewModel.state.value.messages)
     }
 
@@ -2482,7 +2512,7 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `sse refresh after load more keeps expanded window`() = runTest {
+    fun `sse events after load more keep the expanded window without refetching`() = runTest {
         coEvery { repository.getSessions(800) } returns Result.success(numberedSessions(800))
         val viewModel = createViewModel()
         updateState(viewModel) {
@@ -2537,10 +2567,9 @@ class MainViewModelTest {
         )
         advanceUntilIdle()
 
-        // session.updated + session.status idle refresh the session list;
-        // message.updated on a non-current session no longer does.
-        coVerify(atLeast = 2) { repository.getSessions(800) }
-        coVerify(exactly = 0) { repository.getSessions(400) }
+        // SSE updates rows in place; none of these events re-fetch the list.
+        coVerify(exactly = 0) { repository.getSessions(any()) }
+        assertEquals("Updated", viewModel.state.value.sessions.single { it.id == "session-20" }.title)
         assertEquals(800, viewModel.state.value.loadedSessionLimit)
         assertTrue(viewModel.state.value.sessions.any { it.id == "session-650" })
     }
@@ -3557,7 +3586,10 @@ class MainViewModelTest {
     fun `handleSSEEvent session created prepends parsed session`() = runTest {
         val viewModel = createViewModel()
         updateState(viewModel) {
-            it.copy(sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")))
+            it.copy(
+                sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")),
+                sessionPaging = SessionListPaging(defaultDirectory = "/tmp/project"),
+            )
         }
 
         handleSse(
@@ -3566,8 +3598,9 @@ class MainViewModelTest {
                 payload = SSEPayload(
                     type = "session.created",
                     properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-2"))
                         put(
-                            "session",
+                            "info",
                             buildJsonObject {
                                 put("id", JsonPrimitive("session-2"))
                                 put("directory", JsonPrimitive("/tmp/project"))
@@ -3620,9 +3653,10 @@ class MainViewModelTest {
     fun `handleSSEEvent session updated inserts unknown session`() = runTest {
         val viewModel = createViewModel()
         updateState(viewModel) {
-            it.copy(sessions = listOf(
-                com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")
-            ))
+            it.copy(
+                sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")),
+                sessionPaging = SessionListPaging(defaultDirectory = "/tmp/new"),
+            )
         }
 
         handleSse(

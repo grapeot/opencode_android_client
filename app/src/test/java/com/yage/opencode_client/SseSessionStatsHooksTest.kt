@@ -22,7 +22,6 @@ class SseSessionStatsHooksTest {
             state = state,
             event = event,
             onRefreshMessages = { _, _ -> },
-            onRefreshSessions = { },
             onLoadPendingPermissions = { },
             onNonFatalIssue = { },
             onRecordUserMessage = { _, messageId -> userMessages += messageId },

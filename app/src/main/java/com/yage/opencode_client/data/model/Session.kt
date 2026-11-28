@@ -26,6 +26,13 @@ data class Session(
 
     val isArchived: Boolean get() = (time?.archived ?: 0L) > 0L
 
+    /**
+     * Restored from the archive. Restore writes `archived = -1`, which the
+     * server keeps, and `/experimental/session` lists only rows whose archived
+     * field is empty, so these rows need their own lookup.
+     */
+    val isRestored: Boolean get() = time?.archived?.let { it <= 0L } == true
+
     @Serializable
     data class TimeInfo(
         val created: Long? = null,
@@ -53,6 +60,8 @@ data class Session(
         val diff: String? = null
     )
 }
+
+data class SessionPage(val rows: List<Session>, val nextCursor: Long?)
 
 @Serializable
 data class SessionStatus(

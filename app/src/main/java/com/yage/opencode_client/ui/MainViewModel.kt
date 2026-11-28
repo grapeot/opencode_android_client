@@ -83,6 +83,11 @@ data class AppState(
     val hasMoreSessions: Boolean = true,
     val isLoadingMoreSessions: Boolean = false,
     val isRefreshingSessions: Boolean = false,
+    val sessionPaging: SessionListPaging = SessionListPaging(),
+    /** Bumped by every SSE change to a session row; see [sessionEventRevisions]. */
+    val sessionEventRevision: Long = 0,
+    /** Last SSE revision per row, so a list fetch that started earlier cannot undo it. */
+    val sessionEventRevisions: Map<String, Long> = emptyMap(),
     val expandedSessionIds: Set<String> = emptySet(),
     val currentSessionId: String? = null,
     val sessionStatuses: Map<String, SessionStatus> = emptyMap(),
@@ -1819,7 +1824,10 @@ class MainViewModel @Inject constructor(
                             isConnected = health.healthy,
                             serverVersion = health.version,
                             isConnecting = false,
-                            connectionPhase = if (health.healthy) "connected" else "health"
+                            connectionPhase = if (health.healthy) "connected" else "health",
+                            // A restart under the same profile may change the server's
+                            // directory or protocol; probe both again on the next list.
+                            sessionPaging = if (health.healthy) it.sessionPaging.withHostProbesReset() else it.sessionPaging,
                         )
                     }
                     if (health.healthy) {
@@ -1857,8 +1865,36 @@ class MainViewModel @Inject constructor(
             state = _state,
             onSelectSession = ::navigateToSession,
             onLoadSessionStatus = ::loadSessionStatus,
-            onLoadMessages = { sessionId -> loadMessages(sessionId) }
+            onLoadMessages = { sessionId -> loadMessages(sessionId) },
+            onLoadChildren = ::loadArchivedChildren,
         )
+    }
+
+    /** Pull to refresh: resets active paging and reloads archived pages already shown. */
+    fun refreshSessions() {
+        if (!_state.value.isConnected) return
+        launchLoadSessions(
+            scope = hostRuntimeScope,
+            repository = repository,
+            state = _state,
+            onSelectSession = ::navigateToSession,
+            onLoadSessionStatus = ::loadSessionStatus,
+            onLoadMessages = { sessionId -> loadMessages(sessionId) },
+            resetPaging = true,
+            onLoadChildren = ::loadArchivedChildren,
+            onLoaded = {
+                val paging = _state.value.sessionPaging
+                if (paging.hasLoadedArchived || paging.archivedLoadFailed) loadArchivedSessions(reset = true)
+            },
+        )
+    }
+
+    fun loadArchivedSessions(reset: Boolean = false) {
+        launchLoadArchivedSessions(hostRuntimeScope, repository, _state, reset, ::loadArchivedChildren)
+    }
+
+    private fun loadArchivedChildren(sessionId: String) {
+        launchLoadArchivedChildren(hostRuntimeScope, repository, _state, sessionId)
     }
 
     fun loadMoreSessions() {
@@ -2088,6 +2124,9 @@ class MainViewModel @Inject constructor(
                 hasMoreSessions = true,
                 isLoadingMoreSessions = false,
                 isRefreshingSessions = false,
+                sessionPaging = SessionListPaging(),
+                sessionEventRevision = 0,
+                sessionEventRevisions = emptyMap(),
                 expandedSessionIds = emptySet(),
                 currentSessionId = null,
                 sessionStatuses = emptyMap(),
@@ -2239,7 +2278,7 @@ class MainViewModel @Inject constructor(
                     remove = { id -> _state.update { it.copy(sessions = it.sessions.filterNot { row -> row.id == id }) } },
                 )
                 if (ownsResult()) _state.update {
-                    it.copy(sessionArchiveOutcome = if (outcome.foundChildren) outcome.copy(
+                    noteArchivedInPlace(it, outcome.archived).copy(sessionArchiveOutcome = if (outcome.foundChildren) outcome.copy(
                         reviewRoots = selected - outcome.archived - outcome.missing,
                     ) else outcome)
                 }
@@ -2629,6 +2668,12 @@ class MainViewModel @Inject constructor(
             }
             state.copy(expandedSessionIds = next)
         }
+        val current = _state.value
+        if (sessionId in current.expandedSessionIds) {
+            current.sessions.firstOrNull { it.id == sessionId }
+                ?.takeIf { current.sessionPaging.mayHaveUnloadedChildren(it) }
+                ?.let { loadArchivedChildren(sessionId) }
+        }
     }
 
     fun selectModel(index: Int) {
@@ -2926,6 +2971,8 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(streamGeneration = it.streamGeneration + 1) }
         sseJob?.cancel()
         _state.update { it.copy(pendingSessionErrorAt = emptyMap()) }
+        // The first open follows loadInitialData, which already loaded the list.
+        var reopened = false
         sseJob = launchSseCollection(
             hostRuntimeScope,
             repository,
@@ -2944,6 +2991,10 @@ class MainViewModel @Inject constructor(
                 if (sessionId != null && current.sessionStatuses[sessionId]?.isBusy != true) {
                     loadMessages(sessionId, false)
                 }
+                // SSE no longer re-fetches the list per event, so a reopen
+                // reconciles session rows changed while the stream was down.
+                if (reopened) loadSessions()
+                reopened = true
                 loadSessionStatus()
                 loadPendingPermissions()
                 loadPendingQuestions()
@@ -2957,7 +3008,6 @@ class MainViewModel @Inject constructor(
             state = _state,
             event = event,
             onRefreshMessages = ::loadMessagesWithRetry,
-            onRefreshSessions = ::loadSessions,
             onLoadPendingPermissions = ::loadPendingPermissions,
             onNonFatalIssue = { message -> reportNonFatalIssue(TAG, message) },
             onRecordUserMessage = { sessionId, messageId ->

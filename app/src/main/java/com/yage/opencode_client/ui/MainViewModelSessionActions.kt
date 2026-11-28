@@ -18,41 +18,55 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+/**
+ * Reloads the first page and merges it. [resetPaging] (pull to refresh) also
+ * drops deeper active pages, so everything shown is fresh from the server.
+ */
 internal fun launchLoadSessions(
     scope: CoroutineScope,
     repository: OpenCodeRepository,
     state: MutableStateFlow<AppState>,
     onSelectSession: (String) -> Unit,
     onLoadSessionStatus: () -> Unit,
-    onLoadMessages: (String) -> Unit
+    onLoadMessages: (String) -> Unit,
+    resetPaging: Boolean = false,
+    onLoaded: () -> Unit = {},
+    onLoadChildren: (String) -> Unit = {},
 ) {
     scope.launch {
         val requestLimit = maxOf(state.value.loadedSessionLimit, MainViewModelTimings.sessionPageSize)
+        val startRevision = state.value.sessionEventRevision
         state.update { it.copy(isRefreshingSessions = true) }
-        val result = repository.getSessions(requestLimit)
+        val result = fetchSessionList(repository, state, requestLimit, resetPaging)
+            .map { it?.copy(startRevision = startRevision) }
         ensureActive()
         result
-            .onSuccess { sessions ->
+            .onSuccess { fetched ->
+                if (fetched == null) {
+                    state.update { it.copy(isRefreshingSessions = false) }
+                    return@onSuccess
+                }
                 var accepted = false
                 state.update { current ->
-                    if (requestLimit < current.loadedSessionLimit) {
+                    if (fetched.filteredDirectory == null && requestLimit < current.loadedSessionLimit) {
+                        // A legacy "load more" widened the window meanwhile.
                         accepted = false
                         current.copy(isRefreshingSessions = false)
                     } else {
                         accepted = true
-                        val mergedSessions = mergeRefreshedSessionsPreservingLocalActivity(
-                            sessions,
-                            current.sessions,
-                            current.currentSessionId
-                        )
-                        current.copy(
-                            sessions = mergedSessions,
-                            hasMoreSessions = sessions.size >= requestLimit,
-                            isRefreshingSessions = false
-                        )
+                        applySessionListFetch(current, fetched, keepDeeperPages = !resetPaging)
+                            .copy(isRefreshingSessions = false)
                     }
                 }
                 if (!accepted) return@onSuccess
+                if (fetched.restoredRoots != null) {
+                    // Restored roots arrive without children; rows left expanded reload theirs.
+                    val loaded = state.value
+                    loaded.expandedSessionIds.forEach { id ->
+                        val session = loaded.sessions.firstOrNull { it.id == id } ?: return@forEach
+                        if (loaded.sessionPaging.mayHaveUnloadedChildren(session)) onLoadChildren(id)
+                    }
+                }
                 val currentId = state.value.currentSessionId
                 val refreshedSessions = state.value.sessions
                 val hasCurrentSession = currentId != null && refreshedSessions.any { it.id == currentId }
@@ -67,6 +81,30 @@ internal fun launchLoadSessions(
                             onLoadMessages(currentId!!)
                         }
                     }
+                    // The filtered first page holds neither archived rows nor
+                    // anything past the newest page, so a restored selection
+                    // may simply not be on it.
+                    currentId != null && state.value.sessionPaging.usesFilteredList -> {
+                        repository.getSession(currentId)
+                            .onSuccess { session ->
+                                state.update {
+                                    if (it.currentSessionId != currentId) it
+                                    else it.copy(sessions = addMissingSessions(it.sessions, listOf(session)))
+                                }
+                                if (state.value.currentSessionId == currentId) {
+                                    onLoadSessionStatus()
+                                    onLoadMessages(currentId)
+                                }
+                            }
+                            .onFailure { error ->
+                                val gone = error is retrofit2.HttpException && error.code() == 404
+                                if (gone && state.value.currentSessionId == currentId) {
+                                    val first = state.value.sessions.firstOrNull()
+                                    if (first != null) onSelectSession(first.id)
+                                    else state.update { it.copy(currentSessionId = null, messages = emptyList()) }
+                                }
+                            }
+                    }
                     refreshedSessions.isNotEmpty() -> {
                         onSelectSession(refreshedSessions.first().id)
                     }
@@ -74,6 +112,7 @@ internal fun launchLoadSessions(
                         state.update { it.copy(currentSessionId = null, messages = emptyList()) }
                     }
                 }
+                onLoaded()
             }
             .onFailure { error ->
                 state.update {
@@ -92,6 +131,10 @@ internal fun launchLoadMoreSessions(
     state: MutableStateFlow<AppState>,
     onSelectSession: (String) -> Unit
 ) {
+    if (state.value.sessionPaging.usesFilteredList) {
+        launchLoadMoreActiveSessions(scope, repository, state)
+        return
+    }
     var nextLimit = 0
     var shouldLaunch = false
     state.update { current ->
@@ -109,7 +152,8 @@ internal fun launchLoadMoreSessions(
         ensureActive()
         result
             .onSuccess { sessions ->
-                if (state.value.loadedSessionLimit > nextLimit) {
+                // A refresh may have moved the list to the filtered path meanwhile.
+                if (state.value.loadedSessionLimit > nextLimit || state.value.sessionPaging.usesFilteredList) {
                     state.update { it.copy(isLoadingMoreSessions = false) }
                     return@onSuccess
                 }
@@ -142,6 +186,142 @@ internal fun launchLoadMoreSessions(
                         isLoadingMoreSessions = false,
                         error = "Failed to load more sessions: ${errorMessageOrFallback(error, "unknown error")}"
                     )
+                }
+            }
+    }
+}
+
+/** Appends the next active page without re-downloading earlier ones. */
+private fun launchLoadMoreActiveSessions(
+    scope: CoroutineScope,
+    repository: OpenCodeRepository,
+    state: MutableStateFlow<AppState>,
+) {
+    var directory: String? = null
+    var cursor: Long? = null
+    state.update { current ->
+        val paging = current.sessionPaging
+        if (current.isLoadingMoreSessions || paging.filteredDirectory == null || paging.activeCursor == null) {
+            current
+        } else {
+            directory = paging.filteredDirectory
+            cursor = paging.activeCursor
+            current.copy(isLoadingMoreSessions = true)
+        }
+    }
+    val dir = directory ?: return
+    val from = cursor ?: return
+    scope.launch {
+        try {
+            fetchActiveSessionPage(repository, dir, from)
+                .onSuccess { page ->
+                    state.update { current ->
+                        applyActiveSessionPage(current, dir, from, page.rows, page.nextCursor) ?: current
+                    }
+                }
+                .onFailure { error ->
+                    state.update {
+                        it.copy(error = "Failed to load more sessions: ${errorMessageOrFallback(error, "unknown error")}")
+                    }
+                }
+        } finally {
+            state.update { it.copy(isLoadingMoreSessions = false) }
+        }
+    }
+}
+
+/**
+ * Archived subtree tops, newest first. `archived=true` returns every row, so
+ * one load reads server pages until it has a page of tops.
+ */
+internal fun launchLoadArchivedSessions(
+    scope: CoroutineScope,
+    repository: OpenCodeRepository,
+    state: MutableStateFlow<AppState>,
+    reset: Boolean,
+    onLoadChildren: (String) -> Unit,
+) {
+    var directory: String? = null
+    var startCursor: Long? = null
+    state.update { current ->
+        val paging = current.sessionPaging
+        val wanted = reset || !paging.hasLoadedArchived || paging.hasMoreArchived
+        if (!current.isConnected || paging.filteredDirectory == null || paging.isLoadingArchived || !wanted) {
+            current
+        } else {
+            directory = paging.filteredDirectory
+            startCursor = if (reset) null else paging.archivedCursor
+            current.copy(sessionPaging = paging.copy(isLoadingArchived = true, archivedLoadFailed = false))
+        }
+    }
+    val dir = directory ?: return
+    scope.launch {
+        try {
+            var cursor = startCursor
+            val collected = ArrayList<com.yage.opencode_client.data.model.Session>()
+            var exhausted = false
+            for (request in 0 until SessionListPagingLimits.maxArchivedRequestsPerLoad) {
+                val page = repository.getSessionPage(
+                    dir, includeArchived = true, limit = SessionListPagingLimits.archivedRequestSize, cursor = cursor
+                ).getOrElse { error ->
+                    android.util.Log.w("SessionListPaging", "loadArchivedSessions failed: ${error.message}")
+                    state.update {
+                        if (it.sessionPaging.filteredDirectory != dir) it
+                        else it.copy(sessionPaging = it.sessionPaging.copy(archivedLoadFailed = true))
+                    }
+                    return@launch
+                }
+                if (state.value.sessionPaging.filteredDirectory != dir) return@launch
+                collected += page.rows
+                val next = page.nextCursor
+                if (next == null || (cursor != null && next >= cursor)) {
+                    exhausted = true
+                    break
+                }
+                cursor = next
+                if (archivedSubtreeTops(collected, state.value.sessions).size >= SessionListPagingLimits.archivedPageSize) break
+            }
+            state.update { applyArchivedSessionLoad(it, dir, collected, cursor, exhausted, reset) }
+            // A reset drops children, so rows the user left expanded reload theirs.
+            val current = state.value
+            current.expandedSessionIds.forEach { id ->
+                val session = current.sessions.firstOrNull { it.id == id } ?: return@forEach
+                if (current.sessionPaging.mayHaveUnloadedChildren(session)) onLoadChildren(id)
+            }
+        } finally {
+            state.update { it.copy(sessionPaging = it.sessionPaging.copy(isLoadingArchived = false)) }
+        }
+    }
+}
+
+internal fun launchLoadArchivedChildren(
+    scope: CoroutineScope,
+    repository: OpenCodeRepository,
+    state: MutableStateFlow<AppState>,
+    sessionId: String,
+) {
+    var directory: String? = null
+    state.update { current ->
+        val paging = current.sessionPaging
+        if (!paging.usesFilteredList || sessionId in paging.archivedChildrenLoadedIds) {
+            current
+        } else {
+            directory = paging.filteredDirectory
+            current.copy(sessionPaging = paging.copy(archivedChildrenLoadedIds = paging.archivedChildrenLoadedIds + sessionId))
+        }
+    }
+    val dir = directory ?: return
+    scope.launch {
+        repository.getSessionChildren(sessionId)
+            .onSuccess { children ->
+                state.update { if (it.sessionPaging.filteredDirectory != dir) it else applyArchivedChildren(it, children, sessionId) }
+            }
+            .onFailure { error ->
+                android.util.Log.w("SessionListPaging", "loadArchivedChildren failed: ${error.message}")
+                state.update {
+                    if (it.sessionPaging.filteredDirectory != dir) it
+                    else it.copy(sessionPaging = it.sessionPaging.copy(
+                        archivedChildrenLoadedIds = it.sessionPaging.archivedChildrenLoadedIds - sessionId))
                 }
             }
     }
@@ -572,6 +752,16 @@ internal fun launchSetSessionArchived(
 ) {
     scope.launch {
         val archivedValue = if (archived) System.currentTimeMillis() else -1L
+        if (!archived) {
+            // Archived rows are paged in as subtree tops, so the loaded subtree may be partial.
+            fetchArchivedDescendants(repository, state, sessionId).onFailure { error ->
+                if (error is kotlinx.coroutines.CancellationException) return@launch
+                state.update {
+                    it.copy(error = "Failed to restore session: ${errorMessageOrFallback(error, "unknown error")}")
+                }
+                return@launch
+            }
+        }
         val ids = sessionSubtreeIds(state.value.sessions, sessionId, parentFirst = !archived)
         for (id in ids) {
             repository.updateSessionArchived(id, archivedValue)

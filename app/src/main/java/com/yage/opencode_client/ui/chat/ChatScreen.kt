@@ -37,6 +37,7 @@ import com.yage.opencode_client.data.model.MessageWithParts
 import com.yage.opencode_client.data.model.Part
 import com.yage.opencode_client.data.model.SessionStatus
 import com.yage.opencode_client.ui.MainViewModel
+import com.yage.opencode_client.ui.archivedPagingUi
 import com.yage.opencode_client.ui.joinClipboardText
 import com.yage.opencode_client.ui.files.WorkspaceMarkdownLinkResolver
 import com.yage.opencode_client.util.OpenCodeDeepLinkParser
@@ -246,6 +247,7 @@ fun ChatScreen(
                 isLoadingMoreSessions = state.isLoadingMoreSessions,
                 isRefreshingSessions = state.isRefreshingSessions,
                 expandedSessionIds = state.expandedSessionIds,
+                archivedPaging = state.archivedPagingUi { viewModel.loadArchivedSessions() },
                 availableModels = state.availableModels,
                 selectedModelIndex = state.selectedModelIndex,
                 contextUsage = cachedContextUsage,
@@ -276,6 +278,7 @@ fun ChatScreen(
                 onRestoreSession = viewModel::restoreSession,
                 onLoadMoreSessions = viewModel::loadMoreSessions,
                 onRefreshSessions = viewModel::loadSessions,
+                onPullRefreshSessions = viewModel::refreshSessions,
                 onToggleSessionExpanded = viewModel::toggleSessionExpanded,
                 onSelectModel = viewModel::selectModel,
                 onManageModels = {

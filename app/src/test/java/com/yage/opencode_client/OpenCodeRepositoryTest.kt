@@ -249,6 +249,51 @@ class OpenCodeRepositoryTest {
     }
 
     @Test
+    fun `getSessionPage sends filters and reads the next cursor header`() = runBlocking {
+        val session = Session(id = "session-1", directory = "/project")
+        server.enqueue(jsonResponse(json.encodeToString(listOf(session))).setHeader("x-next-cursor", "1700"))
+
+        val page = repository.getSessionPage("/project dir", includeArchived = true, limit = 300, cursor = 1800, rootsOnly = true).getOrThrow()
+
+        assertEquals(listOf("session-1"), page.rows.map { it.id })
+        assertEquals(1700L, page.nextCursor)
+        val url = server.takeRequest().requestUrl!!
+        assertEquals("/experimental/session", url.encodedPath)
+        assertEquals("300", url.queryParameter("limit"))
+        assertEquals("/project dir", url.queryParameter("directory"))
+        assertEquals("true", url.queryParameter("archived"))
+        assertEquals("1800", url.queryParameter("cursor"))
+        assertEquals("true", url.queryParameter("roots"))
+    }
+
+    @Test
+    fun `getSessionPage omits archived and cursor and reports 404 as HttpException`() = runBlocking {
+        server.enqueue(jsonResponse("[]"))
+        server.enqueue(MockResponse().setResponseCode(404))
+
+        val page = repository.getSessionPage("/project", includeArchived = false, limit = 400, cursor = null).getOrThrow()
+        assertNull(page.nextCursor)
+        val url = server.takeRequest().requestUrl!!
+        assertNull(url.queryParameter("archived"))
+        assertNull(url.queryParameter("cursor"))
+        assertNull(url.queryParameter("roots"))
+
+        val error = repository.getSessionPage("/project", includeArchived = false, limit = 400, cursor = null).exceptionOrNull()
+        assertEquals(404, (error as retrofit2.HttpException).code())
+    }
+
+    @Test
+    fun `instance directory and project worktree decode their fields`() = runBlocking {
+        server.enqueue(jsonResponse("{\"directory\":\"/work\",\"home\":\"/home\"}"))
+        server.enqueue(jsonResponse("{\"id\":\"p\",\"worktree\":\"/work/repo\"}"))
+
+        assertEquals("/work", repository.getInstanceDirectory().getOrThrow())
+        assertEquals("/path", server.takeRequest().path)
+        assertEquals("/work/repo", repository.getCurrentProjectWorktree().getOrThrow())
+        assertEquals("/project/current", server.takeRequest().path)
+    }
+
+    @Test
     fun `createSession fails on server error`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(500))
 

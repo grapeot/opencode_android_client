@@ -192,6 +192,31 @@ class OpenCodeRepository @Inject constructor() {
 
     suspend fun getSessions(limit: Int? = null): Result<List<Session>> = apiCall { api.getSessions(limit) }
 
+    /**
+     * One page of `/experimental/session`. Without [includeArchived] the server
+     * returns only unarchived rows; with it, both. [cursor] is the previous
+     * page's `x-next-cursor`.
+     */
+    suspend fun getSessionPage(
+        directory: String,
+        includeArchived: Boolean,
+        limit: Int,
+        cursor: Long?,
+        rootsOnly: Boolean = false,
+    ): Result<SessionPage> = apiCall {
+        val query = linkedMapOf("limit" to maxOf(limit, 1).toString(), "directory" to directory)
+        if (includeArchived) query["archived"] = "true"
+        if (rootsOnly) query["roots"] = "true"
+        if (cursor != null) query["cursor"] = cursor.toString()
+        val response = api.getSessionPage(query)
+        if (!response.isSuccessful) throw retrofit2.HttpException(response)
+        SessionPage(response.body().orEmpty(), response.headers()["x-next-cursor"]?.toLongOrNull())
+    }
+
+    suspend fun getInstanceDirectory(): Result<String?> = apiCall { api.getPath().directory }
+
+    suspend fun getCurrentProjectWorktree(): Result<String?> = apiCall { api.getCurrentProject().worktree }
+
     suspend fun getSession(sessionId: String): Result<Session> = apiCall { api.getSession(sessionId) }
 
     suspend fun getSessionChildren(sessionId: String): Result<List<Session>> = apiCall { api.getSessionChildren(sessionId) }
