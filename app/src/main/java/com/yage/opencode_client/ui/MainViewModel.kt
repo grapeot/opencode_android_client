@@ -84,6 +84,10 @@ data class AppState(
     val isLoadingMoreSessions: Boolean = false,
     val isRefreshingSessions: Boolean = false,
     val sessionPaging: SessionListPaging = SessionListPaging(),
+    /** Bumped by every SSE change to a session row; see [sessionEventRevisions]. */
+    val sessionEventRevision: Long = 0,
+    /** Last SSE revision per row, so a list fetch that started earlier cannot undo it. */
+    val sessionEventRevisions: Map<String, Long> = emptyMap(),
     val expandedSessionIds: Set<String> = emptySet(),
     val currentSessionId: String? = null,
     val sessionStatuses: Map<String, SessionStatus> = emptyMap(),
@@ -1876,7 +1880,10 @@ class MainViewModel @Inject constructor(
             onLoadSessionStatus = ::loadSessionStatus,
             onLoadMessages = { sessionId -> loadMessages(sessionId) },
             resetPaging = true,
-            onLoaded = { if (_state.value.sessionPaging.hasLoadedArchived) loadArchivedSessions(reset = true) },
+            onLoaded = {
+                val paging = _state.value.sessionPaging
+                if (paging.hasLoadedArchived || paging.archivedLoadFailed) loadArchivedSessions(reset = true)
+            },
         )
     }
 
@@ -2116,6 +2123,8 @@ class MainViewModel @Inject constructor(
                 isLoadingMoreSessions = false,
                 isRefreshingSessions = false,
                 sessionPaging = SessionListPaging(),
+                sessionEventRevision = 0,
+                sessionEventRevisions = emptyMap(),
                 expandedSessionIds = emptySet(),
                 currentSessionId = null,
                 sessionStatuses = emptyMap(),

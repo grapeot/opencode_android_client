@@ -35,6 +35,8 @@ data class SessionListPaging(
     val hasLoadedArchived: Boolean = false,
     val hasMoreArchived: Boolean = false,
     val isLoadingArchived: Boolean = false,
+    /** The last archived load failed; the section offers a retry instead of staying blank. */
+    val archivedLoadFailed: Boolean = false,
 ) {
     /** The list on screen came from the filtered path (a per-list fact, not a per-host one). */
     val usesFilteredList: Boolean get() = filteredDirectory != null
@@ -52,6 +54,7 @@ data class SessionListPaging(
         archivedCursor = null,
         hasLoadedArchived = false,
         hasMoreArchived = false,
+        archivedLoadFailed = false,
     )
 
     /** A reconnect may change the server's directory or protocol; probe both again. */
@@ -62,7 +65,8 @@ internal fun AppState.archivedPagingUi(onLoad: () -> Unit) = ArchivedSessionPagi
     filteredDirectory = sessionPaging.filteredDirectory,
     isLoading = sessionPaging.isLoadingArchived,
     hasLoaded = sessionPaging.hasLoadedArchived,
-    canLoadMore = sessionPaging.canLoadMoreArchived,
+    canLoadMore = sessionPaging.canLoadMoreArchived || sessionPaging.archivedLoadFailed,
+    failed = sessionPaging.archivedLoadFailed,
     childrenLoadedIds = sessionPaging.archivedChildrenLoadedIds,
     onLoad = onLoad,
 )
@@ -86,6 +90,8 @@ internal data class SessionListFetch(
     val filteredDirectory: String? = null,
     /** Filtered path only: the cursor after this first page, null when it held every active row. */
     val nextCursor: Long? = null,
+    /** [AppState.sessionEventRevision] when the request started. */
+    val startRevision: Long = 0,
 )
 
 private fun versionNumbers(version: String): List<Int>? {
@@ -142,10 +148,41 @@ internal fun archivedSubtreeTops(rows: List<Session>, known: List<Session>): Lis
  */
 internal fun sessionEventApplies(state: AppState, session: Session): Boolean {
     val paging = state.sessionPaging
-    val directory = paging.filteredDirectory ?: paging.defaultDirectory?.ifEmpty { null } ?: return true
-    return session.directory == directory ||
+    val directory = paging.filteredDirectory ?: paging.defaultDirectory?.ifEmpty { null }
+    return directory?.let { session.directory == it } == true ||
         session.id == state.currentSessionId ||
         state.sessions.any { it.id == session.id }
+}
+
+internal fun AppState.upsertSessionFromEvent(session: Session): AppState {
+    val revision = sessionEventRevision + 1
+    return copy(
+        sessions = upsertSession(sessions, session),
+        sessionEventRevision = revision,
+        sessionEventRevisions = sessionEventRevisions + (session.id to revision),
+    )
+}
+
+internal fun AppState.removeSessionFromEvent(sessionId: String): AppState {
+    val revision = sessionEventRevision + 1
+    return copy(
+        sessions = sessions.filterNot { it.id == sessionId },
+        sessionEventRevision = revision,
+        sessionEventRevisions = sessionEventRevisions + (sessionId to revision),
+    )
+}
+
+/**
+ * Rows SSE changed after a fetch started win over that fetch: the local row
+ * replaces or joins the page, and a row deleted meanwhile stays gone.
+ */
+internal fun preferEventRows(rows: List<Session>, current: AppState, startRevision: Long): List<Session> {
+    val touched = current.sessionEventRevisions.filterValues { it > startRevision }.keys
+    if (touched.isEmpty()) return rows
+    val localById = current.sessions.associateBy { it.id }
+    val pageIds = rows.mapTo(HashSet()) { it.id }
+    val added = touched.filter { it !in pageIds }.mapNotNull(localById::get)
+    return added + rows.mapNotNull { if (it.id in touched) localById[it.id] else it }
 }
 
 /** Adds rows not already present; a local row is never replaced by a page row. */
@@ -234,6 +271,8 @@ internal suspend fun fetchSessionList(
             }
         }
     }
+    // Legacy hosts still resolve the directory once, so SSE events can be scoped to it.
+    if (state.value.sessionPaging.defaultDirectory == null) resolveSessionListDirectory(repository, state)
     return repository.getSessions(legacyLimit).map { rows ->
         SessionListFetch(rows, hasMore = rows.size >= legacyLimit)
     }
@@ -253,10 +292,11 @@ internal fun applySessionListFetch(
 ): AppState {
     val paging = current.sessionPaging
     val directory = fetched.filteredDirectory
+    val pageRows = preferEventRows(fetched.rows, current, fetched.startRevision)
     if (directory == null) {
         // Filtered paging state from an earlier list must not carry into a legacy window.
         return current.copy(
-            sessions = mergeRefreshedSessionsPreservingLocalActivity(fetched.rows, current.sessions, current.currentSessionId),
+            sessions = mergeRefreshedSessionsPreservingLocalActivity(pageRows, current.sessions, current.currentSessionId),
             hasMoreSessions = fetched.hasMore,
             sessionPaging = paging.withArchivedPagesReset().copy(
                 filteredDirectory = null,
@@ -271,7 +311,7 @@ internal fun applySessionListFetch(
         next = paging.withArchivedPagesReset().copy(filteredDirectory = directory)
         keepDeeper = false
     }
-    val activeIds = fetched.rows.mapTo(HashSet()) { it.id }
+    val activeIds = pageRows.mapTo(HashSet()) { it.id }
     // The first page covers every active row with time.updated >= its next
     // cursor (the server pages on `< cursor`); with no cursor it covers all.
     val boundary = fetched.nextCursor
@@ -283,7 +323,7 @@ internal fun applySessionListFetch(
         it.isArchived && it.id in next.loadedArchivedIds && it.id !in activeIds
     }
     val sessions = mergeRefreshedSessionsPreservingLocalActivity(
-        fetched.rows + deeper + retained,
+        pageRows + deeper + retained,
         current.sessions,
         current.currentSessionId,
     )

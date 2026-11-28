@@ -23,6 +23,7 @@ import com.yage.opencode_client.data.model.ProviderRegistryResponse
 import com.yage.opencode_client.data.model.ProvidersResponse
 import com.yage.opencode_client.data.repository.HostProfileStore
 import com.yage.opencode_client.data.repository.OpenCodeRepository
+import com.yage.opencode_client.ui.SessionListPaging
 import com.yage.opencode_client.ssh.SSHKeyManager
 import com.yage.opencode_client.ssh.TunnelManager
 import com.yage.opencode_client.ui.AppState
@@ -3585,7 +3586,10 @@ class MainViewModelTest {
     fun `handleSSEEvent session created prepends parsed session`() = runTest {
         val viewModel = createViewModel()
         updateState(viewModel) {
-            it.copy(sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")))
+            it.copy(
+                sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")),
+                sessionPaging = SessionListPaging(defaultDirectory = "/tmp/project"),
+            )
         }
 
         handleSse(
@@ -3594,8 +3598,9 @@ class MainViewModelTest {
                 payload = SSEPayload(
                     type = "session.created",
                     properties = buildJsonObject {
+                        put("sessionID", JsonPrimitive("session-2"))
                         put(
-                            "session",
+                            "info",
                             buildJsonObject {
                                 put("id", JsonPrimitive("session-2"))
                                 put("directory", JsonPrimitive("/tmp/project"))
@@ -3648,9 +3653,10 @@ class MainViewModelTest {
     fun `handleSSEEvent session updated inserts unknown session`() = runTest {
         val viewModel = createViewModel()
         updateState(viewModel) {
-            it.copy(sessions = listOf(
-                com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")
-            ))
+            it.copy(
+                sessions = listOf(com.yage.opencode_client.data.model.Session(id = "session-1", directory = "/tmp/old")),
+                sessionPaging = SessionListPaging(defaultDirectory = "/tmp/new"),
+            )
         }
 
         handleSse(

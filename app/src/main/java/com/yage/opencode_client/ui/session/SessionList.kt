@@ -353,6 +353,7 @@ data class ArchivedSessionPagingUi(
     val isLoading: Boolean = false,
     val hasLoaded: Boolean = false,
     val canLoadMore: Boolean = false,
+    val failed: Boolean = false,
     val childrenLoadedIds: Set<String> = emptySet(),
     val onLoad: () -> Unit = {},
 ) {
@@ -405,8 +406,9 @@ fun SessionList(
     val archivedRows = remember(archivedTree, expandedSessionIds, archivedExpanded) {
         if (archivedExpanded) flattenVisibleTree(archivedTree, expandedSessionIds) else emptyList()
     }
-    LaunchedEffect(archivedExpanded, archivedPaging.filteredDirectory) {
-        if (archivedExpanded) archivedPaging.onLoad()
+    // Opening the section loads the first batch; further batches come from its Load older row.
+    LaunchedEffect(archivedExpanded, archivedPaging.filteredDirectory, archivedPaging.hasLoaded) {
+        if (archivedExpanded && !archivedPaging.hasLoaded && !archivedPaging.failed) archivedPaging.onLoad()
     }
     val listState = rememberLazyListState()
     var selecting by remember(archiveControls?.scopeKey) { mutableStateOf(false) }
@@ -524,6 +526,7 @@ fun SessionList(
                 }
                 val archivedPending = archivedPaging.filteredDirectory != null &&
                     (archivedPaging.isLoading || !archivedPaging.hasLoaded)
+                // A failed first load shows only the retry row below.
                 if (!selecting && archivedExpanded && archivedRows.isEmpty() && !archivedPending) {
                     item(key = "archived_empty") { EmptySectionRow(stringResource(R.string.sessions_no_archived)) }
                 }

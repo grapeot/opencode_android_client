@@ -79,19 +79,18 @@ internal fun errorMessageOrFallback(throwable: Throwable?, fallback: String): St
     return if (message.isEmpty()) fallback else message
 }
 
-internal fun parseSessionCreatedEvent(event: SSEEvent): SessionCreatedEvent? {
-    val sessionJson = event.payload.getJsonObject("session") ?: return null
-    return runCatching {
-        SessionCreatedEvent(Json.decodeFromString<Session>(sessionJson.toString()))
-    }.getOrNull()
-}
+// The server sends `{sessionID, info}`; `session` is the older shape. Session
+// rows carry fields this client does not model (permission, workspaceID, ...),
+// so decoding must ignore unknown keys.
+internal fun parseSessionCreatedEvent(event: SSEEvent): SessionCreatedEvent? =
+    parseSessionUpdatedEvent(event)?.let(::SessionCreatedEvent)
 
 internal fun parseSessionUpdatedEvent(event: SSEEvent): Session? {
     val sessionJson = event.payload.getJsonObject("info")
         ?: event.payload.getJsonObject("session")
         ?: return null
     return runCatching {
-        Json.decodeFromString<Session>(sessionJson.toString())
+        lenientJson.decodeFromString<Session>(sessionJson.toString())
     }.getOrNull()
 }
 

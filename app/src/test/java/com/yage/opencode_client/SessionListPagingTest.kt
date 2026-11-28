@@ -17,8 +17,10 @@ import com.yage.opencode_client.ui.launchLoadMoreSessions
 import com.yage.opencode_client.ui.launchLoadSessions
 import com.yage.opencode_client.ui.launchSetSessionArchived
 import com.yage.opencode_client.ui.noteArchivedInPlace
+import com.yage.opencode_client.ui.removeSessionFromEvent
 import com.yage.opencode_client.ui.serverMayFilterArchivedSessions
 import com.yage.opencode_client.ui.sessionEventApplies
+import com.yage.opencode_client.ui.upsertSessionFromEvent
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -29,6 +31,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -206,7 +209,8 @@ class SessionListPagingTest {
 
         assertEquals(false, state.value.sessionPaging.serverFiltersArchived)
         coVerify(exactly = 0) { repository.getSessionPage(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { repository.getInstanceDirectory() }
+        // The directory still resolves, so SSE events can be scoped to it.
+        assertEquals(dir, state.value.sessionPaging.defaultDirectory)
     }
 
     @Test
@@ -483,6 +487,31 @@ class SessionListPagingTest {
     // SSE scope
 
     @Test
+    fun `session events decode the server info shape with unmodeled fields`() {
+        val info = kotlinx.serialization.json.buildJsonObject {
+            put("id", kotlinx.serialization.json.JsonPrimitive("s1"))
+            put("directory", kotlinx.serialization.json.JsonPrimitive(dir))
+            put("workspaceID", kotlinx.serialization.json.JsonPrimitive("w"))
+            put("permission", kotlinx.serialization.json.JsonArray(emptyList()))
+            put("time", kotlinx.serialization.json.buildJsonObject {
+                put("updated", kotlinx.serialization.json.JsonPrimitive(5))
+                put("compacting", kotlinx.serialization.json.JsonPrimitive(4))
+            })
+        }
+        fun event(type: String) = com.yage.opencode_client.data.model.SSEEvent(
+            payload = com.yage.opencode_client.data.model.SSEPayload(
+                type = type,
+                properties = kotlinx.serialization.json.buildJsonObject {
+                    put("sessionID", kotlinx.serialization.json.JsonPrimitive("s1"))
+                    put("info", info)
+                },
+            )
+        )
+        assertEquals("s1", com.yage.opencode_client.ui.parseSessionCreatedEvent(event("session.created"))?.session?.id)
+        assertEquals(5L, com.yage.opencode_client.ui.parseSessionUpdatedEvent(event("session.updated"))?.time?.updated)
+    }
+
+    @Test
     fun `session events from other directories are ignored unless listed or selected`() {
         val state = AppState(
             sessions = listOf(row("known", 1, directory = "/elsewhere")),
@@ -493,6 +522,71 @@ class SessionListPagingTest {
         assertFalse(sessionEventApplies(state, row("foreign", 2, directory = "/elsewhere")))
         assertTrue(sessionEventApplies(state, row("known", 2, directory = "/elsewhere")))
         assertTrue(sessionEventApplies(state, row("selected", 2, directory = "/elsewhere")))
-        assertTrue(sessionEventApplies(AppState(), row("anything", 2, directory = "/elsewhere")))
+        val unresolved = AppState(sessions = listOf(row("known", 1)), currentSessionId = "selected")
+        assertFalse(sessionEventApplies(unresolved, row("anything", 2)))
+        assertTrue(sessionEventApplies(unresolved, row("known", 2)))
+        assertTrue(sessionEventApplies(unresolved, row("selected", 2)))
+    }
+
+    @Test
+    fun `an sse upsert during a first page request survives the stale response`() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { repository.getSessionPage(dir, false, 400, null) } coAnswers {
+            gate.await()
+            Result.success(SessionPage(listOf(row("a", 300, archived = null), row("gone", 250)), null))
+        }
+        val state = state(paging = SessionListPaging(serverFiltersArchived = true, defaultDirectory = dir, filteredDirectory = dir),
+            sessions = listOf(row("a", 300), row("gone", 250)))
+        launchLoadSessions(this, repository, state, {}, {}, {})
+        runCurrent()
+        // While the request is in flight: a new sub-agent, an archive elsewhere, and a deletion.
+        state.value = state.value.upsertSessionFromEvent(row("sub", 400, parent = "a"))
+        state.value = state.value.upsertSessionFromEvent(row("a", 300, archived = 9))
+        state.value = state.value.removeSessionFromEvent("gone")
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val byId = state.value.sessions.associateBy { it.id }
+        assertTrue("sub" in byId)
+        assertTrue(byId.getValue("a").isArchived)
+        assertFalse("gone" in byId)
+    }
+
+    @Test
+    fun `a restored selection missing from the first page is fetched instead of replaced`() = runTest {
+        activePage(null, listOf(row("a", 300)), next = null)
+        coEvery { repository.getSession("saved") } returns Result.success(row("saved", 5, archived = 3))
+        val selected = mutableListOf<String>()
+        val state = state()
+        state.value = state.value.copy(currentSessionId = "saved")
+        launchLoadSessions(this, repository, state, { selected += it }, {}, {})
+        advanceUntilIdle()
+
+        assertEquals("saved", state.value.currentSessionId)
+        assertTrue(state.value.sessions.any { it.id == "saved" })
+        assertTrue(selected.isEmpty())
+
+        coEvery { repository.getSession("saved") } returns Result.failure(httpError(404))
+        state.value = state.value.copy(sessions = listOf(row("a", 300)))
+        launchLoadSessions(this, repository, state, { selected += it }, {}, {})
+        advanceUntilIdle()
+        assertEquals(listOf("a"), selected)
+    }
+
+    @Test
+    fun `a failed archived load offers a retry`() = runTest {
+        coEvery { repository.getSessionPage(dir, true, 300, null) } returns Result.failure(httpError(500))
+        val state = state(paging = SessionListPaging(filteredDirectory = dir))
+        launchLoadArchivedSessions(this, repository, state, reset = false) {}
+        advanceUntilIdle()
+        assertTrue(state.value.sessionPaging.archivedLoadFailed)
+        assertFalse(state.value.sessionPaging.isLoadingArchived)
+
+        coEvery { repository.getSessionPage(dir, true, 300, null) } returns
+            Result.success(SessionPage(listOf(row("arch", 5, archived = 1)), null))
+        launchLoadArchivedSessions(this, repository, state, reset = false) {}
+        advanceUntilIdle()
+        assertFalse(state.value.sessionPaging.archivedLoadFailed)
+        assertEquals(setOf("arch"), state.value.sessionPaging.loadedArchivedIds)
     }
 }

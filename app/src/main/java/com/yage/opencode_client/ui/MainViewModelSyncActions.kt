@@ -140,7 +140,7 @@ internal fun handleIncomingSseEvent(
         "session.created" -> {
             val created = parseSessionCreatedEvent(event)
             if (created != null) {
-                state.update { if (sessionEventApplies(it, created.session)) it.copy(sessions = upsertSession(it.sessions, created.session)) else it }
+                state.update { if (sessionEventApplies(it, created.session)) it.upsertSessionFromEvent(created.session) else it }
             } else {
                 onNonFatalIssue("Ignoring invalid session.created payload")
             }
@@ -148,7 +148,7 @@ internal fun handleIncomingSseEvent(
         "session.updated" -> {
             val updated = parseSessionUpdatedEvent(event)
             if (updated != null) {
-                state.update { if (sessionEventApplies(it, updated)) it.copy(sessions = upsertSession(it.sessions, updated)) else it }
+                state.update { if (sessionEventApplies(it, updated)) it.upsertSessionFromEvent(updated) else it }
             } else {
                 onNonFatalIssue("Ignoring invalid session.updated payload")
             }
@@ -157,7 +157,7 @@ internal fun handleIncomingSseEvent(
             // The selected row stays so the open chat is not yanked away.
             val sessionId = event.payload.getString("sessionID") ?: event.payload.getString("id")
             if (sessionId != null && sessionId != state.value.currentSessionId) {
-                state.update { it.copy(sessions = it.sessions.filterNot { row -> row.id == sessionId }) }
+                state.update { it.removeSessionFromEvent(sessionId) }
             }
         }
         "session.status" -> {

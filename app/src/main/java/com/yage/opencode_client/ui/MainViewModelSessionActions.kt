@@ -34,8 +34,9 @@ internal fun launchLoadSessions(
 ) {
     scope.launch {
         val requestLimit = maxOf(state.value.loadedSessionLimit, MainViewModelTimings.sessionPageSize)
+        val startRevision = state.value.sessionEventRevision
         state.update { it.copy(isRefreshingSessions = true) }
-        val result = fetchSessionList(repository, state, requestLimit)
+        val result = fetchSessionList(repository, state, requestLimit).map { it?.copy(startRevision = startRevision) }
         ensureActive()
         result
             .onSuccess { fetched ->
@@ -69,6 +70,30 @@ internal fun launchLoadSessions(
                             onLoadSessionStatus()
                             onLoadMessages(currentId!!)
                         }
+                    }
+                    // The filtered first page holds neither archived rows nor
+                    // anything past the newest page, so a restored selection
+                    // may simply not be on it.
+                    currentId != null && state.value.sessionPaging.usesFilteredList -> {
+                        repository.getSession(currentId)
+                            .onSuccess { session ->
+                                state.update {
+                                    if (it.currentSessionId != currentId) it
+                                    else it.copy(sessions = addMissingSessions(it.sessions, listOf(session)))
+                                }
+                                if (state.value.currentSessionId == currentId) {
+                                    onLoadSessionStatus()
+                                    onLoadMessages(currentId)
+                                }
+                            }
+                            .onFailure { error ->
+                                val gone = error is retrofit2.HttpException && error.code() == 404
+                                if (gone && state.value.currentSessionId == currentId) {
+                                    val first = state.value.sessions.firstOrNull()
+                                    if (first != null) onSelectSession(first.id)
+                                    else state.update { it.copy(currentSessionId = null, messages = emptyList()) }
+                                }
+                            }
                     }
                     refreshedSessions.isNotEmpty() -> {
                         onSelectSession(refreshedSessions.first().id)
@@ -216,7 +241,7 @@ internal fun launchLoadArchivedSessions(
         } else {
             directory = paging.filteredDirectory
             startCursor = if (reset) null else paging.archivedCursor
-            current.copy(sessionPaging = paging.copy(isLoadingArchived = true))
+            current.copy(sessionPaging = paging.copy(isLoadingArchived = true, archivedLoadFailed = false))
         }
     }
     val dir = directory ?: return
@@ -230,6 +255,10 @@ internal fun launchLoadArchivedSessions(
                     dir, includeArchived = true, limit = SessionListPagingLimits.archivedRequestSize, cursor = cursor
                 ).getOrElse { error ->
                     android.util.Log.w("SessionListPaging", "loadArchivedSessions failed: ${error.message}")
+                    state.update {
+                        if (it.sessionPaging.filteredDirectory != dir) it
+                        else it.copy(sessionPaging = it.sessionPaging.copy(archivedLoadFailed = true))
+                    }
                     return@launch
                 }
                 if (state.value.sessionPaging.filteredDirectory != dir) return@launch
